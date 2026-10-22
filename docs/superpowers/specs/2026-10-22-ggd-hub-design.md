@@ -70,7 +70,7 @@ Discord server ◄─► Bot (discord.js)      Web API (Fastify)  ◄─► Web 
 | Database | PostgreSQL + Prisma | Ổn định, có migration, Neon có gói miễn phí |
 | Giao diện | React + Vite + React Router + TanStack Query + Tailwind | Phổ biến, build ra file tĩnh để Fastify phục vụ |
 | Email | Nodemailer qua SMTP (mặc định Gmail + mật khẩu ứng dụng) | Không cần tên miền; đổi nhà cung cấp chỉ cần sửa cấu hình |
-| Test | Vitest + PostgreSQL thật chạy trong Docker | Test logic tính điểm/vote trên DB thật |
+| Test | Vitest + PostgreSQL thật chạy nhúng (`embedded-postgres`, không cần Docker) | Test logic tính điểm/vote trên DB thật |
 
 ### Nguyên tắc tách module
 
@@ -366,7 +366,7 @@ Trang đăng nhập là trang duy nhất không cần đăng nhập.
 
 ## 10. Kiểm thử
 
-- **Test tự động (Vitest, PostgreSQL thật trong Docker)** cho phần dễ sai:
+- **Test tự động (Vitest, PostgreSQL thật chạy nhúng)** cho phần dễ sai:
   - Tính điểm, phân định hoà, đổi người hoá thân.
   - Chốt mùa: tự từ chối lần khai còn chờ, lưu `role_titles`, chạy lại không trùng.
   - Vote: đổi phiếu, cấm tự vote, đếm phiếu, hoà phiếu, không ai vote.
