@@ -1,0 +1,1 @@
+CREATE DATABASE ggd_test;

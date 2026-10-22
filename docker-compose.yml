@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    ports:
+      - "54329:5432"
+    environment:
+      POSTGRES_USER: ggd
+      POSTGRES_PASSWORD: ggd
+      POSTGRES_DB: ggd_dev
+    volumes:
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
