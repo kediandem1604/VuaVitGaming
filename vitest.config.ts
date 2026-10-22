@@ -1,3 +1,4 @@
+import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -18,6 +19,8 @@ export default defineConfig({
         },
       },
       {
+        // Test web viết bằng .tsx — plugin React biến đổi JSX cho project này.
+        plugins: [react()],
         test: {
           name: 'web',
           environment: 'jsdom',
