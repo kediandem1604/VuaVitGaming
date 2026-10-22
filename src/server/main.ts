@@ -15,7 +15,7 @@ import { loadConfig } from './config.js';
 import type { Config } from './config.js';
 import type { Ctx } from './ctx.js';
 import { db } from './db.js';
-import { logMailer } from './mail/log-mailer.js';
+import { createSmtpMailer } from './mail/smtp-mailer.js';
 import { createDiscordOAuthClient } from './modules/auth/oauth.js';
 import { buildApp } from './web/app.js';
 
@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   const bot = createBot(() => ctx, config);
   const ctx: Ctx = {
     db,
-    mailer: logMailer,
+    mailer: createSmtpMailer(config.smtp),
     notifier: bot.notifier,
     directory: bot.directory,
     now: () => new Date(),
