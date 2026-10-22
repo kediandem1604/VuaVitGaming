@@ -1,38 +1,36 @@
 import type { GameSession, Member, Prisma, PrismaClient, Role } from '@prisma/client';
-
-// Bộ đếm cho discordId/displayName mặc định — mỗi file test có module riêng nên tự về 0.
-let memberCounter = 0;
-
-/** Cấp mã thành viên tiếp theo từ sequence, cùng định dạng với production (`GGD-0001`). */
-async function nextMemberCode(db: PrismaClient): Promise<string> {
-  const [row] = await db.$queryRaw<{ n: number }[]>`SELECT nextval('member_code_seq')::int AS n`;
-  if (!row) throw new Error('Không lấy được số từ member_code_seq');
-  return `GGD-${String(row.n).padStart(4, '0')}`;
-}
+import { formatMemberCode, nextMemberCodeNumber } from '../../src/server/modules/members/service.js';
 
 /**
- * Tạo thành viên với giá trị mặc định hợp lý; `memberCode` được cấp từ sequence
- * nếu không truyền vào. Ghi đè bất kỳ cột nào qua `p`.
+ * Tạo thành viên với giá trị mặc định hợp lý. `memberCode` cấp từ sequence
+ * `member_code_seq` (cùng định dạng production, `GGD-0001`) nếu không truyền vào;
+ * `discordId`/`displayName` mặc định (`d-N`, `Member N`) lấy cùng số N với mã,
+ * nên chúng về 1 sau `resetDb` và luôn khớp mã. Ghi đè bất kỳ cột nào qua `p`.
  */
 export async function createMember(
   db: PrismaClient,
   p: Partial<Prisma.MemberUncheckedCreateInput> = {},
 ): Promise<Member> {
-  memberCounter += 1;
-  const memberCode = p.memberCode ?? (await nextMemberCode(db));
+  const n = (p.memberCode === undefined ? null : numberFromCode(p.memberCode)) ?? (await nextMemberCodeNumber(db));
   return db.member.create({
     data: {
-      discordId: `d-${memberCounter}`,
-      displayName: `Member ${memberCounter}`,
+      discordId: `d-${n}`,
+      displayName: `Member ${n}`,
       email: null,
       notifyEmail: true,
       notifyDm: true,
       accessLevel: 'member',
       status: 'active',
       ...p,
-      memberCode,
+      memberCode: p.memberCode ?? formatMemberCode(n),
     },
   });
+}
+
+/** Số N trong mã tuỳ chỉnh dạng `GGD-N` (để mặc định d-N ↔ GGD-N vẫn khớp); dạng khác → null. */
+function numberFromCode(code: string): number | null {
+  const digits = /^GGD-(\d+)$/.exec(code)?.[1];
+  return digits === undefined ? null : Number(digits);
 }
 
 /** Mặc định của `createSession`: 21:00 ngày 22/10/2026 giờ VN = now mặc định + 2 giờ. */

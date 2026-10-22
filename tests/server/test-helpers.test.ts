@@ -41,6 +41,15 @@ test('makeTestCtx defaults and setNow', () => {
   expect(() => setNow('hôm qua')).toThrow();
 });
 
+test('ctx.now() hands out a fresh Date each call', () => {
+  const { ctx } = makeTestCtx();
+  const d = ctx.now();
+  d.setUTCFullYear(1999);
+  // Service nào lỡ sửa Date nhận được cũng không làm lệch đồng hồ test.
+  expect(ctx.now().toISOString()).toBe('2026-10-22T12:00:00.000Z');
+  expect(ctx.now()).not.toBe(d);
+});
+
 test('FakeNotifier shares one message counter and records every call', async () => {
   const { notifier } = makeTestCtx();
   expect(await notifier.publishSession(view)).toBe('msg-1');
@@ -116,6 +125,30 @@ test('createMember allocates codes from the sequence with sane defaults', async 
 
   const c = await createMember(testDb, { memberCode: 'GGD-0042' });
   expect(c.memberCode).toBe('GGD-0042');
+});
+
+test('createMember defaults derive from the member code number', async () => {
+  const a = await createMember(testDb);
+  const b = await createMember(testDb);
+  expect(a).toMatchObject({ memberCode: 'GGD-0001', discordId: 'd-1', displayName: 'Member 1' });
+  expect(b).toMatchObject({ memberCode: 'GGD-0002', discordId: 'd-2', displayName: 'Member 2' });
+
+  // Mã tuỳ chỉnh dạng GGD-N: mặc định theo N để d-N ↔ GGD-N luôn khớp, không tiêu số sequence.
+  const c = await createMember(testDb, { memberCode: 'GGD-0042' });
+  expect(c).toMatchObject({ memberCode: 'GGD-0042', discordId: 'd-42', displayName: 'Member 42' });
+
+  // Mã tuỳ chỉnh khác dạng: vẫn lấy số từ sequence.
+  const d = await createMember(testDb, { memberCode: 'X-1' });
+  expect(d).toMatchObject({ memberCode: 'X-1', discordId: 'd-3', displayName: 'Member 3' });
+
+  // Ghi đè discordId/displayName vẫn được tôn trọng.
+  const e = await createMember(testDb, { discordId: 'snowflake', displayName: 'An' });
+  expect(e).toMatchObject({ memberCode: 'GGD-0004', discordId: 'snowflake', displayName: 'An' });
+});
+
+test('createMember defaults restart with resetDb', async () => {
+  // Test trước đã tạo nhiều người; sau resetDb mọi thứ về 1 — kể cả discordId mặc định.
+  expect(await createMember(testDb)).toMatchObject({ memberCode: 'GGD-0001', discordId: 'd-1' });
 });
 
 test('createSession defaults to classic at now + 2h', async () => {

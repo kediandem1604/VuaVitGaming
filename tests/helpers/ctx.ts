@@ -52,7 +52,8 @@ export function makeTestCtx(): {
     mailer,
     notifier,
     directory,
-    now: () => now,
+    // Bản sao mới mỗi lần: service nào lỡ sửa Date nhận được cũng không làm lệch đồng hồ test.
+    now: () => new Date(now.getTime()),
     config: testConfig(),
   };
 
