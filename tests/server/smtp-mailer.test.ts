@@ -55,9 +55,19 @@ test('default transport is SMTP with TLS only on port 465', () => {
     host: 'smtp.test',
     port: 465,
     secure: true,
+    requireTLS: false,
     auth: { user: 'test-user', pass: 'test-pass' },
   });
-  expect(createSmtpTransport({ ...smtp, port: 587 }).options).toMatchObject({ port: 587, secure: false });
+  // Cổng khác 465: STARTTLS bắt buộc (không bao giờ gửi mật khẩu qua kênh thường).
+  const starttls = { secure: false, requireTLS: true };
+  expect(createSmtpTransport({ ...smtp, port: 587 }).options).toMatchObject({ port: 587, ...starttls });
+  expect(createSmtpTransport({ ...smtp, port: 25 }).options).toMatchObject({ port: 25, ...starttls });
   // Không truyền transport → tự tạo transport SMTP; chưa kết nối gì khi tạo.
   expect(() => createSmtpMailer(smtp)).not.toThrow();
+});
+
+test('default transport times out instead of hanging the scheduler', () => {
+  const timeouts = { connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000 };
+  expect(createSmtpTransport(smtp).options).toMatchObject(timeouts);
+  expect(createSmtpTransport({ ...smtp, port: 587 }).options).toMatchObject(timeouts);
 });

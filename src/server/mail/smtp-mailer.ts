@@ -16,13 +16,26 @@ export interface MailTransport {
   sendMail(message: { from: string; to: string; subject: string; text: string }): Promise<unknown>;
 }
 
-/** Transport SMTP từ cấu hình: TLS ngầm (`secure`) chỉ với cổng 465, cổng khác dùng STARTTLS. */
+/**
+ * Mỗi bước SMTP (nối, chào, im lặng) chờ tối đa chừng này: bộ hẹn giờ chạy các
+ * việc nối tiếp nhau, một SMTP treo sẽ chặn cả nhắc DM lẫn đồng bộ Discord.
+ */
+export const SMTP_TIMEOUT_MS = 15_000;
+
+/**
+ * Transport SMTP từ cấu hình: TLS ngầm (`secure`) chỉ với cổng 465; cổng khác bắt
+ * buộc STARTTLS (`requireTLS`) để mật khẩu không bao giờ đi qua kênh thường.
+ */
 export function createSmtpTransport(smtp: Config['smtp']): Transporter<SMTPSentMessageInfo, SMTPTransportOptions> {
   return createTransport({
     host: smtp.host,
     port: smtp.port,
     secure: smtp.port === 465,
+    requireTLS: smtp.port !== 465,
     auth: { user: smtp.user, pass: smtp.pass },
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
   });
 }
 
