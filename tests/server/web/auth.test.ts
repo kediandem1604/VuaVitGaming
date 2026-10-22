@@ -429,9 +429,10 @@ test('JSON guard: DELETE without a body may omit content-type; role image upload
   expect(del.statusCode).toBe(404);
   expect((await app.inject({ method: 'DELETE', url: '/api/nothing', headers: { 'content-type': 'text/plain' }, payload: 'x' })).statusCode).toBe(415);
 
+  // Guard cho qua → tới bước đăng nhập của route ảnh (401 vì chưa đăng nhập), không phải 415.
   for (const type of ['image/png', 'image/jpeg', 'image/webp']) {
     const res = await app.inject({ method: 'PUT', url: '/api/admin/roles/12/image', headers: { 'content-type': type } });
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(401);
   }
   expect((await app.inject({ method: 'PUT', url: '/api/admin/roles/12/image', headers: { 'content-type': 'image/gif' } })).statusCode).toBe(415);
   expect((await app.inject({ method: 'PUT', url: '/api/admin/roles/12/image', headers: { 'content-type': 'text/plain' } })).statusCode).toBe(415);

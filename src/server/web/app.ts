@@ -21,6 +21,7 @@ import { adminCategoryRoutes } from './routes/admin-categories.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
 import { mvpRoutes } from './routes/mvp.js';
+import { ROLE_IMAGE_TYPES, roleRoutes } from './routes/roles.js';
 import { sessionRoutes } from './routes/sessions.js';
 
 export interface AppDeps {
@@ -65,6 +66,7 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(sessionRoutes);
   await app.register(mvpRoutes);
   await app.register(adminCategoryRoutes);
+  await app.register(roleRoutes);
 
   if (deps.webDistDir !== undefined) {
     await app.register(fastifyStatic, { root: deps.webDistDir });
@@ -121,7 +123,7 @@ function sendNotFound(request: FastifyRequest, reply: FastifyReply, serveWeb: bo
 
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 const ROLE_IMAGE_UPLOAD = /^\/api\/admin\/roles\/[^/]+\/image$/;
-const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const IMAGE_TYPES = new Set(ROLE_IMAGE_TYPES);
 
 /**
  * Thao tác ghi dưới /api phải gửi `application/json` (chống CSRF kiểu form, cùng

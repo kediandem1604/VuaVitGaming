@@ -88,6 +88,34 @@ export interface AwardCategoryDto {
   sortOrder: number;
 }
 
+/** Phe của role: Ngỗng, Vịt, Phe thứ 3. */
+export type Faction = 'goose' | 'duck' | 'neutral';
+
+/**
+ * Một role trong danh mục (`GET /api/roles`, quản trị role). `modeKey` chỉ có ở role
+ * riêng của chế độ đặc biệt. Ảnh tuỳ chỉnh không nằm trong DTO: khi `hasImage`, lấy
+ * qua `GET /api/roles/:id/image`.
+ */
+export interface RoleDto {
+  id: number;
+  key: string;
+  faction: Faction;
+  nameVi: string;
+  nameEn: string;
+  description: string;
+  /** Tên chỉ số tính điểm, vd "Số mạng chém". */
+  metricLabel: string;
+  /** Giới hạn giá trị một lần khai (1–100). */
+  maxPerGame: number;
+  mapNote: string | null;
+  modeKey: string | null;
+  /** Biểu tượng emoji của role. */
+  icon: string;
+  hasImage: boolean;
+  active: boolean;
+  sortOrder: number;
+}
+
 /** Một hạng mục trong form "Kết thúc buổi" (`GET /api/admin/sessions/:id/end-options`); `preselected` = tick sẵn. */
 export interface EndOptionDto {
   id: number;
