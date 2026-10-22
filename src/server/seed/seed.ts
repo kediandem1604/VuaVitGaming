@@ -8,11 +8,15 @@ import { ROLES } from './roles.js';
  * không bao giờ ghi đè chỉnh sửa của admin, nên chạy lại bao nhiêu lần cũng an toàn.
  */
 export async function seedReferenceData(db: PrismaClient): Promise<void> {
-  await db.$transaction(async (tx) => {
-    const modeIdByKey = await seedModes(tx);
-    await seedRoles(tx, modeIdByKey);
-    await seedCategories(tx, modeIdByKey);
-  });
+  await db.$transaction(
+    async (tx) => {
+      const modeIdByKey = await seedModes(tx);
+      await seedRoles(tx, modeIdByKey);
+      await seedCategories(tx, modeIdByKey);
+    },
+    // ~110 truy vấn tuần tự; mặc định 5 giây có thể không đủ với DB ở xa.
+    { timeout: 60_000 },
+  );
 }
 
 async function seedModes(tx: Prisma.TransactionClient): Promise<Map<string, number>> {
