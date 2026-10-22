@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { formatVnDay, formatVnTime, vnDayRange } from '../../lib/time.js';
+import { MessageGoneError } from '../../ports.js';
 import type { SessionView } from '../../ports.js';
 
 // ---------------------------------------------------------------------------
@@ -255,6 +256,7 @@ export async function cancelSession(ctx: Ctx, sessionId: number): Promise<void> 
  * Đăng (chưa có message id) hoặc sửa (đã có) tin Discord của buổi theo trạng thái
  * hiện tại. Không bao giờ ném lỗi: thành công → `discordDirty = false`; lỗi → ghi log
  * và `discordDirty = true` để bộ hẹn giờ thử lại. Buổi không tồn tại → chỉ ghi log.
+ * Tin cũ đã bị xoá trong Discord (`MessageGoneError`) → bỏ id cũ và đăng tin mới ngay.
  *
  * Các lần đồng bộ của cùng một buổi chạy nối đuôi nhau trong tiến trình (web + bot
  * chung một tiến trình): hai người bấm gần như cùng lúc thì lần sau đọc trạng thái
@@ -280,20 +282,35 @@ async function syncNow(ctx: Ctx, sessionId: number): Promise<void> {
       return;
     }
     const view = toSessionView(row);
-    if (row.discordMessageId) {
-      await ctx.notifier.updateSession(row.discordMessageId, view);
-      await ctx.db.gameSession.update({ where: { id: sessionId }, data: { discordDirty: false } });
-    } else {
-      const messageId = await ctx.notifier.publishSession(view);
-      await ctx.db.gameSession.update({
-        where: { id: sessionId },
-        data: { discordMessageId: messageId, discordDirty: false },
-      });
-    }
+    if (row.discordMessageId && (await updateExisting(ctx, sessionId, row.discordMessageId, view))) return;
+
+    const messageId = await ctx.notifier.publishSession(view);
+    await ctx.db.gameSession.update({
+      where: { id: sessionId },
+      data: { discordMessageId: messageId, discordDirty: false },
+    });
   } catch (err) {
     console.error(`[sessions] Không đồng bộ được tin Discord của buổi ${sessionId}: ${messageOf(err)}`);
     await markDirty(ctx, sessionId);
   }
+}
+
+/**
+ * Sửa tin đã đăng; thành công → xoá cờ, trả true. Tin không còn trong Discord
+ * (`MessageGoneError`) → bỏ id cũ ngay (lần sau không sửa hụt nữa) và trả false
+ * để đăng tin mới. Lỗi khác ném tiếp.
+ */
+async function updateExisting(ctx: Ctx, sessionId: number, messageId: string, view: SessionView): Promise<boolean> {
+  try {
+    await ctx.notifier.updateSession(messageId, view);
+  } catch (err) {
+    if (!(err instanceof MessageGoneError)) throw err;
+    console.warn(`[sessions] Tin Discord ${messageId} của buổi ${sessionId} không còn tồn tại — đăng tin mới`);
+    await ctx.db.gameSession.update({ where: { id: sessionId }, data: { discordMessageId: null } });
+    return false;
+  }
+  await ctx.db.gameSession.update({ where: { id: sessionId }, data: { discordDirty: false } });
+  return true;
 }
 
 async function markDirty(ctx: Ctx, sessionId: number): Promise<void> {

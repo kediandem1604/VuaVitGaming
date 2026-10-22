@@ -1,3 +1,4 @@
+import { MessageGoneError } from '../../src/server/ports.js';
 import type {
   DiscordNotifier,
   GuildDirectory,
@@ -21,6 +22,7 @@ export class FakeMailer implements Mailer {
 /**
  * Ghi lại mọi lời gọi Discord. Khi `down` là true, mọi hàm đều ném lỗi.
  * `publishSession`/`publishVote` trả `msg-<n>` từ MỘT bộ đếm chung, bắt đầu từ 1.
+ * `updateSession` với id trong `goneMessageIds` ném `MessageGoneError` (tin đã bị xoá).
  */
 export class FakeNotifier implements DiscordNotifier {
   dms: { discordId: string; text: string }[] = [];
@@ -31,6 +33,7 @@ export class FakeNotifier implements DiscordNotifier {
   announcements: string[] = [];
   down = false;
   failDmFor = new Set<string>();
+  goneMessageIds = new Set<string>();
 
   private messageCounter = 0;
 
@@ -48,6 +51,7 @@ export class FakeNotifier implements DiscordNotifier {
 
   async updateSession(messageId: string, view: SessionView): Promise<void> {
     this.assertUp();
+    if (this.goneMessageIds.has(messageId)) throw new MessageGoneError(`FakeNotifier: tin ${messageId} đã bị xoá`);
     this.updated.push({ messageId, view });
   }
 

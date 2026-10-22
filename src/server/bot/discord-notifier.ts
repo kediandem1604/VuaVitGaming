@@ -2,11 +2,15 @@
  * `DiscordNotifier` thật trên discord.js: DM, kênh thông báo và tin buổi chơi
  * (embed + nút, dựng bởi `buildSessionMessage`). Tin vote (Task 13) còn ném
  * "Chưa hỗ trợ". Mọi lỗi Discord được ném ra — service coi đó là "đăng bù sau"
- * (cờ `discordDirty`). Giới hạn 2000 ký tự của tin văn bản là việc của nơi gọi.
+ * (cờ `discordDirty`); riêng "Unknown Message" khi sửa tin thành `MessageGoneError`
+ * để service đăng lại thay vì thử sửa mãi. Giới hạn 2000 ký tự của tin văn bản là
+ * việc của nơi gọi.
  */
 
+import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
 import type { Client, SendableChannels } from 'discord.js';
 import type { Config } from '../config.js';
+import { MessageGoneError } from '../ports.js';
 import type { DiscordNotifier, SessionView, VotePrompt } from '../ports.js';
 import { buildSessionMessage } from './embeds.js';
 
@@ -28,10 +32,20 @@ export class DiscordJsNotifier implements DiscordNotifier {
     return message.id;
   }
 
-  /** Sửa tin đã đăng theo trạng thái mới (kể cả bỏ nút khi buổi huỷ / kết thúc). */
+  /**
+   * Sửa tin đã đăng theo trạng thái mới (kể cả bỏ nút khi buổi huỷ / kết thúc).
+   * Tin đã bị xoá (Discord 10008 Unknown Message) → `MessageGoneError`; lỗi khác giữ nguyên.
+   */
   async updateSession(messageId: string, view: SessionView): Promise<void> {
     const channel = await this.scheduleChannel();
-    await channel.messages.edit(messageId, buildSessionMessage(view));
+    try {
+      await channel.messages.edit(messageId, buildSessionMessage(view));
+    } catch (err) {
+      if (isUnknownMessage(err)) {
+        throw new MessageGoneError(`Tin Discord ${messageId} không còn tồn tại`, { cause: err });
+      }
+      throw err;
+    }
   }
 
   async publishVote(_prompt: VotePrompt): Promise<string> {
@@ -60,4 +74,8 @@ export class DiscordJsNotifier implements DiscordNotifier {
     }
     return channel;
   }
+}
+
+function isUnknownMessage(err: unknown): boolean {
+  return err instanceof DiscordAPIError && err.code === RESTJSONErrorCodes.UnknownMessage;
 }

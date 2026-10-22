@@ -443,6 +443,52 @@ test('sync publishes a missing message, then updates it, and never throws', asyn
   expect(notifier.updated).toHaveLength(1);
 });
 
+test('a deleted Discord message is republished with a new id instead of being edited forever', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const warns = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const errors = silenceConsoleError();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  expect((await sessionRow(s.id)).discordMessageId).toBe('msg-1');
+
+  // Ai đó xoá tin trong Discord: sửa tin cũ báo "Unknown Message".
+  notifier.goneMessageIds.add('msg-1');
+  const m = await createMember(testDb, { displayName: 'An' });
+  const v = await setAttendance(ctx, s.id, m.id, true);
+
+  expect(notifier.updated).toHaveLength(0);
+  expect(notifier.published).toHaveLength(2);
+  expect(notifier.published[1]).toEqual(v);
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-2', discordDirty: false });
+  expect(errors).not.toHaveBeenCalled();
+  expect(warns).toHaveBeenCalledTimes(1);
+  expect(warns.mock.calls[0]?.[0]).toContain('msg-1');
+  expect(warns.mock.calls[0]?.[0]).toContain(String(s.id));
+
+  // Từ đây sửa tin mới, không đăng thêm.
+  await syncSessionMessage(ctx, s.id);
+  expect(notifier.published).toHaveLength(2);
+  expect(notifier.updated.map((u) => u.messageId)).toEqual(['msg-2']);
+});
+
+test('when the republish after a deleted message fails, the old id is cleared and the session stays dirty', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const errors = silenceConsoleError();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+
+  notifier.goneMessageIds.add('msg-1');
+  vi.spyOn(notifier, 'publishSession').mockRejectedValueOnce(new Error('Discord lỗi'));
+  await expect(syncSessionMessage(ctx, s.id)).resolves.toBeUndefined();
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: null, discordDirty: true });
+  expect(errors).toHaveBeenCalledTimes(1);
+
+  // Lần thử lại không đụng tới tin đã mất nữa: đăng tin mới luôn.
+  await syncSessionMessage(ctx, s.id);
+  expect(notifier.updated).toHaveLength(0);
+  expect(notifier.published).toHaveLength(2);
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-2', discordDirty: false });
+});
+
 test('near-simultaneous presses never leave an older view on the Discord message', async () => {
   const { ctx, notifier, admin, classic } = await setup();
   const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });

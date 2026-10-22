@@ -1,7 +1,9 @@
+import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
 import type { Client } from 'discord.js';
 import { expect, test } from 'vitest';
 import { DiscordJsNotifier } from '../../../src/server/bot/discord-notifier.js';
 import { buildSessionMessage } from '../../../src/server/bot/embeds.js';
+import { MessageGoneError } from '../../../src/server/ports.js';
 import type { SessionView } from '../../../src/server/ports.js';
 import { testConfig } from '../../helpers/ctx.js';
 
@@ -65,4 +67,36 @@ test('a missing or non-text schedule channel is an error (service marks the sess
 
   const voice = new DiscordJsNotifier(fakeClient({ 'ch-schedule': { isSendable: () => false } }).client, testConfig());
   await expect(voice.publishSession(view)).rejects.toThrow('ch-schedule');
+});
+
+test('updateSession maps Discord "Unknown Message" (10008) to MessageGoneError and passes other errors through', async () => {
+  const f = fakeClient({});
+  const n = new DiscordJsNotifier(f.client, testConfig());
+  let failure: unknown;
+  const channel = {
+    isSendable: () => true,
+    messages: {
+      edit: async () => {
+        throw failure;
+      },
+    },
+  };
+  f.client.channels.fetch = (async (id: string) => (id === 'ch-schedule' ? channel : null)) as never;
+  const url = 'https://discord.com/api/v10/channels/ch-schedule/messages/m-1';
+  const discordError = (code: number, status: number, message: string) =>
+    new DiscordAPIError({ code, message }, code, status, 'PATCH', url, {});
+
+  // Tin đã bị xoá: lỗi có kiểu riêng, mang id tin, giữ lỗi gốc làm `cause`.
+  failure = discordError(RESTJSONErrorCodes.UnknownMessage, 404, 'Unknown Message');
+  const gone = await n.updateSession('m-1', view).catch((err: unknown) => err);
+  expect(gone).toBeInstanceOf(MessageGoneError);
+  expect((gone as Error).message).toContain('m-1');
+  expect((gone as Error).cause).toBe(failure);
+
+  // Lỗi Discord khác (thiếu quyền) và lỗi thường: ném nguyên vẹn.
+  failure = discordError(RESTJSONErrorCodes.MissingPermissions, 403, 'Missing Permissions');
+  await expect(n.updateSession('m-1', view)).rejects.toBe(failure);
+  failure = new Error('mạng rớt');
+  await expect(n.updateSession('m-1', view)).rejects.toBe(failure);
+  expect(f.edited).toEqual([]);
 });
