@@ -77,6 +77,19 @@ export async function listSessionsOnVnDate(ctx: Ctx, vnDate: string): Promise<Se
 }
 
 // ---------------------------------------------------------------------------
+// Chế độ chơi
+// ---------------------------------------------------------------------------
+
+/** Chế độ chơi đang bật, theo id tăng dần (thứ tự dữ liệu mẫu) — cho form tạo buổi. */
+export function listActiveModes(ctx: Ctx): Promise<{ id: number; key: string; nameVi: string }[]> {
+  return ctx.db.gameMode.findMany({
+    where: { active: true },
+    select: { id: true, key: true, nameVi: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Tạo buổi
 // ---------------------------------------------------------------------------
 

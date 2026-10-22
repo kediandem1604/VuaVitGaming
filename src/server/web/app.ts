@@ -19,6 +19,7 @@ import type { OAuthClient } from '../modules/auth/oauth.js';
 import { installAuth } from './auth-plugin.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
+import { sessionRoutes } from './routes/sessions.js';
 
 export interface AppDeps {
   oauth: OAuthClient;
@@ -59,6 +60,7 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
 
   await app.register(authRoutes, { oauth: deps.oauth });
   await app.register(meRoutes);
+  await app.register(sessionRoutes);
 
   if (deps.webDistDir !== undefined) {
     await app.register(fastifyStatic, { root: deps.webDistDir });

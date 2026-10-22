@@ -1,13 +1,14 @@
 /**
- * `DiscordNotifier` thật trên discord.js. Task này chỉ có DM và kênh thông báo;
- * embed buổi chơi (Task 9) và tin vote (Task 13) còn ném "Chưa hỗ trợ" — service
- * coi lỗi Discord là "đăng bù sau" nên vô hại. Giới hạn 2000 ký tự của Discord
- * là việc của nơi gọi; ở đây không cắt.
+ * `DiscordNotifier` thật trên discord.js: DM, kênh thông báo và tin buổi chơi
+ * (embed + nút, dựng bởi `buildSessionMessage`). Tin vote (Task 13) còn ném
+ * "Chưa hỗ trợ". Mọi lỗi Discord được ném ra — service coi đó là "đăng bù sau"
+ * (cờ `discordDirty`). Giới hạn 2000 ký tự của tin văn bản là việc của nơi gọi.
  */
 
-import type { Client } from 'discord.js';
+import type { Client, SendableChannels } from 'discord.js';
 import type { Config } from '../config.js';
 import type { DiscordNotifier, SessionView, VotePrompt } from '../ports.js';
+import { buildSessionMessage } from './embeds.js';
 
 export class DiscordJsNotifier implements DiscordNotifier {
   constructor(
@@ -20,12 +21,17 @@ export class DiscordJsNotifier implements DiscordNotifier {
     await this.client.users.send(discordId, text);
   }
 
-  async publishSession(_view: SessionView): Promise<string> {
-    throw new Error('Chưa hỗ trợ');
+  /** Đăng tin buổi chơi vào kênh lịch chơi; trả về id tin để sửa về sau. */
+  async publishSession(view: SessionView): Promise<string> {
+    const channel = await this.scheduleChannel();
+    const message = await channel.send(buildSessionMessage(view));
+    return message.id;
   }
 
-  async updateSession(_messageId: string, _view: SessionView): Promise<void> {
-    throw new Error('Chưa hỗ trợ');
+  /** Sửa tin đã đăng theo trạng thái mới (kể cả bỏ nút khi buổi huỷ / kết thúc). */
+  async updateSession(messageId: string, view: SessionView): Promise<void> {
+    const channel = await this.scheduleChannel();
+    await channel.messages.edit(messageId, buildSessionMessage(view));
   }
 
   async publishVote(_prompt: VotePrompt): Promise<string> {
@@ -38,11 +44,20 @@ export class DiscordJsNotifier implements DiscordNotifier {
 
   /** Gửi vào kênh thông báo đã cấu hình; kênh không tồn tại hay không gửi tin được → ném lỗi. */
   async announce(text: string): Promise<void> {
-    const channelId = this.config.discord.announceChannelId;
+    const channel = await this.sendableChannel(this.config.discord.announceChannelId, 'thông báo');
+    await channel.send(text);
+  }
+
+  private scheduleChannel(): Promise<SendableChannels> {
+    return this.sendableChannel(this.config.discord.scheduleChannelId, 'lịch chơi');
+  }
+
+  /** Kênh theo id; không tồn tại hay không gửi tin được (kênh thoại, danh mục…) → ném lỗi. */
+  private async sendableChannel(channelId: string, label: string): Promise<SendableChannels> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel || !channel.isSendable()) {
-      throw new Error(`Kênh thông báo ${channelId} không phải kênh văn bản gửi tin được`);
+      throw new Error(`Kênh ${label} ${channelId} không phải kênh văn bản gửi tin được`);
     }
-    await channel.send(text);
+    return channel;
   }
 }

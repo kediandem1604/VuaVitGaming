@@ -6,11 +6,13 @@
  */
 
 import { Client, Events, GatewayIntentBits } from 'discord.js';
+import type { Interaction } from 'discord.js';
 import type { Config } from '../config.js';
 import type { Ctx } from '../ctx.js';
 import type { DiscordNotifier, GuildDirectory } from '../ports.js';
 import { DiscordJsNotifier } from './discord-notifier.js';
 import { DiscordGuildDirectory, toGuildMemberInfo } from './guild-directory.js';
+import { handleInteraction } from './interactions.js';
 import { memberEventHandlers, onReadySync, safeHandler } from './member-events.js';
 
 export interface Bot {
@@ -29,6 +31,12 @@ export function createBot(getCtx: () => Ctx, config: Config): Bot {
   client.on(Events.GuildMemberAdd, safeHandler('guildMemberAdd', handlers.guildMemberAdd));
   client.on(Events.GuildMemberRemove, safeHandler('guildMemberRemove', handlers.guildMemberRemove));
   client.on(Events.GuildMemberUpdate, safeHandler('guildMemberUpdate', handlers.guildMemberUpdate));
+
+  // Nút Tham gia/Huỷ, menu vote (Task 13) và lệnh slash (Task 14) đều đi qua một cửa.
+  client.on(
+    Events.InteractionCreate,
+    safeHandler('interactionCreate', (interaction: Interaction) => handleInteraction(getCtx(), interaction)),
+  );
 
   // Mỗi lần sẵn sàng (đăng nhập lại cũng vậy): quét toàn bộ server rồi đồng bộ.
   client.on(

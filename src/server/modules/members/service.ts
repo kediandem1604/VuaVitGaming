@@ -253,6 +253,16 @@ export async function listMembers(ctx: Ctx, filter: { status?: MemberStatus; q?:
   return ctx.db.member.findMany({ where, orderBy: { memberCode: 'asc' } });
 }
 
+/** `avatarUrl` theo id của những thành viên này, một truy vấn; id không có thì vắng trong Map. */
+export async function avatarUrlsByMemberId(ctx: Ctx, memberIds: number[]): Promise<Map<number, string | null>> {
+  if (memberIds.length === 0) return new Map();
+  const rows = await ctx.db.member.findMany({
+    where: { id: { in: memberIds } },
+    select: { id: true, avatarUrl: true },
+  });
+  return new Map(rows.map((r) => [r.id, r.avatarUrl]));
+}
+
 /**
  * Prisma đưa `contains` thẳng vào `ILIKE '%…%'` mà không thoát ký tự đặc biệt, nên
  * `%`, `_` và `\` phải được thoát để người dùng tìm đúng chữ mình gõ.
