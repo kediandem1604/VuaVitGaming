@@ -315,7 +315,7 @@ test('listMembers filters by status and searches name, code and discordId', asyn
   const { ctx } = makeTestCtx();
   // Tạo ngược thứ tự tên để chắc rằng kết quả sắp theo mã, không theo tên hay id.
   const c = await createMember(testDb, { displayName: 'Cường', discordId: 'snowflake-999' });
-  const b = await createMember(testDb, { displayName: 'bình an', discordId: 'id-b' });
+  const b = await createMember(testDb, { displayName: 'bob an', discordId: 'id-b' });
   const a = await createMember(testDb, { displayName: 'Ánh Dương', discordId: 'id-a' });
   await markMemberLeft(ctx, 'id-b');
 
@@ -324,7 +324,8 @@ test('listMembers filters by status and searches name, code and discordId', asyn
   expect(codes(await listMembers(ctx, { status: 'active' }))).toEqual([c.memberCode, a.memberCode]);
   expect(codes(await listMembers(ctx, { status: 'left' }))).toEqual([b.memberCode]);
 
-  expect(codes(await listMembers(ctx, { q: 'BÌNH' }))).toEqual([b.memberCode]); // tên, không phân biệt hoa thường
+  // Tên: không phân biệt hoa thường (so ASCII để không phụ thuộc locale của DB); có dấu khớp nguyên văn.
+  expect(codes(await listMembers(ctx, { q: 'BOB' }))).toEqual([b.memberCode]);
   expect(codes(await listMembers(ctx, { q: 'Dương' }))).toEqual([a.memberCode]);
   expect(codes(await listMembers(ctx, { q: 'ggd-0002' }))).toEqual([b.memberCode]); // mã
   expect(codes(await listMembers(ctx, { q: 'SNOW' }))).toEqual([c.memberCode]); // discordId
