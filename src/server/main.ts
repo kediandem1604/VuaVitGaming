@@ -1,7 +1,8 @@
 /**
- * Điểm vào tiến trình: web (Fastify) và bot Discord chạy chung một process, chia
- * sẻ một `Ctx`. Thứ tự: cấu hình → bot (chưa đăng nhập) → ctx → web lắng nghe →
- * bot đăng nhập. Bot không nối được thì web vẫn chạy (spec §9).
+ * Điểm vào tiến trình: web (Fastify), bộ hẹn giờ và bot Discord chạy chung một
+ * process, chia sẻ một `Ctx`. Thứ tự: cấu hình → bot (chưa đăng nhập) → ctx → web
+ * lắng nghe → bộ hẹn giờ → bot đăng nhập. Bot không nối được thì web vẫn chạy và
+ * nhắc email vẫn đi (spec §9).
  */
 
 import './load-env.js';
@@ -17,6 +18,7 @@ import type { Ctx } from './ctx.js';
 import { db } from './db.js';
 import { createSmtpMailer } from './mail/smtp-mailer.js';
 import { createDiscordOAuthClient } from './modules/auth/oauth.js';
+import { startScheduler } from './scheduler/scheduler.js';
 import { buildApp } from './web/app.js';
 
 // Chỉ ghi log: một lỗi lạc không làm sập cả web lẫn bot.
@@ -40,10 +42,14 @@ async function main(): Promise<void> {
     webDistDir: webDistDir(),
     logger: true,
   });
-  installShutdown(app, bot);
+  let scheduler: { stop(): void } | undefined;
+  installShutdown(app, bot, () => scheduler?.stop());
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
   console.log(`Đang chạy tại cổng ${config.port}`);
+
+  // Trước khi bot đăng nhập: Discord sập thì nhắc email vẫn đi, tin Discord được đăng bù khi bot lên.
+  scheduler = startScheduler(ctx);
 
   try {
     await bot.start();
@@ -74,13 +80,18 @@ function webDistDir(): string | undefined {
   return undefined;
 }
 
-/** SIGINT/SIGTERM: đóng web, ngắt Discord, ngắt database rồi thoát 0 — mỗi bước lỗi chỉ ghi log. */
-function installShutdown(app: FastifyInstance, bot: Bot): void {
+/**
+ * SIGINT/SIGTERM: dừng bộ hẹn giờ, đóng web, ngắt Discord, ngắt database rồi thoát 0
+ * — mỗi bước lỗi chỉ ghi log. Bộ hẹn giờ dừng trước để không bắt đầu lượt mới
+ * trong lúc đang ngắt kết nối.
+ */
+function installShutdown(app: FastifyInstance, bot: Bot, stopScheduler: () => void): void {
   let stopping = false;
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     if (stopping) return;
     stopping = true;
     console.log(`Nhận ${signal}, đang dừng…`);
+    await attempt('dừng bộ hẹn giờ', async () => stopScheduler());
     await attempt('đóng web', () => app.close());
     await attempt('ngắt Discord', () => bot.client.destroy());
     await attempt('ngắt database', () => db.$disconnect());
