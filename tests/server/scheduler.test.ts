@@ -292,17 +292,37 @@ test('ticks auto-end a stale session, publish its vote once Discord is back, and
   expect(notifier.votes.map((v) => v.categoryName)).toEqual(['Giết nhiều nhất', 'Pha xử lý ngu nhất', 'Pha dí người ngu nhất']);
   expect(await testDb.voteMessage.count({ where: { roundId: round.id, discordMessageId: null } })).toBe(0);
 
-  // Có người vote; đến giờ đóng → lượt 3 đóng đợt, công bố kết quả, sửa các tin vote.
+  // Có người vote; đến giờ đóng nhưng Discord lại sập → lượt 3 vẫn đóng đợt trong DB, kết quả chờ đăng bù.
   const voter = await createMember(testDb);
   await castVote(ctx, { roundId: round.id, categoryId: notifier.votes[0]!.categoryId, voterId: voter.id, nomineeId: m.id });
   setNow('2026-10-23T00:00:00Z');
+  notifier.down = true;
   results = await runTick(ctx, defaultJobs());
   expect(results.every((r) => r.ok)).toBe(true);
-  expect((await testDb.voteRound.findUniqueOrThrow({ where: { id: round.id } })).status).toBe('closed');
+  expect(await testDb.voteRound.findUniqueOrThrow({ where: { id: round.id } })).toMatchObject({
+    status: 'closed',
+    announcePending: true,
+  });
+  expect(await testDb.voteMessage.count({ where: { roundId: round.id, resultPending: true } })).toBe(3);
+  expect(await testDb.award.count()).toBe(1);
+  expect(notifier.announcements).toEqual([]);
+  expect(notifier.closedVotes).toEqual([]);
+
+  // Lượt 4, Discord trở lại: vote-sync công bố kết quả đúng một lần và sửa ba tin vote.
+  notifier.down = false;
+  results = await runTick(ctx, defaultJobs());
+  expect(results.every((r) => r.ok)).toBe(true);
   expect(notifier.announcements).toHaveLength(1);
   expect(notifier.announcements[0]).toContain('• Giết nhiều nhất: An (1 phiếu)');
   expect(notifier.closedVotes.map((c) => c.messageId)).toEqual(['msg-2', 'msg-3', 'msg-4']);
-  expect(await testDb.award.count()).toBe(1);
+  expect(await testDb.voteRound.findUniqueOrThrow({ where: { id: round.id } })).toMatchObject({ announcePending: false });
+  expect(await testDb.voteMessage.count({ where: { roundId: round.id, resultPending: true } })).toBe(0);
+
+  // Lượt 5: không còn gì để đăng.
+  results = await runTick(ctx, defaultJobs());
+  expect(results.every((r) => r.ok)).toBe(true);
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.closedVotes).toHaveLength(3);
 });
 
 // ---------------------------------------------------------------------------

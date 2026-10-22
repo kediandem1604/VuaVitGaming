@@ -186,8 +186,8 @@ Một vòng lặp chạy mỗi 60 giây (giữ khoá thuê trong `scheduler_leas
 | `attendances` | session_id, member_id, status (`going`/`cancelled`), updated_at | khoá chính (session_id, member_id) |
 | `notification_log` | session_id, member_id, kind (`pre15`/`start`), channel (`email`/`dm`), sent_at, error | duy nhất (session_id, member_id, kind, channel) |
 | `award_categories` | id, scope (`always`/`mode`/`optional`), mode_id (chỉ khi scope = `mode`), name, description, active, sort_order | mode_id bắt buộc khi và chỉ khi scope = `mode` |
-| `vote_rounds` | id, session_id, opens_at, closes_at, status (`open`/`closed`) | session_id duy nhất |
-| `vote_messages` | round_id, category_id, discord_message_id | duy nhất (round_id, category_id); các hạng mục được chọn cho đợt vote |
+| `vote_rounds` | id, session_id, opens_at, closes_at, status (`open`/`closed`), announce_pending | session_id duy nhất; `announce_pending` = đã đóng nhưng chưa đăng được kết quả vào kênh thông báo (bộ hẹn giờ đăng bù) |
+| `vote_messages` | round_id, category_id, discord_message_id, result_pending | duy nhất (round_id, category_id); các hạng mục được chọn cho đợt vote; `result_pending` = đợt đã đóng nhưng tin chưa được sửa thành kết quả (bộ hẹn giờ sửa bù) |
 | `votes` | round_id, category_id, voter_id, nominee_id, updated_at | duy nhất (round_id, category_id, voter_id); voter_id ≠ nominee_id |
 | `awards` | round_id, category_id, member_id, vote_count | duy nhất (round_id, category_id, member_id) |
 | `roles` | id, key, faction (`goose`/`duck`/`neutral`), name_en, name_vi, description, metric_label, max_per_game, map_note (null, vd "Chỉ có ở Ancient Sands"), mode_id (null = role chế độ thường; có giá trị = role riêng của chế độ đặc biệt), icon (emoji), image (bytea, null), image_mime (null), active, sort_order | key duy nhất; max_per_game ≥ 1 |

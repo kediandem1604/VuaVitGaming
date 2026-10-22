@@ -12,7 +12,7 @@
 import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import type { Ctx } from '../ctx.js';
-import { closeDueRounds, publishPendingVoteMessages } from '../modules/mvp/votes.js';
+import { closeDueRounds, syncVotes } from '../modules/mvp/votes.js';
 import { runReminders } from '../modules/reminders/service.js';
 import { autoEndSessions } from '../modules/sessions/end.js';
 import { syncSessionMessage } from '../modules/sessions/service.js';
@@ -73,8 +73,8 @@ export async function cleanupWebSessions(ctx: Ctx): Promise<number> {
 
 /**
  * Các việc của một lượt, theo thứ tự chạy: nhắc giờ trước (gấp nhất); tự kết thúc buổi
- * và đóng vote (đổi trạng thái, tự đăng Discord); rồi đăng bù tin buổi và tin vote
- * (gom cả những gì hai việc trước không đăng được); cuối cùng dọn dẹp.
+ * và đóng vote (đổi trạng thái, tự đăng Discord); rồi đăng bù tin buổi, tin vote và
+ * kết quả vote (gom cả những gì hai việc trước không đăng được); cuối cùng dọn dẹp.
  */
 export function defaultJobs(): Job[] {
   return [
@@ -82,7 +82,7 @@ export function defaultJobs(): Job[] {
     { name: 'auto-end', run: autoEndSessions },
     { name: 'close-votes', run: closeDueRounds },
     { name: 'session-sync', run: retrySessionSync },
-    { name: 'vote-sync', run: publishPendingVoteMessages },
+    { name: 'vote-sync', run: syncVotes },
     { name: 'web-session-cleanup', run: cleanupWebSessions },
   ];
 }

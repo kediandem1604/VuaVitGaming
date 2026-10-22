@@ -17,6 +17,8 @@ import {
   listHallDates,
   openVoteRound,
   publishPendingVoteMessages,
+  retryRoundResults,
+  syncVotes,
   tallyWinners,
 } from '../../src/server/modules/mvp/votes.js';
 import { autoEndSessions, endSession } from '../../src/server/modules/sessions/end.js';
@@ -61,7 +63,18 @@ const sessionRow = (id: number) => testDb.gameSession.findUniqueOrThrow({ where:
 const roundOf = (sessionId: number) => testDb.voteRound.findUniqueOrThrow({ where: { sessionId } });
 const roundRow = (id: number) => testDb.voteRound.findUniqueOrThrow({ where: { id } });
 const messagesOf = (roundId: number) =>
-  testDb.voteMessage.findMany({ where: { roundId }, orderBy: { categoryId: 'asc' } });
+  testDb.voteMessage.findMany({
+    where: { roundId },
+    select: { roundId: true, categoryId: true, discordMessageId: true },
+    orderBy: { categoryId: 'asc' },
+  });
+/** Tin vote kèm cờ "chờ sửa thành kết quả", theo hạng mục. */
+const pendingOf = (roundId: number) =>
+  testDb.voteMessage.findMany({
+    where: { roundId },
+    select: { categoryId: true, discordMessageId: true, resultPending: true },
+    orderBy: { categoryId: 'asc' },
+  });
 const awardsOf = (roundId: number) =>
   testDb.award.findMany({ where: { roundId }, orderBy: [{ categoryId: 'asc' }, { memberId: 'asc' }] });
 
@@ -296,6 +309,26 @@ test('ending is refused when the session is not scheduled or does not exist', as
 
   await expect(endSession(ctx, 999)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   await expect(endSession(ctx, 999, [])).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(notifier.votes).toHaveLength(3);
+});
+
+test('ending a session and opening its vote round is one transaction', async () => {
+  const { ctx, notifier } = await setup();
+  const { session: s } = await sessionWith(['An']);
+
+  // DB trục trặc giữa chừng: không có buổi "đã kết thúc mà không có vote" — mọi thứ hoàn tác.
+  await expect(endSession(withOneFailingTransaction(ctx), s.id)).rejects.toThrow('db hiccup');
+  expect(await sessionRow(s.id)).toMatchObject({ status: 'scheduled', endedAt: null, discordDirty: false });
+  expect(await testDb.voteRound.count()).toBe(0);
+  expect(await testDb.voteMessage.count()).toBe(0);
+  expect(notifier.published).toHaveLength(0);
+  expect(notifier.votes).toHaveLength(0);
+
+  // Lần sau kết thúc trọn vẹn: buổi `ended`, tin buổi sửa, vote mở và đăng.
+  await endSession(ctx, s.id);
+  expect(await sessionRow(s.id)).toMatchObject({ status: 'ended', endedAt: ctx.now(), discordDirty: false });
+  expect(await roundOf(s.id)).toMatchObject({ status: 'open', closesAt: new Date(CLOSES_AT) });
+  expect(notifier.published[0]).toMatchObject({ id: s.id, status: 'ended' });
   expect(notifier.votes).toHaveLength(3);
 });
 
@@ -628,11 +661,16 @@ test('close is idempotent and announces once', async () => {
       '• Pha xử lý ngu nhất: Không ai được vote',
   );
   expect(await awardsOf(roundId)).toEqual([{ roundId, categoryId: kills.id, memberId: a.id, voteCount: 1 }]);
-  expect((await roundRow(roundId)).status).toBe('closed');
+  expect(await roundRow(roundId)).toMatchObject({ status: 'closed', announcePending: false });
   expect(notifier.closedVotes).toEqual([
     { messageId: 'msg-2', resultText: '🏆 An (1 phiếu)' },
     { messageId: 'msg-3', resultText: 'Không ai được vote' },
   ]);
+  // Discord đã nhận hết: không còn gì chờ đăng bù.
+  expect((await pendingOf(roundId)).map((m) => m.resultPending)).toEqual([false, false]);
+  await retryRoundResults(ctx);
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.closedVotes).toHaveLength(2);
   // Đợt không tồn tại: không làm gì, không ném lỗi.
   await expect(closeVoteRound(ctx, 999)).resolves.toBeUndefined();
   expect(notifier.announcements).toHaveLength(1);
@@ -694,7 +732,7 @@ test('ties crown everyone with the top count, listed by member id', async () => 
   expect(notifier.closedVotes.map((c) => c.messageId)).toEqual(['msg-2', 'msg-3', 'msg-4']);
 });
 
-test('close while Discord is down keeps the database result and never throws', async () => {
+test('close while Discord is down keeps the result and retries it until Discord confirms', async () => {
   const { ctx, notifier } = await setup();
   const errors = silenceConsoleError();
   const { session: s, members } = await sessionWith(['An', 'Bình']);
@@ -707,26 +745,144 @@ test('close while Discord is down keeps the database result and never throws', a
 
   notifier.down = true;
   await expect(closeVoteRound(ctx, roundId)).resolves.toBeUndefined();
-  expect((await roundRow(roundId)).status).toBe('closed');
+  // Kết quả đã chốt trong DB; Discord chưa biết → cờ chờ bật, chưa có thông báo nào.
+  expect(await roundRow(roundId)).toMatchObject({ status: 'closed', announcePending: true });
   expect(await awardsOf(roundId)).toEqual([{ roundId, categoryId: kills.id, memberId: b.id, voteCount: 1 }]);
+  expect(await pendingOf(roundId)).toEqual([
+    { categoryId: kills.id, discordMessageId: 'msg-2', resultPending: true },
+    { categoryId: dumb.id, discordMessageId: 'msg-3', resultPending: true },
+  ]);
+  expect(notifier.announcements).toEqual([]);
+  expect(notifier.closedVotes).toEqual([]);
   expect(errors).toHaveBeenCalledTimes(3); // 1 thông báo + 2 tin vote
   expect(errors.mock.calls[0]?.[0]).toContain(String(roundId));
 
-  // Tin chưa có id (Discord sập lúc mở) thì không có gì để đóng.
+  // Discord vẫn sập: lượt đăng bù chỉ ghi log, giữ cờ.
+  await expect(retryRoundResults(ctx)).resolves.toBeUndefined();
+  expect(errors).toHaveBeenCalledTimes(6);
+  expect((await roundRow(roundId)).announcePending).toBe(true);
+
+  // Discord trở lại: đúng một thông báo (nội dung dựng lại từ DB, y như lúc đóng), mỗi tin sửa một lần, cờ tắt.
   notifier.down = false;
-  const { session: s2, members: m2 } = await sessionWith(['Chi']);
+  await retryRoundResults(ctx);
+  expect(notifier.announcements).toEqual([
+    '🏆 Kết quả tri ân buổi Cổ điển (Classic) 21:00 22/10\n' +
+      '• Giết nhiều nhất: Bình (1 phiếu)\n' +
+      '• Pha xử lý ngu nhất: Không ai được vote',
+  ]);
+  expect(notifier.closedVotes).toEqual([
+    { messageId: 'msg-2', resultText: '🏆 Bình (1 phiếu)' },
+    { messageId: 'msg-3', resultText: 'Không ai được vote' },
+  ]);
+  expect(await roundRow(roundId)).toMatchObject({ status: 'closed', announcePending: false });
+  expect((await pendingOf(roundId)).map((m) => m.resultPending)).toEqual([false, false]);
+
+  // Chạy lại (riêng lẻ và qua việc vote-sync): không còn gì để đăng.
+  await retryRoundResults(ctx);
+  await syncVotes(ctx);
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.closedVotes).toHaveLength(2);
+  expect(errors).toHaveBeenCalledTimes(6);
+});
+
+test('a failed result edit is retried alone; the announcement is never repeated', async () => {
+  const { ctx, notifier } = await setup();
+  const errors = silenceConsoleError();
+  const { session: s, members } = await sessionWith(['An', 'Bình']);
+  const [a, b] = members as [typeof members[0], typeof members[0]];
+  const kills = await category('Giết nhiều nhất');
+  const dumb = await category('Pha xử lý ngu nhất');
+  await endSession(ctx, s.id, [kills.id, dumb.id]);
+  const roundId = (await roundOf(s.id)).id;
+  await castVote(ctx, { roundId, categoryId: kills.id, voterId: a.id, nomineeId: b.id });
+
+  // Thông báo đi, tin đầu sửa lỗi, tin sau sửa được.
+  vi.spyOn(notifier, 'closeVote').mockRejectedValueOnce(new Error('Discord lỗi'));
+  await closeVoteRound(ctx, roundId);
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.closedVotes).toEqual([{ messageId: 'msg-3', resultText: 'Không ai được vote' }]);
+  expect(await roundRow(roundId)).toMatchObject({ announcePending: false });
+  expect(await pendingOf(roundId)).toEqual([
+    { categoryId: kills.id, discordMessageId: 'msg-2', resultPending: true },
+    { categoryId: dumb.id, discordMessageId: 'msg-3', resultPending: false },
+  ]);
+  expect(errors).toHaveBeenCalledTimes(1);
+  expect(errors.mock.calls[0]?.[0]).toContain('msg-2');
+
+  // Lượt sau chỉ sửa lại tin còn chờ.
+  await retryRoundResults(ctx);
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.closedVotes).toEqual([
+    { messageId: 'msg-3', resultText: 'Không ai được vote' },
+    { messageId: 'msg-2', resultText: '🏆 Bình (1 phiếu)' },
+  ]);
+  expect((await pendingOf(roundId)).map((m) => m.resultPending)).toEqual([false, false]);
+});
+
+test('a round whose menus never got posted announces its result and has nothing to edit', async () => {
+  const { ctx, notifier } = await setup();
+  const errors = silenceConsoleError();
+  const { session: s, members } = await sessionWith(['Chi']);
+  const voter = await createMember(testDb);
+  const kills = await category('Giết nhiều nhất');
   notifier.down = true;
-  await endSession(ctx, s2.id, [kills.id]);
+  await endSession(ctx, s.id, [kills.id]);
   notifier.down = false;
   errors.mockClear();
-  const round2 = (await roundOf(s2.id)).id;
-  await castVote(ctx, { roundId: round2, categoryId: kills.id, voterId: a.id, nomineeId: m2[0]!.id });
-  await closeVoteRound(ctx, round2);
+  const roundId = (await roundOf(s.id)).id;
+  await castVote(ctx, { roundId, categoryId: kills.id, voterId: voter.id, nomineeId: members[0]!.id });
+
+  await closeVoteRound(ctx, roundId);
   expect(notifier.announcements).toEqual([
     '🏆 Kết quả tri ân buổi Cổ điển (Classic) 21:00 22/10\n• Giết nhiều nhất: Chi (1 phiếu)',
   ]);
   expect(notifier.closedVotes).toEqual([]);
   expect(errors).not.toHaveBeenCalled();
+  // Tin không có id thì không có gì để sửa bù; đợt đã đóng không đăng menu mới.
+  await syncVotes(ctx);
+  expect(notifier.votes).toEqual([]);
+  expect(notifier.closedVotes).toEqual([]);
+  expect(notifier.announcements).toHaveLength(1);
+});
+
+test('a menu posted while the round closes early gets its result instead of staying live', async () => {
+  const { ctx, notifier } = await setup();
+  silenceConsoleError();
+  const { session: s, members } = await sessionWith(['An', 'Bình']);
+  const [a, b] = members as [typeof members[0], typeof members[0]];
+  const kills = await category('Giết nhiều nhất');
+  const dumb = await category('Pha xử lý ngu nhất');
+  notifier.down = true;
+  await endSession(ctx, s.id, [kills.id, dumb.id]);
+  notifier.down = false;
+  const roundId = (await roundOf(s.id)).id;
+  await castVote(ctx, { roundId, categoryId: kills.id, voterId: a.id, nomineeId: b.id });
+
+  // Đúng lúc tin đầu đang gửi lên Discord, admin đóng sớm: đợt đóng trong DB trước khi Discord trả id.
+  let closing!: Promise<void>;
+  vi.spyOn(notifier, 'publishVote').mockImplementationOnce(async (prompt) => {
+    closing = closeVoteRound(ctx, roundId);
+    await vi.waitFor(async () => expect((await roundRow(roundId)).status).toBe('closed'));
+    notifier.votes.push(prompt);
+    return 'msg-race';
+  });
+  await publishPendingVoteMessages(ctx);
+  await closing;
+
+  // Tin đầu có id và được sửa thành kết quả; tin thứ hai không được đăng nữa vì đợt đã đóng.
+  expect(notifier.votes.map((v) => v.categoryId)).toEqual([kills.id]);
+  expect(await pendingOf(roundId)).toEqual([
+    { categoryId: kills.id, discordMessageId: 'msg-race', resultPending: false },
+    { categoryId: dumb.id, discordMessageId: null, resultPending: true },
+  ]);
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.closedVotes).toEqual([{ messageId: 'msg-race', resultText: '🏆 Bình (1 phiếu)' }]);
+
+  // Lượt đăng bù sau đó: không đăng menu cho đợt đã đóng, không sửa gì thêm.
+  await syncVotes(ctx);
+  expect(notifier.votes).toHaveLength(1);
+  expect(notifier.closedVotes).toHaveLength(1);
+  expect(notifier.announcements).toHaveLength(1);
 });
 
 test('closeDueRounds closes only rounds past closesAt and continues past a failing round', async () => {
@@ -806,7 +962,9 @@ test('auto end after configured hours', async () => {
   expect(await testDb.voteRound.count()).toBe(1); // không ai tham gia → không mở vote
   expect(errors).not.toHaveBeenCalled();
 
-  // Một buổi lỗi không chặn buổi khác: lỗi DB khi mở vote của buổi đầu được ghi log, buổi sau vẫn xong.
+  // Một buổi lỗi không chặn buổi khác, và không để lại buổi "đã kết thúc mà không có vote":
+  // lỗi DB khi kết thúc buổi đầu → buổi đó vẫn `scheduled` (được ghi log), buổi sau vẫn xong;
+  // lượt sau kết thúc nốt buổi đầu kèm vote.
   const s5 = await insertSession(testDb, { startsAt: new Date('2026-10-22T09:00:00Z') });
   await join(s5.id, a.id);
   const s6 = await insertSession(testDb, { startsAt: new Date('2026-10-22T09:30:00Z') });
@@ -814,10 +972,15 @@ test('auto end after configured hours', async () => {
   await expect(autoEndSessions(withOneFailingTransaction(ctx))).resolves.toBeUndefined();
   expect(errors).toHaveBeenCalledTimes(1);
   expect(errors.mock.calls[0]?.[0]).toContain(String(s5.id));
-  expect((await sessionRow(s5.id)).status).toBe('ended');
-  expect((await sessionRow(s6.id)).status).toBe('ended');
+  expect(await sessionRow(s5.id)).toMatchObject({ status: 'scheduled', endedAt: null });
   expect(await testDb.voteRound.findUnique({ where: { sessionId: s5.id } })).toBeNull();
+  expect((await sessionRow(s6.id)).status).toBe('ended');
   expect(await roundOf(s6.id)).toMatchObject({ status: 'open' });
+
+  await autoEndSessions(ctx);
+  expect(await sessionRow(s5.id)).toMatchObject({ status: 'ended', endedAt: ctx.now() });
+  expect(await roundOf(s5.id)).toMatchObject({ status: 'open' });
+  expect(errors).toHaveBeenCalledTimes(1);
 });
 
 // ---------------------------------------------------------------------------

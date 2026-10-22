@@ -4,14 +4,19 @@
  * `voteDurationHours` hoặc sớm hơn), tính người thắng và công bố kết quả; Sảnh tri
  * ân đọc kết quả theo ngày VN của buổi chơi.
  *
- * Discord không bao giờ chặn nghiệp vụ: đợt vote và các dòng `vote_messages` được
- * lưu trước, tin Discord đăng sau (đăng bù mỗi phút qua `publishPendingVoteMessages`
- * khi lần đầu lỗi). Không bao giờ gọi Discord với menu rỗng: không có người tham gia
- * thì không mở vote, tin chưa đăng mà hết ứng viên thì chờ.
+ * Discord không bao giờ chặn nghiệp vụ và mọi tin lỗi đều được đăng bù (spec §9):
+ * - Đợt vote và các dòng `vote_messages` được tạo trong giao dịch kết thúc buổi;
+ *   tin menu đăng sau, tin nào chưa có `discordMessageId` thì `vote-sync` đăng bù.
+ * - Đóng đợt ghi kết quả vào DB rồi mới gọi Discord; `announcePending` (đợt) và
+ *   `resultPending` (từng tin) chỉ tắt khi Discord đã nhận, nên thông báo và các tin
+ *   kết quả cũng được `vote-sync` đăng bù, dựng lại y nguyên từ DB.
+ * - Không bao giờ gọi Discord với menu rỗng: không có người tham gia thì không mở
+ *   vote, tin chưa đăng mà hết ứng viên thì chờ.
  *
  * Trạng thái DB là sự thật: `closeVoteRound` đổi `open → closed` có điều kiện trong
- * giao dịch rồi mới gọi Discord, nên hai bên đóng cùng lúc chỉ có một bên công bố;
- * lỗi Discord sau khi đã lưu chỉ được ghi log.
+ * giao dịch, nên hai bên đóng cùng lúc chỉ có một bên đi tiếp; mọi lời gọi Discord
+ * của module chạy nối đuôi nhau trong tiến trình và đọc lại cờ trước khi gửi, nên
+ * một tin không bao giờ đăng hai lần.
  */
 
 import { Prisma } from '@prisma/client';
@@ -34,36 +39,52 @@ const NO_VOTES = 'Không ai được vote';
 // ---------------------------------------------------------------------------
 
 /**
- * Mở đợt vote cho buổi với các hạng mục `categoryIds` (trùng được lọc). Trả về id đợt;
- * trả `null` — không tạo gì, không gọi Discord — khi không có hạng mục nào hoặc buổi
- * không có người tham gia còn trong server (Discord từ chối menu rỗng). Buổi đã có
- * đợt thì trả về đợt đó, không tạo thêm (kể cả khi hai bên mở cùng lúc).
+ * Tạo đợt vote cho buổi trong giao dịch `tx` với các hạng mục `categoryIds` (trùng
+ * được lọc): `opensAt = now`, `closesAt = now + voteDurationHours`, một dòng
+ * `vote_messages` mỗi hạng mục. Trả về id đợt; trả `null` — không tạo gì — khi không
+ * có hạng mục nào hoặc buổi không có người tham gia còn trong server (Discord từ chối
+ * menu rỗng). Buổi đã có đợt thì trả về đợt đó, không tạo thêm.
  *
- * `closesAt = now + voteDurationHours` (cài đặt). Đợt và các dòng `vote_messages`
- * được ghi trong một giao dịch, rồi đăng tin Discord; đăng lỗi thì bộ hẹn giờ đăng bù.
+ * `endSession` gọi hàm này trong cùng giao dịch với việc đổi trạng thái buổi, nên
+ * không bao giờ có buổi "đã kết thúc mà không có vote" vì lỗi giữa chừng.
  */
-export async function openVoteRound(ctx: Ctx, sessionId: number, categoryIds: number[]): Promise<number | null> {
-  const existing = await ctx.db.voteRound.findUnique({ where: { sessionId }, select: { id: true } });
+export async function createRoundTx(
+  tx: Prisma.TransactionClient,
+  sessionId: number,
+  categoryIds: number[],
+  now: Date,
+  voteDurationHours: number,
+): Promise<number | null> {
+  const existing = await tx.voteRound.findUnique({ where: { sessionId }, select: { id: true } });
   if (existing) return existing.id;
 
   const ids = [...new Set(categoryIds)];
   if (ids.length === 0) return null;
-  const nominees = await ctx.db.attendance.count({
+  const nominees = await tx.attendance.count({
     where: { sessionId, status: 'going', member: { status: 'active' } },
   });
   if (nominees === 0) return null;
 
+  const round = await tx.voteRound.create({
+    data: { sessionId, opensAt: now, closesAt: new Date(now.getTime() + voteDurationHours * HOUR_MS) },
+    select: { id: true },
+  });
+  await tx.voteMessage.createMany({ data: ids.map((categoryId) => ({ roundId: round.id, categoryId })) });
+  return round.id;
+}
+
+/**
+ * Mở đợt vote cho buổi (xem `createRoundTx`) trong giao dịch riêng, rồi đăng tin
+ * Discord; đăng lỗi thì bộ hẹn giờ đăng bù. Hai bên mở cùng lúc cho một buổi thì
+ * bên thua cuộc đua trả về đợt bên thắng vừa tạo.
+ */
+export async function openVoteRound(ctx: Ctx, sessionId: number, categoryIds: number[]): Promise<number | null> {
   const { voteDurationHours } = await getSettings(ctx);
   const now = ctx.now();
-  const closesAt = new Date(now.getTime() + voteDurationHours * HOUR_MS);
 
-  let roundId: number;
+  let roundId: number | null;
   try {
-    roundId = await ctx.db.$transaction(async (tx) => {
-      const round = await tx.voteRound.create({ data: { sessionId, opensAt: now, closesAt }, select: { id: true } });
-      await tx.voteMessage.createMany({ data: ids.map((categoryId) => ({ roundId: round.id, categoryId })) });
-      return round.id;
-    });
+    roundId = await ctx.db.$transaction((tx) => createRoundTx(tx, sessionId, categoryIds, now, voteDurationHours));
   } catch (err) {
     // Bên kia vừa mở đợt cho buổi này (sessionId là unique): dùng đợt của họ.
     if (!isUniqueViolation(err)) throw err;
@@ -72,8 +93,26 @@ export async function openVoteRound(ctx: Ctx, sessionId: number, categoryIds: nu
     return winner.id;
   }
 
-  await publishPendingVoteMessages(ctx);
+  if (roundId !== null) await publishPendingVoteMessages(ctx);
   return roundId;
+}
+
+// ---------------------------------------------------------------------------
+// Hàng đợi Discord trong tiến trình
+// ---------------------------------------------------------------------------
+
+/**
+ * Mọi lời gọi Discord của module (đăng menu, công bố kết quả, sửa tin) chạy nối đuôi
+ * nhau trong tiến trình (web + bot + bộ hẹn giờ chung một tiến trình): admin kết thúc
+ * / đóng sớm và `vote-sync` có thể trùng nhịp, mà mỗi lượt đều đọc lại cờ trong DB
+ * trước khi gửi, nên một tin không bao giờ đăng hai lần.
+ */
+let discordQueue: Promise<unknown> = Promise.resolve();
+
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = discordQueue.then(task);
+  discordQueue = run.catch(() => undefined);
+  return run;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,17 +124,10 @@ export async function openVoteRound(ctx: Ctx, sessionId: number, categoryIds: nu
  * giờ đóng (tin của đợt đã hết hạn không còn ý nghĩa). Ứng viên = người đang tham
  * gia còn trong server, theo thứ tự tham gia; không có ứng viên thì chưa đăng.
  * Mỗi tin độc lập: một tin lỗi được ghi log, các tin khác vẫn đăng. Không ném lỗi Discord.
- *
- * Các lời gọi trong tiến trình chạy nối đuôi nhau (admin kết thúc buổi và bộ hẹn giờ
- * có thể trùng nhịp) để một tin không bị đăng hai lần.
  */
 export function publishPendingVoteMessages(ctx: Ctx): Promise<void> {
-  const run = publishQueue.then(() => publishPendingNow(ctx));
-  publishQueue = run.catch(() => undefined);
-  return run;
+  return enqueue(() => publishPendingNow(ctx));
 }
-
-let publishQueue: Promise<void> = Promise.resolve();
 
 async function publishPendingNow(ctx: Ctx): Promise<void> {
   const now = ctx.now();
@@ -120,6 +152,10 @@ async function publishPendingNow(ctx: Ctx): Promise<void> {
         views.set(m.round.sessionId, view);
       }
       if (view.attendees.length === 0) continue; // Discord từ chối menu rỗng — chờ lượt sau.
+      // Đợt có thể vừa đóng (đóng sớm) sau truy vấn ở trên: kiểm tra lại ngay trước khi đăng
+      // để không treo thêm menu cho đợt đã đóng. Tin đã gửi đi mà đợt đóng đúng lúc đó vẫn
+      // được lưu id và sẽ được sửa thành kết quả nhờ cờ `resultPending`.
+      if (!(await isRoundOpen(ctx, m.roundId))) continue;
 
       const prompt: VotePrompt = {
         roundId: m.roundId,
@@ -141,6 +177,11 @@ async function publishPendingNow(ctx: Ctx): Promise<void> {
       );
     }
   }
+}
+
+async function isRoundOpen(ctx: Ctx, roundId: number): Promise<boolean> {
+  const round = await ctx.db.voteRound.findUnique({ where: { id: roundId }, select: { status: true, closesAt: true } });
+  return round?.status === 'open' && round.closesAt.getTime() > ctx.now().getTime();
 }
 
 /** `{chế độ} {HH:mm} {dd/MM}` giờ VN — nhãn buổi trên tin vote và thông báo kết quả. */
@@ -241,39 +282,28 @@ export function tallyWinners(nomineeIds: number[]): Winner[] {
     .sort((a, b) => b.voteCount - a.voteCount || a.memberId - b.memberId);
 }
 
-interface ClosedCategory {
-  name: string;
-  discordMessageId: string | null;
-  winners: { displayName: string; voteCount: number }[];
-}
-
 /**
- * Đóng đợt vote: trong một giao dịch đổi `open → closed` có điều kiện (đợt đã đóng
+ * Đóng đợt vote. Trong một giao dịch: đổi `open → closed` có điều kiện (đợt đã đóng
  * hoặc không có → không làm gì, kể cả khi hai bên đóng cùng lúc), tính người thắng
- * từng hạng mục của đợt và ghi `awards`. Sau đó công bố kết quả vào kênh thông báo
- * (một lần cho cả đợt) và sửa từng tin vote đã đăng thành kết quả. Lỗi Discord sau
- * khi đã lưu chỉ được ghi log — không ném, không hoàn tác.
+ * từng hạng mục của đợt và ghi `awards`, bật `announcePending` cho đợt và
+ * `resultPending` cho mọi tin của đợt. Sau khi lưu xong mới gọi Discord
+ * (`deliverRoundResults`); lỗi Discord chỉ ghi log — `vote-sync` đăng bù.
  */
 export async function closeVoteRound(ctx: Ctx, roundId: number): Promise<void> {
   const closed = await ctx.db.$transaction(async (tx) => {
     const { count } = await tx.voteRound.updateMany({
       where: { id: roundId, status: 'open' },
-      data: { status: 'closed' },
+      data: { status: 'closed', announcePending: true },
     });
-    if (count === 0) return null;
+    if (count === 0) return false;
 
     const round = await tx.voteRound.findUniqueOrThrow({
       where: { id: roundId },
       select: {
-        session: { select: { startsAt: true, mode: { select: { nameVi: true } } } },
-        messages: {
-          select: { categoryId: true, discordMessageId: true, category: { select: { name: true } } },
-          orderBy: [{ category: { sortOrder: 'asc' } }, { categoryId: 'asc' }],
-        },
+        messages: { select: { categoryId: true } },
         votes: { select: { categoryId: true, nomineeId: true } },
       },
     });
-
     const nomineesByCategory = new Map<number, number[]>();
     for (const v of round.votes) {
       const list = nomineesByCategory.get(v.categoryId) ?? [];
@@ -281,52 +311,85 @@ export async function closeVoteRound(ctx: Ctx, roundId: number): Promise<void> {
       nomineesByCategory.set(v.categoryId, list);
     }
     // Chỉ hạng mục có trong `vote_messages` của đợt mới có kết quả.
-    const tallied = round.messages.map((m) => ({
-      ...m,
-      winners: tallyWinners(nomineesByCategory.get(m.categoryId) ?? []),
-    }));
-
-    const awards = tallied.flatMap((c) =>
-      c.winners.map((w) => ({ roundId, categoryId: c.categoryId, memberId: w.memberId, voteCount: w.voteCount })),
+    const awards = round.messages.flatMap((m) =>
+      tallyWinners(nomineesByCategory.get(m.categoryId) ?? []).map((w) => ({
+        roundId,
+        categoryId: m.categoryId,
+        memberId: w.memberId,
+        voteCount: w.voteCount,
+      })),
     );
     if (awards.length > 0) await tx.award.createMany({ data: awards, skipDuplicates: true });
 
-    const names = await displayNames(tx, awards.map((a) => a.memberId));
-    const categories: ClosedCategory[] = tallied.map((c) => ({
-      name: c.category.name,
-      discordMessageId: c.discordMessageId,
-      winners: c.winners.map((w) => ({
-        displayName: names.get(w.memberId) ?? `#${w.memberId}`,
-        voteCount: w.voteCount,
-      })),
-    }));
-    const label = sessionLabel({ modeName: round.session.mode.nameVi, startsAt: round.session.startsAt });
-    return { label, categories };
+    // Mọi tin của đợt chờ được sửa thành kết quả — kể cả tin chưa có id: tin đang gửi
+    // đúng lúc này vẫn có thể nhận id ngay sau đây và sẽ được sửa ở lượt đăng bù.
+    await tx.voteMessage.updateMany({ where: { roundId }, data: { resultPending: true } });
+    return true;
   });
-  if (!closed) return;
 
-  try {
-    await ctx.notifier.announce(buildAnnouncement(closed.label, closed.categories));
-  } catch (err) {
-    console.error(`[mvp] Không công bố được kết quả đợt vote ${roundId}: ${messageOf(err)}`);
-  }
-  for (const c of closed.categories) {
-    if (!c.discordMessageId) continue; // Tin chưa từng đăng được (Discord sập lúc mở) — không có gì để sửa.
-    try {
-      await ctx.notifier.closeVote(c.discordMessageId, resultText(c.winners));
-    } catch (err) {
-      console.error(`[mvp] Không đóng được tin vote ${c.discordMessageId} của đợt ${roundId}: ${messageOf(err)}`);
-    }
-  }
+  if (closed) await enqueue(() => deliverRoundResults(ctx, roundId));
 }
 
-async function displayNames(tx: Prisma.TransactionClient, memberIds: number[]): Promise<Map<number, string>> {
-  if (memberIds.length === 0) return new Map();
-  const rows = await tx.member.findMany({
-    where: { id: { in: [...new Set(memberIds)] } },
-    select: { id: true, displayName: true },
+/**
+ * Đăng những gì Discord còn thiếu của một đợt đã đóng, dựng lại từ DB (`awards` +
+ * hạng mục, nên lần đăng bù giống y lần đầu): thông báo kết quả nếu `announcePending`,
+ * rồi sửa từng tin đã có id còn `resultPending`. Gửi thành công thì tắt cờ tương ứng;
+ * lỗi Discord chỉ ghi log để lượt sau thử lại, các tin khác vẫn được gửi.
+ */
+async function deliverRoundResults(ctx: Ctx, roundId: number): Promise<void> {
+  const round = await ctx.db.voteRound.findUnique({
+    where: { id: roundId },
+    select: {
+      status: true,
+      announcePending: true,
+      session: { select: { startsAt: true, mode: { select: { nameVi: true } } } },
+      messages: {
+        select: { categoryId: true, discordMessageId: true, resultPending: true, category: { select: { name: true } } },
+        orderBy: [{ category: { sortOrder: 'asc' } }, { categoryId: 'asc' }],
+      },
+      awards: {
+        select: { categoryId: true, voteCount: true, member: { select: { displayName: true } } },
+        orderBy: [{ voteCount: 'desc' }, { memberId: 'asc' }],
+      },
+    },
   });
-  return new Map(rows.map((r) => [r.id, r.displayName]));
+  if (round?.status !== 'closed') return;
+
+  const results = round.messages.map((m) => ({
+    ...m,
+    winners: round.awards
+      .filter((a) => a.categoryId === m.categoryId)
+      .map((a) => ({ displayName: a.member.displayName, voteCount: a.voteCount })),
+  }));
+
+  if (round.announcePending) {
+    const label = sessionLabel({ modeName: round.session.mode.nameVi, startsAt: round.session.startsAt });
+    let announced = false;
+    try {
+      await ctx.notifier.announce(buildAnnouncement(label, results));
+      announced = true;
+    } catch (err) {
+      console.error(`[mvp] Không công bố được kết quả đợt vote ${roundId}: ${messageOf(err)}`);
+    }
+    if (announced) await ctx.db.voteRound.updateMany({ where: { id: roundId }, data: { announcePending: false } });
+  }
+
+  for (const r of results) {
+    if (!r.discordMessageId || !r.resultPending) continue;
+    let edited = false;
+    try {
+      await ctx.notifier.closeVote(r.discordMessageId, resultText(r.winners));
+      edited = true;
+    } catch (err) {
+      console.error(`[mvp] Không đóng được tin vote ${r.discordMessageId} của đợt ${roundId}: ${messageOf(err)}`);
+    }
+    if (edited) {
+      await ctx.db.voteMessage.updateMany({
+        where: { roundId, categoryId: r.categoryId },
+        data: { resultPending: false },
+      });
+    }
+  }
 }
 
 /** `{tên1}, {tên2} ({n} phiếu)` — hoặc "Không ai được vote". */
@@ -337,10 +400,14 @@ function winnersText(winners: { displayName: string; voteCount: number }[]): str
 }
 
 /** Thông báo kết quả cả đợt vào kênh thông báo. */
-function buildAnnouncement(label: string, categories: ClosedCategory[]): string {
-  return [`🏆 Kết quả tri ân buổi ${label}`, ...categories.map((c) => `• ${c.name}: ${winnersText(c.winners)}`)].join(
-    '\n',
-  );
+function buildAnnouncement(
+  label: string,
+  categories: { category: { name: string }; winners: { displayName: string; voteCount: number }[] }[],
+): string {
+  return [
+    `🏆 Kết quả tri ân buổi ${label}`,
+    ...categories.map((c) => `• ${c.category.name}: ${winnersText(c.winners)}`),
+  ].join('\n');
 }
 
 /** Kết quả thay cho menu chọn trên từng tin vote. */
@@ -362,6 +429,35 @@ export async function closeDueRounds(ctx: Ctx): Promise<void> {
       console.error(`[mvp] Không đóng được đợt vote ${id}: ${messageOf(err)}`);
     }
   }
+}
+
+/**
+ * Đăng bù kết quả của các đợt đã đóng mà Discord còn thiếu: thông báo chưa đăng được
+ * (`announcePending`) hoặc tin đã có id nhưng chưa sửa thành kết quả (`resultPending`).
+ * Từng đợt một; một đợt lỗi được ghi log, các đợt khác vẫn chạy.
+ */
+export async function retryRoundResults(ctx: Ctx): Promise<void> {
+  const rounds = await ctx.db.voteRound.findMany({
+    where: {
+      status: 'closed',
+      OR: [{ announcePending: true }, { messages: { some: { resultPending: true, discordMessageId: { not: null } } } }],
+    },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+  for (const { id } of rounds) {
+    try {
+      await enqueue(() => deliverRoundResults(ctx, id));
+    } catch (err) {
+      console.error(`[mvp] Không đăng bù được kết quả đợt vote ${id}: ${messageOf(err)}`);
+    }
+  }
+}
+
+/** Việc `vote-sync` của bộ hẹn giờ: đăng bù menu vote còn thiếu, rồi đăng bù kết quả còn thiếu. */
+export async function syncVotes(ctx: Ctx): Promise<void> {
+  await publishPendingVoteMessages(ctx);
+  await retryRoundResults(ctx);
 }
 
 // ---------------------------------------------------------------------------

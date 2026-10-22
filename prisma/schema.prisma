@@ -205,6 +205,8 @@ model VoteRound {
   opensAt   DateTime    @default(now()) @map("opens_at") @db.Timestamptz(3)
   closesAt  DateTime    @map("closes_at") @db.Timestamptz(3)
   status    RoundStatus @default(open)
+  /// Đã đóng nhưng chưa đăng được kết quả vào kênh thông báo — bộ hẹn giờ đăng bù.
+  announcePending Boolean @default(false) @map("announce_pending")
 
   session  GameSession   @relation(fields: [sessionId], references: [id])
   messages VoteMessage[]
@@ -219,6 +221,8 @@ model VoteMessage {
   roundId          Int     @map("round_id")
   categoryId       Int     @map("category_id")
   discordMessageId String? @map("discord_message_id")
+  /// Đợt đã đóng nhưng tin này chưa được sửa thành kết quả — bộ hẹn giờ sửa bù.
+  resultPending    Boolean @default(false) @map("result_pending")
 
   round    VoteRound     @relation(fields: [roundId], references: [id])
   category AwardCategory @relation(fields: [categoryId], references: [id])
