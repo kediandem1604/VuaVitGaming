@@ -128,19 +128,47 @@ export async function syncGuildMembers(
 }
 
 /**
- * Chuyển mọi thành viên `active` khớp `where` sang `left` (leftAt = bây giờ) và xoá
- * phiên web của họ, trong một giao dịch, bằng truy vấn theo tập hợp (không lặp từng
- * người). Người đã `left` giữ nguyên mốc rời cũ. Trả về số người vừa chuyển.
+ * Chuyển mọi thành viên `active` khớp `where` sang `left` (leftAt = bây giờ), xoá
+ * phiên web của họ và trả chỗ họ đang giữ ở các buổi chưa diễn ra, trong một giao
+ * dịch, bằng truy vấn theo tập hợp (không lặp từng người). Người đã `left` giữ nguyên
+ * mốc rời cũ và không bị đụng tới. Trả về số người vừa chuyển.
  */
 async function markLeft(ctx: Ctx, where: Prisma.MemberWhereInput): Promise<number> {
-  const [, updated] = await ctx.db.$transaction([
-    ctx.db.webSession.deleteMany({ where: { member: where } }),
-    ctx.db.member.updateMany({
-      where: { ...where, status: 'active' },
-      data: { status: 'left', leftAt: ctx.now() },
-    }),
-  ]);
-  return updated.count;
+  return ctx.db.$transaction(async (tx) => {
+    const now = ctx.now();
+    await tx.webSession.deleteMany({ where: { member: where } });
+
+    const leaving = await tx.member.findMany({ where: { ...where, status: 'active' }, select: { id: true } });
+    if (leaving.length === 0) return 0;
+    const memberIds = leaving.map((m) => m.id);
+
+    const { count } = await tx.member.updateMany({
+      where: { id: { in: memberIds }, status: 'active' },
+      data: { status: 'left', leftAt: now },
+    });
+    await releaseSeats(tx, memberIds, now);
+    return count;
+  });
+}
+
+/**
+ * Huỷ chỗ `going` của những người này ở các buổi còn `scheduled` (buổi đã kết thúc giữ
+ * nguyên lịch sử) và đánh dấu `discordDirty` để bộ hẹn giờ sửa lại tin Discord — module
+ * thành viên không gọi Discord. Quay lại server không trả lại chỗ.
+ */
+async function releaseSeats(tx: Prisma.TransactionClient, memberIds: number[], now: Date): Promise<void> {
+  const seats = await tx.attendance.findMany({
+    where: { memberId: { in: memberIds }, status: 'going', session: { status: 'scheduled' } },
+    select: { sessionId: true },
+  });
+  if (seats.length === 0) return;
+  const sessionIds = [...new Set(seats.map((s) => s.sessionId))];
+
+  await tx.attendance.updateMany({
+    where: { memberId: { in: memberIds }, sessionId: { in: sessionIds }, status: 'going' },
+    data: { status: 'cancelled', updatedAt: now },
+  });
+  await tx.gameSession.updateMany({ where: { id: { in: sessionIds } }, data: { discordDirty: true } });
 }
 
 // ---------------------------------------------------------------------------

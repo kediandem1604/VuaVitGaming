@@ -14,7 +14,7 @@ import {
 import type { GuildMemberInfo } from '../../src/server/ports.js';
 import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
-import { createMember } from '../helpers/factories.js';
+import { createMember, createSession } from '../helpers/factories.js';
 
 beforeEach(resetDb);
 
@@ -242,6 +242,99 @@ test('sync with an empty list marks everyone left', async () => {
   await upsertMemberFromGuild(ctx, info('2'));
   expect(await syncGuildMembers(ctx, [])).toEqual({ created: 0, left: 2 });
   expect(await testDb.member.count({ where: { status: 'active' } })).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// Rời server → trả chỗ ở các buổi chưa diễn ra
+// ---------------------------------------------------------------------------
+
+const JOINED_AT = new Date('2026-10-22T11:00:00Z');
+const attendance = (sessionId: number, memberId: number) =>
+  testDb.attendance.findUniqueOrThrow({ where: { sessionId_memberId: { sessionId, memberId } } });
+const sessionRow = (id: number) => testDb.gameSession.findUniqueOrThrow({ where: { id } });
+
+/**
+ * B đang `going` ở một buổi `scheduled` và một buổi `ended`, đã rời một buổi `scheduled`
+ * khác; A đang `going` cùng buổi với B. Trả về các id để test kiểm tra sau khi B rời server.
+ */
+async function seatsFixture(ctx: ReturnType<typeof makeTestCtx>['ctx']) {
+  const a = (await upsertMemberFromGuild(ctx, info('a'))).member;
+  const b = (await upsertMemberFromGuild(ctx, info('b'))).member;
+  const scheduled = await createSession(testDb);
+  const ended = await createSession(testDb, { status: 'ended', endedAt: ctx.now() });
+  const alreadyLeft = await createSession(testDb, { startsAt: new Date('2026-10-23T14:00:00Z') });
+  await testDb.attendance.createMany({
+    data: [
+      { sessionId: scheduled.id, memberId: a.id, status: 'going', updatedAt: JOINED_AT },
+      { sessionId: scheduled.id, memberId: b.id, status: 'going', updatedAt: JOINED_AT },
+      { sessionId: ended.id, memberId: b.id, status: 'going', updatedAt: JOINED_AT },
+      { sessionId: alreadyLeft.id, memberId: b.id, status: 'cancelled', updatedAt: JOINED_AT },
+    ],
+  });
+  return { a, b, scheduled, ended, alreadyLeft };
+}
+
+async function expectSeatsReleased(f: Awaited<ReturnType<typeof seatsFixture>>, leftAt: Date): Promise<void> {
+  // Buổi chưa diễn ra: chỗ của B bị huỷ đúng mốc đồng hồ test; buổi cần sửa lại tin Discord.
+  expect(await attendance(f.scheduled.id, f.b.id)).toMatchObject({ status: 'cancelled', updatedAt: leftAt });
+  expect((await sessionRow(f.scheduled.id)).discordDirty).toBe(true);
+  // Buổi đã kết thúc: lịch sử tham gia giữ nguyên, không đánh dấu gì.
+  expect(await attendance(f.ended.id, f.b.id)).toMatchObject({ status: 'going', updatedAt: JOINED_AT });
+  expect((await sessionRow(f.ended.id)).discordDirty).toBe(false);
+  // Buổi B đã tự rời trước đó: không đụng tới, không bị đánh dấu.
+  expect(await attendance(f.alreadyLeft.id, f.b.id)).toMatchObject({ status: 'cancelled', updatedAt: JOINED_AT });
+  expect((await sessionRow(f.alreadyLeft.id)).discordDirty).toBe(false);
+  // Người khác trong cùng buổi không bị ảnh hưởng.
+  expect(await attendance(f.scheduled.id, f.a.id)).toMatchObject({ status: 'going', updatedAt: JOINED_AT });
+}
+
+test('markMemberLeft releases the seats of the leaving member in scheduled sessions only', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  const f = await seatsFixture(ctx);
+
+  setNow('2026-10-22T13:00:00Z');
+  await markMemberLeft(ctx, 'b');
+  await expectSeatsReleased(f, new Date('2026-10-22T13:00:00Z'));
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: f.b.id } })).status).toBe('left');
+
+  // Quay lại server: chỗ KHÔNG được trả lại, mốc huỷ giữ nguyên.
+  setNow('2026-10-22T14:00:00Z');
+  expect((await upsertMemberFromGuild(ctx, info('b'))).reactivated).toBe(true);
+  expect(await attendance(f.scheduled.id, f.b.id)).toMatchObject({
+    status: 'cancelled',
+    updatedAt: new Date('2026-10-22T13:00:00Z'),
+  });
+});
+
+test('markMemberLeft on an already-left member touches no attendance', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  // Dòng `going` còn sót của người đã rời (vd do đua với lúc bấm Tham gia): không phải việc của lần rời lại.
+  const l = (await upsertMemberFromGuild(ctx, info('l'))).member;
+  const s = await createSession(testDb);
+  await testDb.attendance.create({ data: { sessionId: s.id, memberId: l.id, status: 'going', updatedAt: JOINED_AT } });
+  await testDb.member.update({ where: { id: l.id }, data: { status: 'left', leftAt: JOINED_AT } });
+
+  setNow('2026-10-22T13:00:00Z');
+  await markMemberLeft(ctx, 'l');
+  expect(await attendance(s.id, l.id)).toMatchObject({ status: 'going', updatedAt: JOINED_AT });
+  expect((await sessionRow(s.id)).discordDirty).toBe(false);
+});
+
+test('syncGuildMembers releases the seats of members missing from the guild', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  const f = await seatsFixture(ctx);
+
+  setNow('2026-10-22T13:00:00Z');
+  expect(await syncGuildMembers(ctx, [info('a')])).toEqual({ created: 0, left: 1 });
+  await expectSeatsReleased(f, new Date('2026-10-22T13:00:00Z'));
+
+  // Chạy lại khi B đã rời: không đổi gì thêm (mốc huỷ giữ nguyên).
+  setNow('2026-10-22T14:00:00Z');
+  expect(await syncGuildMembers(ctx, [info('a')])).toEqual({ created: 0, left: 0 });
+  expect(await attendance(f.scheduled.id, f.b.id)).toMatchObject({
+    status: 'cancelled',
+    updatedAt: new Date('2026-10-22T13:00:00Z'),
+  });
 });
 
 // ---------------------------------------------------------------------------

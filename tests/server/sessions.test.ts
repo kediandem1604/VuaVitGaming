@@ -7,6 +7,8 @@ import {
   setAttendance,
   syncSessionMessage,
 } from '../../src/server/modules/sessions/service.js';
+import { markMemberLeft, upsertMemberFromGuild } from '../../src/server/modules/members/service.js';
+import type { GuildMemberInfo } from '../../src/server/ports.js';
 import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
 import { createMember, createSession as insertSession } from '../helpers/factories.js';
@@ -302,7 +304,47 @@ test('concurrent joins never exceed capacity', async () => {
   expect((await getSessionView(ctx, s.id)).attendees).toHaveLength(3);
 });
 
-test('members who left the server neither count toward capacity nor appear as attendees', async () => {
+const guildInfo = (discordId: string, displayName: string): GuildMemberInfo => ({
+  discordId,
+  displayName,
+  avatarUrl: null,
+  roleIds: [],
+});
+
+test('leaving the server frees the seat, and rejoining does not take it back', async () => {
+  const { ctx, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id, capacity: 2 });
+  const a = await createMember(testDb, { displayName: 'A' });
+  const b = (await upsertMemberFromGuild(ctx, guildInfo('dB', 'B'))).member;
+  const c = await createMember(testDb, { displayName: 'C' });
+
+  await setAttendance(ctx, s.id, a.id, true);
+  await setAttendance(ctx, s.id, b.id, true);
+
+  // B rời server: chỗ của B bị huỷ ngay, buổi chờ bộ hẹn giờ sửa lại tin Discord.
+  await markMemberLeft(ctx, 'dB');
+  expect(await attendanceRow(s.id, b.id)).toMatchObject({ status: 'cancelled', updatedAt: ctx.now() });
+  expect((await sessionRow(s.id)).discordDirty).toBe(true);
+  expect((await getSessionView(ctx, s.id)).attendees).toEqual([{ memberId: a.id, displayName: 'A' }]);
+  expect(await goingCount(s.id)).toBe(1);
+
+  // C lấy chỗ vừa trống.
+  const v = await setAttendance(ctx, s.id, c.id, true);
+  expect(v.attendees).toEqual([
+    { memberId: a.id, displayName: 'A' },
+    { memberId: c.id, displayName: 'C' },
+  ]);
+
+  // B quay lại server: không tự có lại chỗ; bấm Tham gia thì buổi đã đủ người.
+  expect((await upsertMemberFromGuild(ctx, guildInfo('dB', 'B'))).reactivated).toBe(true);
+  expect(await goingCount(s.id)).toBe(2);
+  expect((await getSessionView(ctx, s.id)).attendees.map((x) => x.memberId)).toEqual([a.id, c.id]);
+  await expect(setAttendance(ctx, s.id, b.id, true)).rejects.toMatchObject({ code: 'SESSION_FULL' });
+  expect(await goingCount(s.id)).toBe(2);
+  expect((await attendanceRow(s.id, b.id)).status).toBe('cancelled');
+});
+
+test('a stale going row of a left member neither counts toward capacity nor appears as an attendee', async () => {
   const { ctx, admin, classic } = await setup();
   const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id, capacity: 2 });
   const a = await createMember(testDb, { displayName: 'A' });
@@ -311,19 +353,21 @@ test('members who left the server neither count toward capacity nor appear as at
 
   await setAttendance(ctx, s.id, a.id, true);
   await setAttendance(ctx, s.id, b.id, true);
+  // Đổi thẳng trạng thái trong DB, không qua module thành viên — mô phỏng dòng `going`
+  // còn sót (vd đua giữa lúc rời server và lúc bấm Tham gia). Lớp phòng thủ thứ hai.
   await testDb.member.update({ where: { id: b.id }, data: { status: 'left', leftAt: ctx.now() } });
+  expect((await attendanceRow(s.id, b.id)).status).toBe('going');
 
   expect((await getSessionView(ctx, s.id)).attendees).toEqual([{ memberId: a.id, displayName: 'A' }]);
 
-  // Chỗ của B được tính là trống nên C vào được; dòng của B vẫn còn trong DB.
+  // Dòng sót không chiếm chỗ: C vẫn vào được.
   const v = await setAttendance(ctx, s.id, c.id, true);
   expect(v.attendees).toEqual([
     { memberId: a.id, displayName: 'A' },
     { memberId: c.id, displayName: 'C' },
   ]);
-  expect(await goingCount(s.id)).toBe(3);
 
-  // Người đã rời server không được bấm nữa.
+  // Người đã rời server (hoặc không tồn tại) không được bấm.
   await expect(setAttendance(ctx, s.id, b.id, false)).rejects.toMatchObject({ code: 'FORBIDDEN' });
   await expect(setAttendance(ctx, s.id, 999, true)).rejects.toMatchObject({ code: 'FORBIDDEN' });
 });
