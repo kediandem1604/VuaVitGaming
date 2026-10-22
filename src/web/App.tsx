@@ -43,7 +43,15 @@ export function App() {
 function Shell() {
   const me = useMe();
 
-  if (me.isPending) return <FullScreenNotice>Đang tải…</FullScreenNotice>;
+  // Có dữ liệu là giữ khung trang: một lần tải lại ngầm thất bại (TanStack vẫn
+  // giữ `data` khi refetch lỗi) không được xoá cả trang và form người dùng đang gõ.
+  if (me.data) {
+    return (
+      <Layout me={me.data}>
+        <Outlet context={me.data} />
+      </Layout>
+    );
+  }
 
   if (me.isError) {
     if (me.error instanceof ApiError && me.error.status === 401) {
@@ -59,11 +67,7 @@ function Shell() {
     );
   }
 
-  return (
-    <Layout me={me.data}>
-      <Outlet context={me.data} />
-    </Layout>
-  );
+  return <FullScreenNotice>Đang tải…</FullScreenNotice>;
 }
 
 /** Chỉ mod/admin; thành viên thường thấy thông báo không có quyền. */
