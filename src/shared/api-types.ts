@@ -124,6 +124,26 @@ export interface EndOptionDto {
   preselected: boolean;
 }
 
+/** Trạng thái một lần khai điểm: chờ duyệt, đã duyệt, bị từ chối. */
+export type ReportStatus = 'pending' | 'approved' | 'rejected';
+
+/**
+ * Một lần khai điểm (lịch sử của tôi, hàng chờ duyệt). `playedOn` dạng `YYYY-MM-DD`
+ * (ngày VN), `createdAt` ISO 8601 (UTC). `rejectReason` chỉ có khi `status = 'rejected'`.
+ */
+export interface ReportDto {
+  id: number;
+  member: { id: number; displayName: string };
+  role: { id: number; nameVi: string; icon: string; metricLabel: string };
+  value: number;
+  playedOn: string;
+  sessionId: number | null;
+  note: string | null;
+  status: ReportStatus;
+  rejectReason: string | null;
+  createdAt: string;
+}
+
 /** Thân phản hồi của mọi lỗi API. */
 export interface ApiErrorBody {
   error: { code: string; message: string };
