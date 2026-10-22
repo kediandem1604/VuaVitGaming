@@ -1,0 +1,355 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum AccessLevel {
+  member
+  mod
+  admin
+}
+
+enum MemberStatus {
+  active
+  left
+}
+
+enum SessionStatus {
+  scheduled
+  ended
+  cancelled
+}
+
+enum AttendanceStatus {
+  going
+  cancelled
+}
+
+enum ReminderKind {
+  pre15
+  start
+}
+
+enum Channel {
+  email
+  dm
+}
+
+enum CategoryScope {
+  always
+  mode
+  optional
+}
+
+enum RoundStatus {
+  open
+  closed
+}
+
+enum Faction {
+  goose
+  duck
+  neutral
+}
+
+enum ReportStatus {
+  pending
+  approved
+  rejected
+}
+
+// ---------------------------------------------------------------------------
+// Thành viên và đăng nhập
+// ---------------------------------------------------------------------------
+
+model Member {
+  id          Int          @id @default(autoincrement())
+  discordId   String       @unique @map("discord_id")
+  memberCode  String       @unique @map("member_code")
+  displayName String       @map("display_name")
+  avatarUrl   String?      @map("avatar_url")
+  email       String?
+  notifyEmail Boolean      @default(true) @map("notify_email")
+  notifyDm    Boolean      @default(true) @map("notify_dm")
+  accessLevel AccessLevel  @default(member) @map("access_level")
+  status      MemberStatus @default(active)
+  joinedAt    DateTime     @default(now()) @map("joined_at") @db.Timestamptz(3)
+  leftAt      DateTime?    @map("left_at") @db.Timestamptz(3)
+
+  webSessions     WebSession[]
+  createdSessions GameSession[]     @relation("SessionCreator")
+  attendances     Attendance[]
+  notifications   NotificationLog[]
+  votesCast       Vote[]            @relation("VoteVoter")
+  votesReceived   Vote[]            @relation("VoteNominee")
+  awards          Award[]
+  statReports     StatReport[]      @relation("ReportMember")
+  reviewedReports StatReport[]      @relation("ReportReviewer")
+  roleTitles      RoleTitle[]
+
+  @@map("members")
+}
+
+model WebSession {
+  id        String   @id @default(uuid())
+  memberId  Int      @map("member_id")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@map("web_sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Buổi chơi, điểm danh, nhắc giờ
+// ---------------------------------------------------------------------------
+
+model GameMode {
+  id     Int     @id @default(autoincrement())
+  key    String  @unique
+  nameVi String  @map("name_vi")
+  nameEn String  @map("name_en")
+  active Boolean @default(true)
+
+  sessions        GameSession[]
+  roles           Role[]
+  awardCategories AwardCategory[]
+
+  @@map("game_modes")
+}
+
+model GameSession {
+  id               Int           @id @default(autoincrement())
+  startsAt         DateTime      @map("starts_at") @db.Timestamptz(3)
+  modeId           Int           @map("mode_id")
+  capacity         Int           @default(16)
+  roomCode         String?       @map("room_code")
+  note             String?
+  status           SessionStatus @default(scheduled)
+  discordMessageId String?       @map("discord_message_id")
+  discordDirty     Boolean       @default(false) @map("discord_dirty")
+  createdById      Int           @map("created_by")
+  endedAt          DateTime?     @map("ended_at") @db.Timestamptz(3)
+
+  mode          GameMode          @relation(fields: [modeId], references: [id])
+  createdBy     Member            @relation("SessionCreator", fields: [createdById], references: [id])
+  attendances   Attendance[]
+  notifications NotificationLog[]
+  voteRound     VoteRound?
+  statReports   StatReport[]
+
+  @@index([startsAt])
+  @@map("game_sessions")
+}
+
+model Attendance {
+  sessionId Int              @map("session_id")
+  memberId  Int              @map("member_id")
+  status    AttendanceStatus @default(going)
+  updatedAt DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  session GameSession @relation(fields: [sessionId], references: [id])
+  member  Member      @relation(fields: [memberId], references: [id])
+
+  @@id([sessionId, memberId])
+  @@map("attendances")
+}
+
+model NotificationLog {
+  sessionId Int          @map("session_id")
+  memberId  Int          @map("member_id")
+  kind      ReminderKind
+  channel   Channel
+  sentAt    DateTime     @default(now()) @map("sent_at") @db.Timestamptz(3)
+  error     String?
+
+  session GameSession @relation(fields: [sessionId], references: [id])
+  member  Member      @relation(fields: [memberId], references: [id])
+
+  @@id([sessionId, memberId, kind, channel])
+  @@map("notification_log")
+}
+
+// ---------------------------------------------------------------------------
+// MVP / Sảnh tri ân
+// ---------------------------------------------------------------------------
+
+model AwardCategory {
+  id          Int           @id @default(autoincrement())
+  scope       CategoryScope
+  modeId      Int?          @map("mode_id")
+  name        String
+  description String?
+  active      Boolean       @default(true)
+  sortOrder   Int           @map("sort_order")
+
+  mode         GameMode?     @relation(fields: [modeId], references: [id])
+  voteMessages VoteMessage[]
+  votes        Vote[]
+  awards       Award[]
+
+  @@map("award_categories")
+}
+
+model VoteRound {
+  id        Int         @id @default(autoincrement())
+  sessionId Int         @unique @map("session_id")
+  opensAt   DateTime    @default(now()) @map("opens_at") @db.Timestamptz(3)
+  closesAt  DateTime    @map("closes_at") @db.Timestamptz(3)
+  status    RoundStatus @default(open)
+
+  session  GameSession   @relation(fields: [sessionId], references: [id])
+  messages VoteMessage[]
+  votes    Vote[]
+  awards   Award[]
+
+  @@index([status, closesAt])
+  @@map("vote_rounds")
+}
+
+model VoteMessage {
+  roundId          Int     @map("round_id")
+  categoryId       Int     @map("category_id")
+  discordMessageId String? @map("discord_message_id")
+
+  round    VoteRound     @relation(fields: [roundId], references: [id])
+  category AwardCategory @relation(fields: [categoryId], references: [id])
+
+  @@id([roundId, categoryId])
+  @@map("vote_messages")
+}
+
+model Vote {
+  roundId    Int      @map("round_id")
+  categoryId Int      @map("category_id")
+  voterId    Int      @map("voter_id")
+  nomineeId  Int      @map("nominee_id")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  round    VoteRound     @relation(fields: [roundId], references: [id])
+  category AwardCategory @relation(fields: [categoryId], references: [id])
+  voter    Member        @relation("VoteVoter", fields: [voterId], references: [id])
+  nominee  Member        @relation("VoteNominee", fields: [nomineeId], references: [id])
+
+  @@id([roundId, categoryId, voterId])
+  @@map("votes")
+}
+
+model Award {
+  roundId    Int @map("round_id")
+  categoryId Int @map("category_id")
+  memberId   Int @map("member_id")
+  voteCount  Int @map("vote_count")
+
+  round    VoteRound     @relation(fields: [roundId], references: [id])
+  category AwardCategory @relation(fields: [categoryId], references: [id])
+  member   Member        @relation(fields: [memberId], references: [id])
+
+  @@id([roundId, categoryId, memberId])
+  @@map("awards")
+}
+
+// ---------------------------------------------------------------------------
+// Role, điểm, mùa giải
+// ---------------------------------------------------------------------------
+
+model Role {
+  id          Int     @id @default(autoincrement())
+  key         String  @unique
+  faction     Faction
+  nameEn      String  @map("name_en")
+  nameVi      String  @map("name_vi")
+  description String
+  metricLabel String  @map("metric_label")
+  maxPerGame  Int     @map("max_per_game")
+  mapNote     String? @map("map_note")
+  modeId      Int?    @map("mode_id")
+  icon        String
+  image       Bytes?
+  imageMime   String? @map("image_mime")
+  active      Boolean @default(true)
+  sortOrder   Int     @map("sort_order")
+
+  mode        GameMode?    @relation(fields: [modeId], references: [id])
+  statReports StatReport[]
+  roleTitles  RoleTitle[]
+
+  @@map("roles")
+}
+
+model StatReport {
+  id           Int          @id @default(autoincrement())
+  memberId     Int          @map("member_id")
+  roleId       Int          @map("role_id")
+  sessionId    Int?         @map("session_id")
+  playedOn     DateTime     @map("played_on") @db.Date
+  value        Int
+  note         String?
+  status       ReportStatus @default(pending)
+  reviewedById Int?         @map("reviewed_by")
+  reviewedAt   DateTime?    @map("reviewed_at") @db.Timestamptz(3)
+  rejectReason String?      @map("reject_reason")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  member     Member       @relation("ReportMember", fields: [memberId], references: [id])
+  role       Role         @relation(fields: [roleId], references: [id])
+  session    GameSession? @relation(fields: [sessionId], references: [id])
+  reviewedBy Member?      @relation("ReportReviewer", fields: [reviewedById], references: [id])
+
+  @@index([roleId, status, playedOn])
+  @@index([memberId, createdAt])
+  @@map("stat_reports")
+}
+
+model Season {
+  id             String    @id // YYYY-MM
+  startsAt       DateTime  @map("starts_at") @db.Timestamptz(3)
+  endsAt         DateTime  @map("ends_at") @db.Timestamptz(3)
+  closedAt       DateTime? @map("closed_at") @db.Timestamptz(3)
+  reviewNudgedAt DateTime? @map("review_nudged_at") @db.Timestamptz(3)
+
+  roleTitles RoleTitle[]
+
+  @@map("seasons")
+}
+
+model RoleTitle {
+  seasonId String @map("season_id")
+  roleId   Int    @map("role_id")
+  memberId Int    @map("member_id")
+  score    Int
+
+  season Season @relation(fields: [seasonId], references: [id])
+  role   Role   @relation(fields: [roleId], references: [id])
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@id([seasonId, roleId])
+  @@map("role_titles")
+}
+
+// ---------------------------------------------------------------------------
+// Cài đặt và bộ hẹn giờ
+// ---------------------------------------------------------------------------
+
+model AppSetting {
+  key   String @id
+  value String
+
+  @@map("app_settings")
+}
+
+model SchedulerLease {
+  id        Int      @id
+  holder    String
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@map("scheduler_lease")
+}

@@ -10,6 +10,8 @@ export default defineConfig({
           environment: 'node',
           include: ['tests/server/**/*.test.ts'],
           fileParallelism: false,
+          globalSetup: ['tests/helpers/global-setup.ts'],
+          setupFiles: ['tests/helpers/setup.ts'],
         },
       },
       {
