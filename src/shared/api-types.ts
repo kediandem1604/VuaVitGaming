@@ -144,6 +144,50 @@ export interface ReportDto {
   createdAt: string;
 }
 
+/**
+ * Một dòng bảng xếp hạng của một role trong một mùa. Hạng 1..n liên tiếp (không đồng
+ * hạng); `lastApprovedAt` ISO 8601 (UTC) là lần duyệt gần nhất của người đó ở role này
+ * trong mùa — mốc dùng để phân hoà điểm (ai đạt mức điểm đó trước xếp trên).
+ */
+export interface LeaderboardRowDto {
+  rank: number;
+  memberId: number;
+  displayName: string;
+  avatarUrl: string | null;
+  score: number;
+  games: number;
+  lastApprovedAt: string;
+}
+
+/** Người đang hoá thân một role trong Đại sảnh (top 1 của mùa, điểm > 0). */
+export interface HallHolderDto {
+  memberId: number;
+  displayName: string;
+  score: number;
+}
+
+/** Người giữ role ở mùa đã chốt gần nhất trước đó — chỉ có khi mùa đang xem chưa ai hoá thân. */
+export interface HallPreviousDto extends HallHolderDto {
+  seasonId: string;
+}
+
+export interface HallRoleDto {
+  role: RoleDto;
+  holder: HallHolderDto | null;
+  previous: HallPreviousDto | null;
+}
+
+/**
+ * Đại sảnh hoá thân một mùa (`seasonId` dạng `YYYY-MM`): mọi role đang bật theo thứ tự
+ * danh mục. Mùa đã chốt (`closed`) lấy người giữ từ kết quả chốt; mùa đang mở tính trực
+ * tiếp từ lần khai đã duyệt. (Khác với `HallOfDayDto` — Sảnh tri ân theo buổi chơi.)
+ */
+export interface HallDto {
+  seasonId: string;
+  closed: boolean;
+  roles: HallRoleDto[];
+}
+
 /** Thân phản hồi của mọi lỗi API. */
 export interface ApiErrorBody {
   error: { code: string; message: string };

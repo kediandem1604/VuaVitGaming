@@ -314,9 +314,10 @@ test('review rules', async () => {
   await reviewReport(ctx, asReviewer(a), ownReportOfMod.id, { approve: true });
   expect(await reportRow(ownReportOfMod.id)).toMatchObject({ status: 'approved', reviewedById: a.id });
 
-  // Duyệt không gửi gì (thông báo hoá thân là việc của Task 16).
+  // Duyệt không DM ai. Lần duyệt đầu đưa Admin lên hoá thân Vịt → một thông báo; hai lần sau
+  // cùng 3 điểm nhưng đạt muộn hơn nên Admin vẫn giữ (chi tiết ở leaderboard.test.ts).
   expect(notifier.dms).toEqual([]);
-  expect(notifier.announcements).toEqual([]);
+  expect(notifier.announcements).toEqual(['👑 Admin đã hoá thân Vịt mùa 2026-10!']);
 });
 
 test('rejection DMs reporter with reason', async () => {

@@ -11,9 +11,11 @@
  *
  * Duyệt: mod không tự duyệt lần khai của mình (admin thì được — server chỉ có một
  * admin vẫn chạy); đổi trạng thái `pending → approved/rejected` là một cập nhật có
- * điều kiện, nên hai mod duyệt cùng lúc chỉ một người thành công. DM từ chối gửi sau
- * khi đã lưu; lỗi DM chỉ ghi log. Sau khi duyệt chưa làm gì thêm — Task 16 nối thông
- * báo đổi người hoá thân vào `afterApprove`.
+ * điều kiện trên đúng trạng thái VÀ đúng role/ngày/giá trị mod đã xem, nên hai mod duyệt
+ * cùng lúc chỉ một người thành công, và người khai sửa đúng lúc mod bấm duyệt thì mod
+ * được báo xem lại chứ không duyệt nhầm nội dung mới. DM từ chối gửi sau khi đã lưu;
+ * lỗi DM chỉ ghi log. Sau khi duyệt: so top 1 của (role, mùa của ngày chơi) trước và sau
+ * — đổi người thì đăng "👑 … đã hoá thân …" (`leaderboard.ts`; lỗi Discord chỉ ghi log).
  *
  * Giới hạn 30 lần/ngày là đếm-rồi-ghi (không khoá): hai lần khai cùng một mili giây có
  * thể lọt thành 31 — chấp nhận được cho một giới hạn chống spam.
@@ -34,6 +36,8 @@ import {
   vnDayRange,
 } from '../../lib/time.js';
 import { ensureSeason, isSeasonClosed } from '../seasons/service.js';
+import { announceHolderChange, getRoleLeader } from './leaderboard.js';
+import type { LeaderboardRow } from './leaderboard.js';
 
 /** Số lần khai tối đa của một người trong một ngày VN. */
 export const MAX_REPORTS_PER_DAY = 30;
@@ -258,8 +262,10 @@ type ReviewableReport = Prisma.StatReportGetPayload<{
  * ngoài tầng web); lần khai phải có (`NOT_FOUND`) và còn `pending` (`NOT_PENDING`);
  * mod không tự duyệt (`SELF_REVIEW`); từ chối phải có lý do sau khi cắt khoảng trắng
  * (`REASON_REQUIRED`), tối đa 200 ký tự (`VALIDATION`); mùa của ngày chơi chưa chốt
- * (`SEASON_CLOSED`). Đổi trạng thái có điều kiện `status = 'pending'` nên hai người
- * duyệt cùng lúc chỉ một người thành công, người kia nhận `NOT_PENDING`.
+ * (`SEASON_CLOSED`). Đổi trạng thái có điều kiện `status = 'pending'` và đúng
+ * role/ngày/giá trị đã đọc: hai người duyệt cùng lúc chỉ một người thành công, người kia
+ * nhận `NOT_PENDING`; người khai sửa chen vào giữa lúc đọc và ghi → `NOT_PENDING` với
+ * lời nhắn xem lại (lần khai vẫn chờ duyệt).
  * Sau khi lưu: từ chối → DM người khai (lỗi chỉ ghi log); duyệt → `afterApprove`.
  */
 export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: number, decision: ReviewDecision): Promise<void> {
@@ -283,10 +289,17 @@ export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
     if (reason.length > REASON_MAX) throw appError('VALIDATION', 'Lý do từ chối tối đa 200 ký tự');
   }
 
-  if (await isSeasonClosed(ctx, seasonIdOf(dbToDateOnly(report.playedOn)))) throw appError('SEASON_CLOSED');
+  const seasonId = seasonIdOf(dbToDateOnly(report.playedOn));
+  if (await isSeasonClosed(ctx, seasonId)) throw appError('SEASON_CLOSED');
+
+  // Top 1 của (role, mùa) TRƯỚC khi duyệt — so với sau khi duyệt để biết có đổi người hoá thân.
+  const leaderBefore = d.approve ? await getRoleLeader(ctx, report.roleId, seasonId) : null;
 
   const { count } = await ctx.db.statReport.updateMany({
-    where: { id: reportId, status: 'pending' },
+    // Khoá lạc quan: chỉ ghi khi lần khai vẫn chờ duyệt và vẫn đúng role/ngày/giá trị mod
+    // đã xem — người khai sửa chen vào thì không duyệt nhầm nội dung mới, và `leaderBefore`
+    // ở trên luôn đúng với role/mùa thực sự được duyệt.
+    where: { id: reportId, status: 'pending', roleId: report.roleId, playedOn: report.playedOn, value: report.value },
     data: {
       status: d.approve ? 'approved' : 'rejected',
       reviewedById: reviewer.id,
@@ -294,18 +307,31 @@ export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
       rejectReason: reason,
     },
   });
-  if (count === 0) throw appError('NOT_PENDING');
+  if (count === 0) throw await notPendingError(ctx, reportId);
 
-  if (d.approve) await afterApprove(ctx, report);
+  if (d.approve) await afterApprove(ctx, report, seasonId, leaderBefore);
   else await notifyRejected(ctx, report, reason ?? '');
 }
 
 /**
- * Việc làm sau khi một lần khai được duyệt (đã lưu xong). Hiện chưa có gì — Task 16
- * tính lại top 1 của role trong mùa của ngày chơi và đăng "👑 … đã hoá thân …" ở đây.
+ * Cập nhật có điều kiện không trúng dòng nào: hoặc đã có người xử lý (thông báo mặc
+ * định), hoặc lần khai vẫn chờ duyệt nhưng người khai vừa sửa — nhắc mod xem lại.
  */
-async function afterApprove(_ctx: Ctx, _report: ReviewableReport): Promise<void> {
-  // Chưa có việc gì.
+async function notPendingError(ctx: Ctx, reportId: number): Promise<Error> {
+  const fresh = await ctx.db.statReport.findUnique({ where: { id: reportId }, select: { status: true } });
+  return fresh?.status === 'pending' ? appError('NOT_PENDING', 'Lần khai vừa được sửa, hãy xem lại') : appError('NOT_PENDING');
+}
+
+/**
+ * Sau khi một lần khai được duyệt (đã lưu xong): tính lại top 1 của role trong mùa của
+ * ngày chơi; khác người so với `before` → đăng "👑 … đã hoá thân …" (spec §4.6). Role chỉ
+ * có điểm 0 không có ai dẫn đầu, nên không bao giờ thông báo. Lỗi Discord chỉ ghi log.
+ */
+async function afterApprove(ctx: Ctx, report: ReviewableReport, seasonId: string, before: LeaderboardRow | null): Promise<void> {
+  const after = await getRoleLeader(ctx, report.roleId, seasonId);
+  if (after && after.memberId !== before?.memberId) {
+    await announceHolderChange(ctx, after.displayName, report.role.nameVi, seasonId);
+  }
 }
 
 /** DM người khai lý do bị từ chối. Discord lỗi chỉ ghi log — lần khai đã bị từ chối trong DB rồi. */
