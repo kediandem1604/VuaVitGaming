@@ -100,6 +100,35 @@ function withOneFailingTransaction(ctx: Ctx): Ctx {
   return { ...ctx, db };
 }
 
+/**
+ * Bản sao ctx mà lời gọi `db.<model>.<method>` ĐẦU TIÊN (ngoài giao dịch) thất bại —
+ * DB trục trặc đúng một lần; mọi lời gọi khác, kể cả `$transaction`, đi thẳng tới DB thật.
+ */
+function withOneFailingQuery(ctx: Ctx, model: 'voteRound' | 'voteMessage', method: string): Ctx {
+  let failed = false;
+  const db = new Proxy({} as PrismaClient, {
+    get(_target, prop) {
+      const value = Reflect.get(testDb, prop) as unknown;
+      if (prop === model && typeof value === 'object' && value !== null) {
+        return new Proxy(value, {
+          get(delegate, name) {
+            if (name === method && !failed) {
+              return () => {
+                failed = true;
+                return Promise.reject(new Error('db hiccup'));
+              };
+            }
+            const fn = Reflect.get(delegate, name) as unknown;
+            return typeof fn === 'function' ? (fn as (...args: unknown[]) => unknown).bind(delegate) : fn;
+          },
+        });
+      }
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(testDb) : value;
+    },
+  });
+  return { ...ctx, db };
+}
+
 /** Buổi classic (hoặc `modeKey`) có người tham gia tên `names`, theo thứ tự. */
 async function sessionWith(names: string[], p: Parameters<typeof insertSession>[1] = {}) {
   const session = await insertSession(testDb, p);
@@ -817,6 +846,77 @@ test('a failed result edit is retried alone; the announcement is never repeated'
     { messageId: 'msg-2', resultText: '🏆 Bình (1 phiếu)' },
   ]);
   expect((await pendingOf(roundId)).map((m) => m.resultPending)).toEqual([false, false]);
+});
+
+test('a vote message deleted by hand counts as delivered when closing (R27)', async () => {
+  const { ctx, notifier } = await setup();
+  const errors = silenceConsoleError();
+  const warns = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const { session: s, members } = await sessionWith(['An', 'Bình']);
+  const [a, b] = members as [typeof members[0], typeof members[0]];
+  const kills = await category('Giết nhiều nhất');
+  const dumb = await category('Pha xử lý ngu nhất');
+  await endSession(ctx, s.id, [kills.id, dumb.id]);
+  const roundId = (await roundOf(s.id)).id;
+  await castVote(ctx, { roundId, categoryId: kills.id, voterId: a.id, nomineeId: b.id });
+
+  // Ai đó xoá tay tin vote của hạng mục đầu (msg-2) trước khi đóng.
+  notifier.goneMessageIds.add('msg-2');
+  await expect(closeVoteRound(ctx, roundId)).resolves.toBeUndefined();
+
+  // Thông báo vẫn đi (kết quả không mất), tin còn lại vẫn sửa; tin đã xoá coi như xong — không
+  // treo `resultPending` để đăng bù mãi một tin không còn tồn tại.
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.announcements[0]).toContain('Giết nhiều nhất: Bình (1 phiếu)');
+  expect(notifier.closedVotes).toEqual([{ messageId: 'msg-3', resultText: 'Không ai được vote' }]);
+  expect(await roundRow(roundId)).toMatchObject({ status: 'closed', announcePending: false });
+  expect((await pendingOf(roundId)).map((m) => m.resultPending)).toEqual([false, false]);
+  expect(warns).toHaveBeenCalledTimes(1);
+  expect(String(warns.mock.calls[0]?.[0])).toContain('msg-2');
+  expect(errors).not.toHaveBeenCalled();
+
+  // Không còn gì để đăng bù.
+  await retryRoundResults(ctx);
+  await syncVotes(ctx);
+  expect(notifier.closedVotes).toHaveLength(1);
+  expect(notifier.announcements).toHaveLength(1);
+  expect(warns).toHaveBeenCalledTimes(1);
+});
+
+test('a committed close never throws, even when result delivery fails before reaching Discord (R27)', async () => {
+  const { ctx, notifier } = await setup();
+  const errors = silenceConsoleError();
+  const { session: s, members } = await sessionWith(['An', 'Bình']);
+  const [a, b] = members as [typeof members[0], typeof members[0]];
+  const kills = await category('Giết nhiều nhất');
+  const dumb = await category('Pha xử lý ngu nhất');
+  await endSession(ctx, s.id, [kills.id, dumb.id]);
+  const roundId = (await roundOf(s.id)).id;
+  const vote = { roundId, categoryId: kills.id, voterId: a.id, nomineeId: b.id };
+  await castVote(ctx, vote);
+
+  // DB trục trặc đúng lúc đọc đợt để đăng kết quả — sau khi giao dịch đóng đã lưu.
+  await expect(closeVoteRound(withOneFailingQuery(ctx, 'voteRound', 'findUnique'), roundId)).resolves.toBeUndefined();
+  expect(await roundRow(roundId)).toMatchObject({ status: 'closed', announcePending: true });
+  expect(await awardsOf(roundId)).toEqual([{ roundId, categoryId: kills.id, memberId: b.id, voteCount: 1 }]);
+  expect((await pendingOf(roundId)).map((m) => m.resultPending)).toEqual([true, true]);
+  expect(notifier.announcements).toEqual([]);
+  expect(notifier.closedVotes).toEqual([]);
+  expect(errors).toHaveBeenCalledTimes(1);
+  expect(String(errors.mock.calls[0]?.[0])).toContain(String(roundId));
+  // Đợt đã đóng thật: không nhận phiếu nữa.
+  await expect(castVote(ctx, vote)).rejects.toMatchObject({ code: 'ROUND_CLOSED' });
+
+  // Lượt đăng bù hoàn tất phần còn thiếu.
+  await retryRoundResults(ctx);
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.closedVotes).toEqual([
+    { messageId: 'msg-2', resultText: '🏆 Bình (1 phiếu)' },
+    { messageId: 'msg-3', resultText: 'Không ai được vote' },
+  ]);
+  expect(await roundRow(roundId)).toMatchObject({ announcePending: false });
+  expect((await pendingOf(roundId)).map((m) => m.resultPending)).toEqual([false, false]);
+  expect(errors).toHaveBeenCalledTimes(1);
 });
 
 test('a round whose menus never got posted announces its result and has nothing to edit', async () => {

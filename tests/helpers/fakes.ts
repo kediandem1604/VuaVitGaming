@@ -23,7 +23,7 @@ export class FakeMailer implements Mailer {
  * Ghi lại mọi lời gọi Discord. Khi `down` là true, mọi hàm đều ném lỗi.
  * `publishSession`/`publishVote` trả `msg-<n>` từ MỘT bộ đếm chung, bắt đầu từ 1.
  * `publishVote` với danh sách ứng viên rỗng ném lỗi (Discord từ chối menu 0 lựa chọn).
- * `updateSession` với id trong `goneMessageIds` ném `MessageGoneError` (tin đã bị xoá).
+ * `updateSession`/`closeVote` với id trong `goneMessageIds` ném `MessageGoneError` (tin đã bị xoá).
  */
 export class FakeNotifier implements DiscordNotifier {
   dms: { discordId: string; text: string }[] = [];
@@ -66,6 +66,7 @@ export class FakeNotifier implements DiscordNotifier {
 
   async closeVote(messageId: string, resultText: string): Promise<void> {
     this.assertUp();
+    if (this.goneMessageIds.has(messageId)) throw new MessageGoneError(`FakeNotifier: tin ${messageId} đã bị xoá`);
     this.closedVotes.push({ messageId, resultText });
   }
 

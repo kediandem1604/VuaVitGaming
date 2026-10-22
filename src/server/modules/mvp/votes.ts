@@ -24,6 +24,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { formatVnDay, formatVnTime, toVnDate, vnDayRange } from '../../lib/time.js';
+import { MessageGoneError } from '../../ports.js';
 import type { SessionView, VotePrompt } from '../../ports.js';
 import type { HallOfDayDto, HallSessionDto } from '../../../shared/api-types.js';
 import { getSessionView } from '../sessions/service.js';
@@ -287,7 +288,8 @@ export function tallyWinners(nomineeIds: number[]): Winner[] {
  * hoặc không có → không làm gì, kể cả khi hai bên đóng cùng lúc), tính người thắng
  * từng hạng mục của đợt và ghi `awards`, bật `announcePending` cho đợt và
  * `resultPending` cho mọi tin của đợt. Sau khi lưu xong mới gọi Discord
- * (`deliverRoundResults`); lỗi Discord chỉ ghi log — `vote-sync` đăng bù.
+ * (`deliverRoundResults`). Giao dịch đã lưu thì hàm không ném lỗi nữa: mọi lỗi của
+ * bước đăng kết quả (Discord hay DB) chỉ ghi log — `vote-sync` đăng bù (ruling R27).
  */
 export async function closeVoteRound(ctx: Ctx, roundId: number): Promise<void> {
   const closed = await ctx.db.$transaction(async (tx) => {
@@ -326,15 +328,22 @@ export async function closeVoteRound(ctx: Ctx, roundId: number): Promise<void> {
     await tx.voteMessage.updateMany({ where: { roundId }, data: { resultPending: true } });
     return true;
   });
+  if (!closed) return;
 
-  if (closed) await enqueue(() => deliverRoundResults(ctx, roundId));
+  try {
+    await enqueue(() => deliverRoundResults(ctx, roundId));
+  } catch (err) {
+    console.error(`[mvp] Đợt vote ${roundId} đã đóng nhưng chưa đăng được kết quả (sẽ đăng bù): ${messageOf(err)}`);
+  }
 }
 
 /**
  * Đăng những gì Discord còn thiếu của một đợt đã đóng, dựng lại từ DB (`awards` +
  * hạng mục, nên lần đăng bù giống y lần đầu): thông báo kết quả nếu `announcePending`,
  * rồi sửa từng tin đã có id còn `resultPending`. Gửi thành công thì tắt cờ tương ứng;
- * lỗi Discord chỉ ghi log để lượt sau thử lại, các tin khác vẫn được gửi.
+ * lỗi Discord chỉ ghi log để lượt sau thử lại, các tin khác vẫn được gửi. Tin đã bị
+ * xoá tay (`MessageGoneError`) coi như xong — không còn gì để sửa, kết quả vẫn nằm
+ * trong thông báo (ruling R27).
  */
 async function deliverRoundResults(ctx: Ctx, roundId: number): Promise<void> {
   const round = await ctx.db.voteRound.findUnique({
@@ -376,14 +385,19 @@ async function deliverRoundResults(ctx: Ctx, roundId: number): Promise<void> {
 
   for (const r of results) {
     if (!r.discordMessageId || !r.resultPending) continue;
-    let edited = false;
+    let delivered = false;
     try {
       await ctx.notifier.closeVote(r.discordMessageId, resultText(r.winners));
-      edited = true;
+      delivered = true;
     } catch (err) {
-      console.error(`[mvp] Không đóng được tin vote ${r.discordMessageId} của đợt ${roundId}: ${messageOf(err)}`);
+      if (err instanceof MessageGoneError) {
+        console.warn(`[mvp] Tin vote ${r.discordMessageId} của đợt ${roundId} đã bị xoá — bỏ qua việc ghi kết quả lên tin`);
+        delivered = true;
+      } else {
+        console.error(`[mvp] Không đóng được tin vote ${r.discordMessageId} của đợt ${roundId}: ${messageOf(err)}`);
+      }
     }
-    if (edited) {
+    if (delivered) {
       await ctx.db.voteMessage.updateMany({
         where: { roundId, categoryId: r.categoryId },
         data: { resultPending: false },
