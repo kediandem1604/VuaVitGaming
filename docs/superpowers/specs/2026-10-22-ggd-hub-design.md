@@ -385,6 +385,7 @@ Biến môi trường:
 | `DATABASE_URL` | Chuỗi kết nối PostgreSQL |
 | `PUBLIC_URL` | Địa chỉ web (dùng cho OAuth và link trong tin nhắn) |
 | `SESSION_SECRET` | Khoá ký cookie |
+| `TRUST_PROXY_HOPS` | Số lớp proxy phía trước app (mặc định 1) — dùng để lấy đúng IP người dùng cho giới hạn tốc độ |
 | `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Thông tin app Discord |
 | `DISCORD_GUILD_ID` | ID server Discord |
 | `DISCORD_SCHEDULE_CHANNEL_ID`, `DISCORD_VOTE_CHANNEL_ID`, `DISCORD_ANNOUNCE_CHANNEL_ID` | Các kênh bot đăng tin |

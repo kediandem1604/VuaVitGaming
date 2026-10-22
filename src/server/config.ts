@@ -5,6 +5,8 @@ export type Config = {
   publicUrl: string;
   sessionSecret: string;
   devLogin: boolean;
+  /** Số lớp proxy phía trước app (Railway thường là 1): để lấy đúng IP người dùng từ X-Forwarded-For. */
+  trustProxyHops: number;
   databaseUrl: string;
   discord: {
     token: string;
@@ -47,6 +49,16 @@ const commaList = z
       .filter((item) => item.length > 0),
   );
 
+// Số nguyên ≥ 0; thiếu biến hoặc chuỗi rỗng → 1.
+const proxyHops = z.preprocess(
+  (raw) => (typeof raw === 'string' && raw.trim() === '' ? undefined : raw),
+  z.coerce
+    .number({ invalid_type_error: 'phải là số' })
+    .int('phải là số nguyên')
+    .min(0, 'phải từ 0 trở lên')
+    .default(1),
+);
+
 const envSchema = z.object({
   PORT: portNumber.default(3000),
   PUBLIC_URL: requiredString.url('phải là URL hợp lệ'),
@@ -54,6 +66,7 @@ const envSchema = z.object({
     .string({ required_error: 'thiếu biến' })
     .min(32, 'cần ít nhất 32 ký tự'),
   DEV_LOGIN: z.string().optional(),
+  TRUST_PROXY_HOPS: proxyHops,
   DATABASE_URL: requiredString,
   DISCORD_TOKEN: requiredString,
   DISCORD_CLIENT_ID: requiredString,
@@ -86,6 +99,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     publicUrl: e.PUBLIC_URL,
     sessionSecret: e.SESSION_SECRET,
     devLogin: e.DEV_LOGIN === '1' && e.PUBLIC_URL.startsWith('http://localhost'),
+    trustProxyHops: e.TRUST_PROXY_HOPS,
     databaseUrl: e.DATABASE_URL,
     discord: {
       token: e.DISCORD_TOKEN,

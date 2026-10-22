@@ -30,9 +30,18 @@ export interface AppDeps {
 
 const RATE_LIMIT_PER_MINUTE = 120;
 
+/**
+ * Chỉ tin đúng `hops` lớp proxy phía trước app (hop 0 là máy nối thẳng vào socket).
+ * IP người dùng là mục mà lớp proxy cuối nối vào X-Forwarded-For; phần client tự
+ * thêm bị bỏ qua nên không né được giới hạn tốc độ. Fastify 5 cố ý coi số nguyên
+ * truyền thẳng vào `trustProxy` là "không tin ai", nên phải đưa hàm.
+ */
+function trustProxyHops(hops: number): (address: string, hop: number) => boolean {
+  return (_address, hop) => hop < hops;
+}
+
 export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance> {
-  // trustProxy: chạy sau proxy (Railway) nên IP thật nằm ở x-forwarded-for.
-  const app = Fastify({ logger: deps.logger ?? false, trustProxy: true });
+  const app = Fastify({ logger: deps.logger ?? false, trustProxy: trustProxyHops(ctx.config.trustProxyHops) });
   installAuth(app, ctx);
 
   app.setErrorHandler((err, request, reply) => sendError(err, request, reply));

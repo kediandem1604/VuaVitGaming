@@ -591,10 +591,26 @@ test('rate limit: 120 requests per minute per IP, 429 in Vietnamese', async () =
   const limited = await app.inject({ url: '/api/me' });
   expect(limited.statusCode).toBe(429);
   expect(limited.json()).toEqual(errorBody('RATE_LIMITED', 'Bạn thao tác quá nhanh, thử lại sau'));
+});
 
-  // IP khác (qua proxy, trustProxy) không bị ảnh hưởng.
-  const other = await app.inject({ url: '/api/me', headers: { 'x-forwarded-for': '10.0.0.2' } });
-  expect(other.statusCode).toBe(401);
+test('rate limit keys on the IP the trusted proxy appended, not one the client supplies', async () => {
+  app.get('/api/__ip', async (request) => ({ ip: request.ip }));
+  // Một lớp proxy (10.0.0.1) nối IP thật vào CUỐI X-Forwarded-For; phần bên trái do client tự bịa.
+  const viaProxy = (url: string, spoofed: string, real = '203.0.113.7') =>
+    app.inject({ url, remoteAddress: '10.0.0.1', headers: { 'x-forwarded-for': `${spoofed}, ${real}` } });
+
+  for (const spoofed of ['1.2.3.4', '5.6.7.8', '9.9.9.9, 8.8.8.8']) {
+    expect((await viaProxy('/api/__ip', spoofed, '198.51.100.5')).json()).toEqual({ ip: '198.51.100.5' });
+  }
+
+  // Đổi phần bịa mỗi request vẫn chung một "xô": hết 120 là 429.
+  for (let i = 0; i < 120; i += 1) {
+    expect((await viaProxy('/api/me', `10.${i}.0.1`)).statusCode).toBe(401);
+  }
+  expect((await viaProxy('/api/me', '172.16.0.99')).statusCode).toBe(429);
+
+  // Người dùng thật khác (proxy nối IP khác) là xô khác.
+  expect((await viaProxy('/api/me', '1.2.3.4', '203.0.113.8')).statusCode).toBe(401);
 });
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ export function testConfig(): Config {
     publicUrl: 'http://localhost:3000',
     sessionSecret: 'test-secret-test-secret-test-secret-32',
     devLogin: false,
+    trustProxyHops: 1,
     databaseUrl: 'postgresql://ggd:ggd@localhost:54330/ggd_test',
     discord: {
       token: 'test-token',

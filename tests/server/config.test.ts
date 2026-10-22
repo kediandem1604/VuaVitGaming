@@ -38,6 +38,16 @@ test('short SESSION_SECRET rejected', () => {
   expect(() => loadConfig({ ...base, SESSION_SECRET: 'short' })).toThrow(/SESSION_SECRET/);
 });
 
+test('TRUST_PROXY_HOPS defaults to 1 and must be an integer >= 0', () => {
+  expect(loadConfig(base).trustProxyHops).toBe(1);
+  expect(loadConfig({ ...base, TRUST_PROXY_HOPS: '2' }).trustProxyHops).toBe(2);
+  expect(loadConfig({ ...base, TRUST_PROXY_HOPS: '0' }).trustProxyHops).toBe(0);
+  expect(loadConfig({ ...base, TRUST_PROXY_HOPS: '' }).trustProxyHops).toBe(1); // để trống = chưa đặt
+  expect(() => loadConfig({ ...base, TRUST_PROXY_HOPS: 'abc' })).toThrow(/TRUST_PROXY_HOPS/);
+  expect(() => loadConfig({ ...base, TRUST_PROXY_HOPS: '-1' })).toThrow(/TRUST_PROXY_HOPS/);
+  expect(() => loadConfig({ ...base, TRUST_PROXY_HOPS: '1.5' })).toThrow(/TRUST_PROXY_HOPS/);
+});
+
 test('dev login only on localhost', () => {
   expect(loadConfig({ ...base, DEV_LOGIN: '1' }).devLogin).toBe(true);
   expect(loadConfig({ ...base, DEV_LOGIN: '1', PUBLIC_URL: 'https://ggd.example.com' }).devLogin).toBe(false);
