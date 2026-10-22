@@ -208,22 +208,28 @@ const voteSchema = z.object({
   nomineeId: z.number().int(),
 });
 
+/** Tên để trả lời người vừa vote ("Đã vote {nomineeName} cho “{categoryName}”"). */
+export interface VoteReceipt {
+  nomineeName: string;
+  categoryName: string;
+}
+
 /**
  * Bỏ (hoặc đổi) phiếu: mỗi người một phiếu cho mỗi hạng mục của đợt. Kiểm tra theo
  * thứ tự: đợt có (`NOT_FOUND`) → còn mở và chưa tới giờ đóng (`ROUND_CLOSED`) → hạng
  * mục thuộc đợt (`CATEGORY_NOT_IN_ROUND`) → người vote còn trong server (`FORBIDDEN`)
  * → không tự vote (`SELF_VOTE`) → người được vote đang tham gia buổi và còn trong
- * server (`NOT_NOMINEE`).
+ * server (`NOT_NOMINEE`). Trả về tên người được vote và hạng mục (đọc trong cùng giao dịch).
  *
  * Khoá dòng đợt (`FOR UPDATE`) trong giao dịch để phiếu bỏ đúng lúc đóng đợt không
  * lọt ra ngoài bảng kết quả: hoặc phiếu vào trước và được tính, hoặc thấy đợt đã đóng.
  */
-export async function castVote(ctx: Ctx, input: VoteInput): Promise<void> {
+export async function castVote(ctx: Ctx, input: VoteInput): Promise<VoteReceipt> {
   const parsed = voteSchema.safeParse(input);
   if (!parsed.success) throw appError('VALIDATION');
   const { roundId, categoryId, voterId, nomineeId } = parsed.data;
 
-  await ctx.db.$transaction(async (tx) => {
+  return ctx.db.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM vote_rounds WHERE id = ${roundId} FOR UPDATE`;
     if (locked.length === 0) throw appError('NOT_FOUND');
     const round = await tx.voteRound.findUniqueOrThrow({
@@ -234,7 +240,7 @@ export async function castVote(ctx: Ctx, input: VoteInput): Promise<void> {
 
     const inRound = await tx.voteMessage.findUnique({
       where: { roundId_categoryId: { roundId, categoryId } },
-      select: { categoryId: true },
+      select: { category: { select: { name: true } } },
     });
     if (!inRound) throw appError('CATEGORY_NOT_IN_ROUND');
 
@@ -244,7 +250,7 @@ export async function castVote(ctx: Ctx, input: VoteInput): Promise<void> {
 
     const nominee = await tx.attendance.findUnique({
       where: { sessionId_memberId: { sessionId: round.sessionId, memberId: nomineeId } },
-      select: { status: true, member: { select: { status: true } } },
+      select: { status: true, member: { select: { status: true, displayName: true } } },
     });
     if (nominee?.status !== 'going' || nominee.member.status !== 'active') throw appError('NOT_NOMINEE');
 
@@ -255,6 +261,7 @@ export async function castVote(ctx: Ctx, input: VoteInput): Promise<void> {
       create: { roundId, categoryId, voterId, nomineeId, updatedAt: now },
       update: { nomineeId, updatedAt: now },
     });
+    return { nomineeName: nominee.member.displayName, categoryName: inRound.category.name };
   });
 }
 
@@ -335,6 +342,17 @@ export async function closeVoteRound(ctx: Ctx, roundId: number): Promise<void> {
   } catch (err) {
     console.error(`[mvp] Đợt vote ${roundId} đã đóng nhưng chưa đăng được kết quả (sẽ đăng bù): ${messageOf(err)}`);
   }
+}
+
+/**
+ * Admin đóng sớm một đợt qua web: đợt không có → `NOT_FOUND`; đợt đã đóng → không
+ * làm gì (bấm hai lần vô hại). Khác `closeVoteRound` (bộ hẹn giờ gọi, lặng lẽ bỏ qua
+ * đợt không có) chỉ ở chỗ báo lỗi cho người dùng khi id sai.
+ */
+export async function closeVoteRoundEarly(ctx: Ctx, roundId: number): Promise<void> {
+  const round = await ctx.db.voteRound.findUnique({ where: { id: roundId }, select: { id: true } });
+  if (!round) throw appError('NOT_FOUND');
+  await closeVoteRound(ctx, roundId);
 }
 
 /**

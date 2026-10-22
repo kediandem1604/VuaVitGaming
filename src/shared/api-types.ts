@@ -74,6 +74,28 @@ export interface HallOfDayDto {
   sessions: HallSessionDto[];
 }
 
+/** Phạm vi hạng mục tri ân: buổi nào cũng có / chỉ một chế độ chơi / theo role (admin tick thêm khi kết thúc). */
+export type CategoryScope = 'always' | 'mode' | 'optional';
+
+/** Hạng mục tri ân cho trang quản trị (`/api/admin/categories`); `mode` chỉ có khi `scope = 'mode'`. */
+export interface AwardCategoryDto {
+  id: number;
+  scope: CategoryScope;
+  mode: ModeDto | null;
+  name: string;
+  description: string | null;
+  active: boolean;
+  sortOrder: number;
+}
+
+/** Một hạng mục trong form "Kết thúc buổi" (`GET /api/admin/sessions/:id/end-options`); `preselected` = tick sẵn. */
+export interface EndOptionDto {
+  id: number;
+  name: string;
+  scope: CategoryScope;
+  preselected: boolean;
+}
+
 /** Thân phản hồi của mọi lỗi API. */
 export interface ApiErrorBody {
   error: { code: string; message: string };

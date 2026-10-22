@@ -15,14 +15,21 @@ import { appError } from '../../lib/errors.js';
 
 const CATEGORY_ORDER = [{ sortOrder: 'asc' }, { id: 'asc' }] satisfies Prisma.AwardCategoryOrderByWithRelationInput[];
 
+/** Chế độ chơi đi kèm (chỉ hạng mục `mode` có), đủ cho trang quản trị hiển thị. */
+const WITH_MODE = { mode: { select: { id: true, key: true, nameVi: true } } } satisfies Prisma.AwardCategoryInclude;
+
+/** Hạng mục kèm chế độ chơi của nó (null khi không theo chế độ) — dạng trang quản trị cần. */
+export type AwardCategoryWithMode = Prisma.AwardCategoryGetPayload<{ include: typeof WITH_MODE }>;
+
 // ---------------------------------------------------------------------------
 // Đọc
 // ---------------------------------------------------------------------------
 
-/** Mọi hạng mục đang bật (hoặc tất cả với `includeInactive`), theo sortOrder rồi id. */
-export function listCategories(ctx: Ctx, opts: { includeInactive?: boolean } = {}): Promise<AwardCategory[]> {
+/** Mọi hạng mục đang bật (hoặc tất cả với `includeInactive`), kèm chế độ chơi, theo sortOrder rồi id. */
+export function listCategories(ctx: Ctx, opts: { includeInactive?: boolean } = {}): Promise<AwardCategoryWithMode[]> {
   return ctx.db.awardCategory.findMany({
     where: opts.includeInactive ? {} : { active: true },
+    include: WITH_MODE,
     orderBy: CATEGORY_ORDER,
   });
 }
@@ -111,8 +118,8 @@ const patchSchema = z.object({
 /** Lỗi zod không có thông báo riêng (sai kiểu…) → thông báo chung tiếng Việt. */
 const defaultErrorMap: z.ZodErrorMap = () => ({ message: 'Dữ liệu không hợp lệ' });
 
-/** Tạo hạng mục. Dữ liệu sai hoặc vi phạm quy tắc phạm vi ⇔ chế độ → `VALIDATION`. */
-export async function createCategory(ctx: Ctx, input: CategoryInput): Promise<AwardCategory> {
+/** Tạo hạng mục (trả về kèm chế độ chơi). Dữ liệu sai hoặc vi phạm quy tắc phạm vi ⇔ chế độ → `VALIDATION`. */
+export async function createCategory(ctx: Ctx, input: CategoryInput): Promise<AwardCategoryWithMode> {
   const parsed = createSchema.safeParse(input, { errorMap: defaultErrorMap });
   if (!parsed.success) throw appError('VALIDATION', parsed.error.issues[0]?.message);
   const { scope, name, description, sortOrder } = parsed.data;
@@ -129,15 +136,16 @@ export async function createCategory(ctx: Ctx, input: CategoryInput): Promise<Aw
       description: emptyToNull(description),
       sortOrder: sortOrder ?? (await nextSortOrder(ctx)),
     },
+    include: WITH_MODE,
   });
 }
 
 /**
  * Sửa các trường được truyền (trường vắng mặt giữ nguyên). Quy tắc phạm vi ⇔ chế độ
  * được kiểm tra trên dòng sau khi gộp: đổi `scope` sang khác `mode` thì phải gửi
- * kèm `modeId: null`. Hạng mục không có → `NOT_FOUND`.
+ * kèm `modeId: null`. Hạng mục không có → `NOT_FOUND`. Trả về kèm chế độ chơi.
  */
-export async function updateCategory(ctx: Ctx, id: number, patch: CategoryPatch): Promise<AwardCategory> {
+export async function updateCategory(ctx: Ctx, id: number, patch: CategoryPatch): Promise<AwardCategoryWithMode> {
   const parsed = patchSchema.safeParse(patch, { errorMap: defaultErrorMap });
   if (!parsed.success) throw appError('VALIDATION', parsed.error.issues[0]?.message);
   const p = parsed.data;
@@ -156,7 +164,7 @@ export async function updateCategory(ctx: Ctx, id: number, patch: CategoryPatch)
   if (p.sortOrder !== undefined) data.sortOrder = p.sortOrder;
   if (p.active !== undefined) data.active = p.active;
 
-  return ctx.db.awardCategory.update({ where: { id }, data });
+  return ctx.db.awardCategory.update({ where: { id }, data, include: WITH_MODE });
 }
 
 /** Ràng buộc CHECK trong DB: `scope = 'mode'` ⇔ `modeId` khác null — báo lỗi tiếng Việt trước khi DB từ chối. */

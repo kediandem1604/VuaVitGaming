@@ -3,8 +3,10 @@ import { MessageFlags } from 'discord.js';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { GuildMemberSource } from '../../../src/server/bot/guild-directory.js';
 import { handleInteraction } from '../../../src/server/bot/interactions.js';
-import type { ComponentInteractionLike, InteractionLike } from '../../../src/server/bot/interactions.js';
+import type { InteractionLike, SelectMenuInteractionLike } from '../../../src/server/bot/interactions.js';
 import type { Ctx } from '../../../src/server/ctx.js';
+import { closeVoteRound } from '../../../src/server/modules/mvp/votes.js';
+import { endSession } from '../../../src/server/modules/sessions/end.js';
 import { cancelSession, createSession, getSessionView } from '../../../src/server/modules/sessions/service.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
@@ -35,6 +37,28 @@ async function openSession(capacity = 16): Promise<number> {
 }
 
 const goingCount = (sessionId: number) => testDb.attendance.count({ where: { sessionId, status: 'going' } });
+const voteCount = (roundId: number) => testDb.vote.count({ where: { roundId } });
+
+/**
+ * Buổi đã kết thúc có người tham gia `names` (theo thứ tự), mở vote với các hạng mục
+ * `categoryNames`; trả về đợt, hạng mục và người tham gia để dựng menu vote giả.
+ */
+async function openRound(names: string[], categoryNames = ['Giết nhiều nhất']) {
+  const sessionId = await openSession();
+  const members = [];
+  for (const [i, displayName] of names.entries()) {
+    const m = await createMember(testDb, { displayName, discordId: `nominee-${i}` });
+    await testDb.attendance.create({
+      data: { sessionId, memberId: m.id, status: 'going', updatedAt: new Date(Date.UTC(2026, 9, 22, 11, 0, i)) },
+    });
+    members.push(m);
+  }
+  const categories = [];
+  for (const name of categoryNames) categories.push(await testDb.awardCategory.findFirstOrThrow({ where: { name } }));
+  await endSession(ctx, sessionId, categories.map((c) => c.id));
+  const round = await testDb.voteRound.findUniqueOrThrow({ where: { sessionId } });
+  return { sessionId, roundId: round.id, categories, members };
+}
 
 /** GuildMember giả (kiểu cấu trúc) của người bấm nút. */
 const guildMember = (id: string, name = `User ${id}`): GuildMemberSource => ({
@@ -45,13 +69,14 @@ const guildMember = (id: string, name = `User ${id}`): GuildMemberSource => ({
   guild: { id: 'test-guild' },
 });
 
-type Step = { step: 'defer' | 'edit' | 'reply'; content?: string; going: number };
+type Step = { step: 'defer' | 'edit' | 'reply'; content?: string; going: number; votes?: number };
 
 /**
- * Tương tác giả. Mỗi lời gọi trả lời được ghi lại kèm số người `going` trong DB
- * tại thời điểm đó — để kiểm tra `deferReply` xảy ra TRƯỚC khi điểm danh được ghi.
+ * Tương tác giả. Mỗi lời gọi trả lời được ghi lại kèm số người `going` (buổi
+ * `sessionId`) và số phiếu (đợt `roundId`) trong DB tại thời điểm đó — để kiểm tra
+ * `deferReply` xảy ra TRƯỚC khi điểm danh / phiếu được ghi.
  */
-class FakeInteraction implements InteractionLike, ComponentInteractionLike {
+class FakeInteraction implements InteractionLike, SelectMenuInteractionLike {
   steps: Step[] = [];
 
   constructor(
@@ -61,6 +86,9 @@ class FakeInteraction implements InteractionLike, ComponentInteractionLike {
       guildId?: string | null;
       member?: GuildMemberSource | null;
       sessionId?: number;
+      roundId?: number;
+      /** Giá trị menu đã chọn (chỉ có ở menu chọn). */
+      values?: string[];
     } = {},
   ) {}
 
@@ -72,15 +100,19 @@ class FakeInteraction implements InteractionLike, ComponentInteractionLike {
     return this.opts.member === undefined ? guildMember('u1', 'Người bấm') : this.opts.member;
   }
 
-  isButton(): this is ComponentInteractionLike {
+  get values(): string[] {
+    return this.opts.values ?? [];
+  }
+
+  isButton(): this is SelectMenuInteractionLike {
     return (this.opts.kind ?? 'button') === 'button';
   }
 
-  isStringSelectMenu(): this is ComponentInteractionLike {
+  isStringSelectMenu(): this is SelectMenuInteractionLike {
     return this.opts.kind === 'select';
   }
 
-  inCachedGuild(): this is ComponentInteractionLike & { member: GuildMemberSource } {
+  inCachedGuild(): this is SelectMenuInteractionLike & { member: GuildMemberSource } {
     return this.member !== null;
   }
 
@@ -99,8 +131,10 @@ class FakeInteraction implements InteractionLike, ComponentInteractionLike {
   }
 
   private async record(step: Step['step'], content?: string): Promise<void> {
-    const going = this.opts.sessionId === undefined ? 0 : await goingCount(this.opts.sessionId);
-    this.steps.push(content === undefined ? { step, going } : { step, content, going });
+    const entry: Step = { step, going: this.opts.sessionId === undefined ? 0 : await goingCount(this.opts.sessionId) };
+    if (content !== undefined) entry.content = content;
+    if (this.opts.roundId !== undefined) entry.votes = await voteCount(this.opts.roundId);
+    this.steps.push(entry);
   }
 }
 
@@ -224,6 +258,8 @@ test('non-guild ignored', async () => {
     new FakeInteraction(`att:join:${sessionId}`, { guildId: null, member: null }),
     // Server đúng nhưng chưa cache (dữ liệu thành viên thô): không có GuildMember để tạo hồ sơ.
     new FakeInteraction(`att:join:${sessionId}`, { member: null }),
+    // Menu vote cũng vậy.
+    new FakeInteraction('vote:1:1', { kind: 'select', values: ['1'], guildId: 'other-guild' }),
   ]) {
     await handleInteraction(ctx, i);
     expect(i.steps).toEqual([{ step: 'reply', content: 'Bot chỉ dùng trong server chính', going: 0 }]);
@@ -244,15 +280,115 @@ test('unknown custom ids are ignored with a log line', async () => {
   expect(String(warns.mock.calls[0]?.[0])).toContain('att:join:abc');
 });
 
-test('vote menus are not supported yet', async () => {
-  const i = new FakeInteraction('vote:1:2', { kind: 'select' });
-  await handleInteraction(ctx, i);
-  expect(i.steps).toEqual([{ step: 'reply', content: 'Chưa hỗ trợ', going: 0 }]);
-});
-
 test('non-component interactions are ignored', async () => {
   const i = new FakeInteraction('att:join:1', { kind: 'command' });
   await handleInteraction(ctx, i);
   expect(i.steps).toEqual([]);
   expect(warns).not.toHaveBeenCalled();
+});
+
+// ---------------------------------------------------------------------------
+// Menu vote
+// ---------------------------------------------------------------------------
+
+test('vote select defers first, upserts the voter, records the vote and confirms with the names', async () => {
+  const { roundId, categories, members } = await openRound(['An', 'Bình']);
+  const kills = categories[0]!;
+  const [an, binh] = members as [(typeof members)[0], (typeof members)[0]];
+
+  const i = new FakeInteraction(`vote:${roundId}:${kills.id}`, { kind: 'select', values: [String(an.id)], roundId });
+  await handleInteraction(ctx, i);
+  expect(i.steps).toEqual([
+    { step: 'defer', going: 0, votes: 0 },
+    { step: 'edit', content: 'Đã vote An cho “Giết nhiều nhất”. Đổi ý thì chọn lại.', going: 0, votes: 1 },
+  ]);
+
+  // Người vote (ngoài buổi, cả server được vote) có hồ sơ từ GuildMember; phiếu ghi đúng người.
+  const voter = await testDb.member.findUniqueOrThrow({ where: { discordId: 'u1' } });
+  expect(voter).toMatchObject({ displayName: 'Người bấm', avatarUrl: 'https://cdn.test/u1.png', status: 'active' });
+  expect(await testDb.vote.findMany()).toEqual([
+    { roundId, categoryId: kills.id, voterId: voter.id, nomineeId: an.id, updatedAt: ctx.now() },
+  ]);
+
+  // Đổi ý: chọn lại người khác → đổi phiếu, vẫn một phiếu.
+  const again = new FakeInteraction(`vote:${roundId}:${kills.id}`, { kind: 'select', values: [String(binh.id)], roundId });
+  await handleInteraction(ctx, again);
+  expect(again.steps).toEqual([
+    { step: 'defer', going: 0, votes: 1 },
+    { step: 'edit', content: 'Đã vote Bình cho “Giết nhiều nhất”. Đổi ý thì chọn lại.', going: 0, votes: 1 },
+  ]);
+  expect((await testDb.vote.findFirstOrThrow()).nomineeId).toBe(binh.id);
+  expect(errors).not.toHaveBeenCalled();
+  expect(warns).not.toHaveBeenCalled();
+});
+
+test('self vote is refused with the business message', async () => {
+  const { roundId, categories, members } = await openRound(['An', 'Bình']);
+  const kills = categories[0]!;
+  const an = members[0]!;
+  // Người bấm (u1) chính là An.
+  await testDb.member.update({ where: { id: an.id }, data: { discordId: 'u1' } });
+
+  const i = new FakeInteraction(`vote:${roundId}:${kills.id}`, { kind: 'select', values: [String(an.id)], roundId });
+  await handleInteraction(ctx, i);
+  expect(i.steps).toEqual([
+    { step: 'defer', going: 0, votes: 0 },
+    { step: 'edit', content: 'Không được tự vote', going: 0, votes: 0 },
+  ]);
+  expect(errors).not.toHaveBeenCalled(); // lỗi nghiệp vụ không phải lỗi hệ thống
+});
+
+test('bad menu values and other vote rule violations answer with the business message', async () => {
+  const { roundId, categories, members } = await openRound(['An', 'Bình']);
+  const kills = categories[0]!;
+  const an = members[0]!;
+  const outsider = await createMember(testDb, { displayName: 'Người ngoài' });
+  const egg = await testDb.awardCategory.findFirstOrThrow({ where: { name: 'Pha đẻ trứng lộ liễu nhất (Cò gáy)' } });
+
+  const answer = async (customId: string, values: string[]) => {
+    const i = new FakeInteraction(customId, { kind: 'select', values });
+    await handleInteraction(ctx, i);
+    expect(i.steps.map((s) => s.step)).toEqual(['defer', 'edit']);
+    return i.steps[1]?.content;
+  };
+  const menu = `vote:${roundId}:${kills.id}`;
+
+  // Giá trị menu bị sửa (không phải id hợp lệ) → lỗi dữ liệu, không lộ gì.
+  for (const values of [['abc'], [], ['0'], ['1.5'], ['-1'], ['01']]) {
+    expect(await answer(menu, values), JSON.stringify(values)).toBe('Dữ liệu không hợp lệ');
+  }
+  expect(await answer(menu, [String(outsider.id)])).toBe('Người này không có mặt ở buổi chơi');
+  expect(await answer(`vote:${roundId}:${egg.id}`, [String(an.id)])).toBe('Hạng mục không thuộc đợt vote này');
+  expect(await answer(`vote:999:${kills.id}`, [String(an.id)])).toBe('Không tìm thấy');
+  expect(await voteCount(roundId)).toBe(0);
+
+  await closeVoteRound(ctx, roundId);
+  expect(await answer(menu, [String(an.id)])).toBe('Vote đã đóng');
+  expect(await voteCount(roundId)).toBe(0);
+  expect(errors).not.toHaveBeenCalled();
+});
+
+test('unexpected errors while voting are logged and answered generically', async () => {
+  const { roundId, categories, members } = await openRound(['An']);
+  const kills = categories[0]!;
+  const broken: Ctx = {
+    ...ctx,
+    db: {
+      member: {
+        findUnique: async () => {
+          throw new Error('db secret');
+        },
+      },
+    } as unknown as PrismaClient,
+  };
+
+  const i = new FakeInteraction(`vote:${roundId}:${kills.id}`, { kind: 'select', values: [String(members[0]!.id)], roundId });
+  await handleInteraction(broken, i);
+  expect(i.steps).toEqual([
+    { step: 'defer', going: 0, votes: 0 },
+    { step: 'edit', content: 'Có lỗi xảy ra, thử lại sau', going: 0, votes: 0 },
+  ]);
+  expect(errors).toHaveBeenCalledTimes(1);
+  expect(String(errors.mock.calls[0]?.[0])).toContain(`vote:${roundId}:${kills.id}`);
+  expect(String(errors.mock.calls[0]?.[1] ?? '')).not.toBe(''); // lỗi gốc đi kèm trong log
 });

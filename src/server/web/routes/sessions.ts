@@ -1,15 +1,18 @@
 /**
  * Buổi chơi qua HTTP: danh sách theo ngày VN, điểm danh (giống hệt bấm nút Discord
- * vì cùng gọi `setAttendance`), mod tạo/huỷ buổi; chế độ chơi cho form tạo buổi.
+ * vì cùng gọi `setAttendance`), mod tạo/huỷ/kết thúc buổi (kết thúc = chọn hạng mục
+ * tri ân và mở vote); chế độ chơi cho form tạo buổi.
  */
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { ModeDto, SessionDto } from '../../../shared/api-types.js';
+import type { EndOptionDto, ModeDto, SessionDto } from '../../../shared/api-types.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { toVnDate, vnDateTimeToUtc } from '../../lib/time.js';
 import { avatarUrlsByMemberId } from '../../modules/members/service.js';
+import { endOptions } from '../../modules/mvp/categories.js';
+import { endSession } from '../../modules/sessions/end.js';
 import {
   cancelSession,
   createSession,
@@ -19,17 +22,20 @@ import {
 } from '../../modules/sessions/service.js';
 import type { SessionView } from '../../ports.js';
 import { currentMember, requireMember, requireMod } from '../auth-plugin.js';
+import { VN_DATE, idParams, int32Id } from '../schemas.js';
 
-// Chỉ kiểm tra dạng ở đây; ngày không tồn tại (30/02) do src/server/lib/time.ts bắt.
-const VN_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const VN_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-
-/** `:id` phải là số nguyên dương vừa cột Int của PostgreSQL. */
-const idParams = z.object({ id: z.coerce.number().int().positive().max(2_147_483_647) });
 
 const listQuery = z.object({ date: z.string().regex(VN_DATE).optional() });
 
 const attendanceBody = z.object({ going: z.boolean() }).strict();
+
+/**
+ * Hạng mục mở vote khi kết thúc: rỗng = kết thúc không vote; tối đa 25 (mỗi hạng mục
+ * một tin Discord). Muốn hạng mục mặc định thì client gửi danh sách tick sẵn của
+ * `end-options` — không có mặc định ngầm ở API.
+ */
+const endBody = z.object({ categoryIds: z.array(int32Id).max(25) }).strict();
 
 const createBody = z
   .object({
@@ -110,6 +116,18 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/admin/sessions/:id/cancel', { preHandler: requireMod }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
     await cancelSession(app.ctx, id);
+    return reply.code(204).send();
+  });
+
+  app.get('/api/admin/sessions/:id/end-options', { preHandler: requireMod }, async (request): Promise<EndOptionDto[]> => {
+    const { id } = idParams.parse(request.params);
+    return endOptions(app.ctx, id);
+  });
+
+  app.post('/api/admin/sessions/:id/end', { preHandler: requireMod }, async (request, reply) => {
+    const { id } = idParams.parse(request.params);
+    const { categoryIds } = endBody.parse(request.body);
+    await endSession(app.ctx, id, categoryIds);
     return reply.code(204).send();
   });
 }

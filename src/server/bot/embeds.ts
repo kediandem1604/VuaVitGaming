@@ -1,19 +1,31 @@
 /**
- * Dựng tin Discord của một buổi chơi (embed + hàng nút) từ `SessionView`.
- * Hàm thuần, trả JSON thuần (kiểu API của Discord) nên test không cần kết nối;
- * `DiscordJsNotifier` gửi/sửa đúng payload này. Các giới hạn của Discord (field
- * 1024 ký tự, tiêu đề 256) được tôn trọng ở đây để tin không bao giờ bị từ chối.
+ * Dựng tin Discord của một buổi chơi (embed + hàng nút) từ `SessionView` và tin vote
+ * một hạng mục (embed + menu chọn) từ `VotePrompt`. Hàm thuần, trả JSON thuần (kiểu
+ * API của Discord) nên test không cần kết nối; `DiscordJsNotifier` gửi/sửa đúng
+ * payload này. Các giới hạn của Discord (field 1024 ký tự, tiêu đề 256, nhãn menu
+ * 100, tối đa 25 lựa chọn) được tôn trọng ở đây để tin không bao giờ bị từ chối.
  */
 
 import { ButtonStyle, ComponentType } from 'discord.js';
-import type { APIActionRowComponent, APIButtonComponent, APIEmbed, APIEmbedField } from 'discord.js';
+import type {
+  APIActionRowComponent,
+  APIButtonComponent,
+  APIEmbed,
+  APIEmbedField,
+  APIStringSelectComponent,
+} from 'discord.js';
 import { formatVnDay, formatVnTime } from '../lib/time.js';
-import type { SessionView } from '../ports.js';
+import type { SessionView, VotePrompt } from '../ports.js';
 import { encodeCustomId } from './custom-ids.js';
 
 export interface SessionMessage {
   embeds: APIEmbed[];
   components: APIActionRowComponent<APIButtonComponent>[];
+}
+
+export interface VoteMessage {
+  embeds: APIEmbed[];
+  components: APIActionRowComponent<APIStringSelectComponent>[];
 }
 
 /** Xanh ngỗng (global constraints) khi đang mở; xám khi huỷ; xanh lá khi đã kết thúc. */
@@ -86,4 +98,60 @@ function buttonRow(view: SessionView): APIActionRowComponent<APIButtonComponent>
 
 function clip(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
+// ---------------------------------------------------------------------------
+// Tin vote
+// ---------------------------------------------------------------------------
+
+/** Vàng — màu tin vote. */
+const VOTE_COLOUR = 0xf5b700;
+/** Giới hạn của menu chọn Discord: nhãn 100 ký tự, tối đa 25 lựa chọn. */
+const SELECT_LABEL_MAX = 100;
+const SELECT_OPTIONS_MAX = 25;
+
+/**
+ * Tin vote một hạng mục: embed vàng (tên hạng mục; mô tả nếu có; nhãn buổi; giờ đóng
+ * VN) và một menu chọn đúng một người trong số người có mặt, theo thứ tự tham gia,
+ * giá trị lựa chọn là memberId. Sức chứa buổi ≤ 25 nên không bao giờ quá 25 lựa
+ * chọn, nhưng vẫn cắt phòng hờ. Không có ứng viên là lỗi lập trình: Discord từ chối
+ * menu rỗng, service không bao giờ gọi tới đây trong trường hợp đó.
+ */
+export function buildVoteMessage(prompt: VotePrompt): VoteMessage {
+  if (prompt.nominees.length === 0) throw new Error(`Tin vote đợt ${prompt.roundId} không có ứng viên`);
+
+  const lines = [`Buổi: ${prompt.sessionLabel}`, `Đóng lúc ${formatVnTime(prompt.closesAt)} ${formatVnDay(prompt.closesAt)}`];
+  if (prompt.description) lines.unshift(prompt.description);
+  const embed: APIEmbed = {
+    title: clip(`🏆 ${prompt.categoryName}`, EMBED_TITLE_MAX),
+    description: lines.join('\n'),
+    color: VOTE_COLOUR,
+  };
+
+  const menu: APIStringSelectComponent = {
+    type: ComponentType.StringSelect,
+    custom_id: encodeCustomId({ kind: 'vote', roundId: prompt.roundId, categoryId: prompt.categoryId }),
+    placeholder: 'Chọn người xứng đáng',
+    min_values: 1,
+    max_values: 1,
+    options: prompt.nominees
+      .slice(0, SELECT_OPTIONS_MAX)
+      .map((n) => ({ label: clipLabel(n.displayName), value: String(n.memberId) })),
+  };
+  return { embeds: [embed], components: [{ type: ComponentType.ActionRow, components: [menu] }] };
+}
+
+/**
+ * Cắt nhãn về ≤ 100 đơn vị UTF-16 (Discord đếm như `String.length`) rồi thêm "…",
+ * không bao giờ cắt giữa một cặp surrogate (emoji). Tên Discord ≤ 32 ký tự nên
+ * hiếm khi cần, nhưng tin không được bị từ chối vì một cái tên.
+ */
+function clipLabel(s: string): string {
+  if (s.length <= SELECT_LABEL_MAX) return s;
+  let out = '';
+  for (const ch of s) {
+    if (out.length + ch.length > SELECT_LABEL_MAX - 1) break;
+    out += ch;
+  }
+  return `${out}…`;
 }

@@ -1,18 +1,18 @@
 /**
- * `DiscordNotifier` thật trên discord.js: DM, kênh thông báo và tin buổi chơi
- * (embed + nút, dựng bởi `buildSessionMessage`). Tin vote (Task 13) còn ném
- * "Chưa hỗ trợ". Mọi lỗi Discord được ném ra — service coi đó là "đăng bù sau"
- * (cờ `discordDirty`); riêng "Unknown Message" khi sửa tin thành `MessageGoneError`
- * để service đăng lại thay vì thử sửa mãi. Giới hạn 2000 ký tự của tin văn bản là
- * việc của nơi gọi.
+ * `DiscordNotifier` thật trên discord.js: DM, kênh thông báo, tin buổi chơi (embed +
+ * nút, dựng bởi `buildSessionMessage`) và tin vote (embed + menu, dựng bởi
+ * `buildVoteMessage`). Mọi lỗi Discord được ném ra — service coi đó là "đăng bù sau"
+ * (cờ `discordDirty`, `resultPending`); riêng "Unknown Message" khi sửa tin thành
+ * `MessageGoneError` để service đăng lại (tin buổi) hay bỏ qua (tin vote) thay vì thử
+ * sửa mãi. Giới hạn 2000 ký tự của tin văn bản là việc của nơi gọi.
  */
 
 import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
-import type { Client, SendableChannels } from 'discord.js';
+import type { APIEmbed, Client, SendableChannels } from 'discord.js';
 import type { Config } from '../config.js';
 import { MessageGoneError } from '../ports.js';
 import type { DiscordNotifier, SessionView, VotePrompt } from '../ports.js';
-import { buildSessionMessage } from './embeds.js';
+import { buildSessionMessage, buildVoteMessage } from './embeds.js';
 
 export class DiscordJsNotifier implements DiscordNotifier {
   constructor(
@@ -41,19 +41,36 @@ export class DiscordJsNotifier implements DiscordNotifier {
     try {
       await channel.messages.edit(messageId, buildSessionMessage(view));
     } catch (err) {
-      if (isUnknownMessage(err)) {
-        throw new MessageGoneError(`Tin Discord ${messageId} không còn tồn tại`, { cause: err });
-      }
-      throw err;
+      throw asMessageGone(err, messageId);
     }
   }
 
-  async publishVote(_prompt: VotePrompt): Promise<string> {
-    throw new Error('Chưa hỗ trợ');
+  /** Đăng tin vote (embed + menu) vào kênh vote; trả về id tin để sửa thành kết quả về sau. */
+  async publishVote(prompt: VotePrompt): Promise<string> {
+    const channel = await this.voteChannel();
+    const message = await channel.send(buildVoteMessage(prompt));
+    return message.id;
   }
 
-  async closeVote(_messageId: string, _resultText: string): Promise<void> {
-    throw new Error('Chưa hỗ trợ');
+  /**
+   * Đóng tin vote: đọc lại tin, giữ nguyên embed gốc, thêm dòng "Kết quả" và chân
+   * "Đã đóng vote", bỏ menu. Tin đã bị xoá (10008, khi đọc hay khi sửa) →
+   * `MessageGoneError`; lỗi khác giữ nguyên.
+   */
+  async closeVote(messageId: string, resultText: string): Promise<void> {
+    const channel = await this.voteChannel();
+    try {
+      const message = await channel.messages.fetch(messageId);
+      const original: APIEmbed = message.embeds[0]?.toJSON() ?? {};
+      const embed: APIEmbed = {
+        ...original,
+        fields: [...(original.fields ?? []), { name: 'Kết quả', value: resultText }],
+        footer: { text: 'Đã đóng vote' },
+      };
+      await channel.messages.edit(messageId, { embeds: [embed], components: [] });
+    } catch (err) {
+      throw asMessageGone(err, messageId);
+    }
   }
 
   /** Gửi vào kênh thông báo đã cấu hình; kênh không tồn tại hay không gửi tin được → ném lỗi. */
@@ -66,6 +83,10 @@ export class DiscordJsNotifier implements DiscordNotifier {
     return this.sendableChannel(this.config.discord.scheduleChannelId, 'lịch chơi');
   }
 
+  private voteChannel(): Promise<SendableChannels> {
+    return this.sendableChannel(this.config.discord.voteChannelId, 'vote');
+  }
+
   /** Kênh theo id; không tồn tại hay không gửi tin được (kênh thoại, danh mục…) → ném lỗi. */
   private async sendableChannel(channelId: string, label: string): Promise<SendableChannels> {
     const channel = await this.client.channels.fetch(channelId);
@@ -74,6 +95,11 @@ export class DiscordJsNotifier implements DiscordNotifier {
     }
     return channel;
   }
+}
+
+/** Lỗi khi sửa tin `messageId`: 10008 Unknown Message → `MessageGoneError` (giữ lỗi gốc ở `cause`); lỗi khác trả về nguyên vẹn. */
+function asMessageGone(err: unknown, messageId: string): unknown {
+  return isUnknownMessage(err) ? new MessageGoneError(`Tin Discord ${messageId} không còn tồn tại`, { cause: err }) : err;
 }
 
 function isUnknownMessage(err: unknown): boolean {

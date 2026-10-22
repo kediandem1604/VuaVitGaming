@@ -17,8 +17,10 @@ import type { Ctx } from '../ctx.js';
 import { AppError, appError } from '../lib/errors.js';
 import type { OAuthClient } from '../modules/auth/oauth.js';
 import { installAuth } from './auth-plugin.js';
+import { adminCategoryRoutes } from './routes/admin-categories.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
+import { mvpRoutes } from './routes/mvp.js';
 import { sessionRoutes } from './routes/sessions.js';
 
 export interface AppDeps {
@@ -61,6 +63,8 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(authRoutes, { oauth: deps.oauth });
   await app.register(meRoutes);
   await app.register(sessionRoutes);
+  await app.register(mvpRoutes);
+  await app.register(adminCategoryRoutes);
 
   if (deps.webDistDir !== undefined) {
     await app.register(fastifyStatic, { root: deps.webDistDir });
