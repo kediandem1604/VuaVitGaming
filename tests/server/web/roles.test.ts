@@ -214,6 +214,33 @@ test('image served with stored mime', async () => {
   expect((await deleteImage('abc', adminSid)).statusCode).toBe(400);
 });
 
+test('role images have their own rate-limit bucket', async () => {
+  const { sid } = await memberWithSid();
+  const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
+  const swordsman = await roleByKey(testDb, 'swordsman');
+  expect((await putImage(swordsman.id, adminSid, png)).statusCode).toBe(204);
+
+  // Cùng một IP (vd nhiều người sau một NAT) tải ảnh 600 lần trong một phút: đều được.
+  const ip = '203.0.113.7';
+  const getImage = () => app.inject({ url: `/api/roles/${swordsman.id}/image`, cookies: cookies(sid), remoteAddress: ip });
+  const statuses: number[] = [];
+  for (let batch = 0; batch < 6; batch += 1) {
+    const results = await Promise.all(Array.from({ length: 100 }, getImage));
+    statuses.push(...results.map((r) => r.statusCode));
+  }
+  expect(statuses.every((s) => s === 200 || s === 304)).toBe(true);
+
+  // Ảnh không ăn vào bucket chung: các route khác từ IP đó vẫn chạy (vượt xa 120/phút nếu tính chung).
+  const me = await app.inject({ url: '/api/me', cookies: cookies(sid), remoteAddress: ip });
+  expect(me.statusCode).toBe(200);
+
+  // Lần thứ 601 trong phút → 429 với thân lỗi của app; bucket chung vẫn chưa cạn.
+  const limited = await getImage();
+  expect(limited.statusCode).toBe(429);
+  expect(limited.json()).toEqual(errorBody('RATE_LIMITED', 'Bạn thao tác quá nhanh, thử lại sau'));
+  expect((await app.inject({ url: '/api/roles', cookies: cookies(sid), remoteAddress: ip })).statusCode).toBe(200);
+});
+
 test('image of a role without one is 404 JSON', async () => {
   const { sid } = await memberWithSid();
   const goose = await roleByKey(testDb, 'goose');

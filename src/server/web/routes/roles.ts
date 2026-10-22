@@ -20,6 +20,13 @@ export const ROLE_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', '
 const IMAGE_BODY_LIMIT = 1_100_000;
 /** Ảnh đổi hiếm; trình duyệt giữ 5 phút rồi hỏi lại bằng ETag. */
 const IMAGE_CACHE_CONTROL = 'public, max-age=300';
+/**
+ * Bucket giới hạn tốc độ riêng cho ảnh role: một lần tải Đại sảnh có thể kéo ~70 ảnh,
+ * nhiều người sau một NAT (CGNAT di động) dùng chung IP — nếu tính vào bucket chung
+ * 120/phút thì mọi route /api của IP đó (kể cả "Tham gia") sẽ bị chặn. Thân lỗi 429
+ * vẫn là của app (route kế thừa `errorResponseBuilder` chung).
+ */
+const IMAGE_RATE_LIMIT = { max: 600, timeWindow: '1 minute' };
 
 /** `?all=1` → kể cả role đã tắt (chỉ admin; người khác vẫn chỉ thấy role bật). */
 const listQuery = z.object({ all: z.literal('1').optional() });
@@ -69,7 +76,7 @@ export async function roleRoutes(app: FastifyInstance): Promise<void> {
     return listRoles(app.ctx, { includeInactive: isAdmin && all === '1' });
   });
 
-  app.get('/api/roles/:id/image', { preHandler: requireMember }, async (request, reply) => {
+  app.get('/api/roles/:id/image', { preHandler: requireMember, config: { rateLimit: IMAGE_RATE_LIMIT } }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
     const image = await getRoleImage(app.ctx, id);
     if (!image) throw appError('NOT_FOUND');
