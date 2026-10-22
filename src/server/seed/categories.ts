@@ -7,7 +7,7 @@ export type CategorySeed = {
   sortOrder: number;
 };
 
-// Khoá tự nhiên khi seed là `name` (bảng không có unique) — xem seed.ts.
+// Chỉ được nạp khi bảng award_categories còn trống — xem seed.ts.
 export const CATEGORIES: readonly CategorySeed[] = [
   { name: 'Giết nhiều nhất', scope: 'always', modeKey: null, sortOrder: 1 },
   { name: 'Pha xử lý ngu nhất', scope: 'always', modeKey: null, sortOrder: 2 },

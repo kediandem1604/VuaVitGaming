@@ -58,6 +58,15 @@ test('reseed keeps admin edits and adds nothing', async () => {
   expect(await testDb.awardCategory.count()).toBe(6);
 });
 
+test('category seed leaves admin edits alone', async () => {
+  const category = await testDb.awardCategory.findFirstOrThrow({ where: { name: 'Pha xử lý ngu nhất' } });
+  await testDb.awardCategory.update({ where: { id: category.id }, data: { name: 'Pha xử lý đỉnh nhất' } });
+  await seedReferenceData(testDb);
+  expect(await testDb.awardCategory.count()).toBe(6);
+  expect(await testDb.awardCategory.count({ where: { name: 'Pha xử lý đỉnh nhất' } })).toBe(1);
+  expect(await testDb.awardCategory.count({ where: { name: 'Pha xử lý ngu nhất' } })).toBe(0);
+});
+
 test('self vote blocked by database', async () => {
   const voter = await testDb.member.create({
     data: { discordId: '100', memberCode: 'GGD-0001', displayName: 'An' },

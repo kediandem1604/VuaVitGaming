@@ -51,11 +51,11 @@ async function seedRoles(tx: Prisma.TransactionClient, modeIdByKey: Map<string, 
   }
 }
 
-// award_categories không có unique trên name → tìm theo tên rồi tạo nếu thiếu (không upsert).
+// award_categories không có khoá tự nhiên (admin đổi tên được) → chỉ nạp khi bảng
+// còn trống; đã có dòng nào thì bỏ qua hoàn toàn (ruling R13).
 async function seedCategories(tx: Prisma.TransactionClient, modeIdByKey: Map<string, number>): Promise<void> {
+  if ((await tx.awardCategory.count()) > 0) return;
   for (const { modeKey, ...category } of CATEGORIES) {
-    const existing = await tx.awardCategory.findFirst({ where: { name: category.name }, select: { id: true } });
-    if (existing) continue;
     const modeId = modeKey === null ? null : requireModeId(modeIdByKey, modeKey, `hạng mục "${category.name}"`);
     await tx.awardCategory.create({ data: { ...category, modeId }, select: { id: true } });
   }
