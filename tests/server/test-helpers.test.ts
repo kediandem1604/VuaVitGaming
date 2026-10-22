@@ -89,6 +89,14 @@ test('FakeNotifier down and failDmFor', async () => {
   expect(notifier.published).toHaveLength(0);
 });
 
+test('FakeNotifier rejects a vote menu without nominees, like Discord does', async () => {
+  const { notifier } = makeTestCtx();
+  await expect(notifier.publishVote({ ...prompt, nominees: [] })).rejects.toThrow('Discord không nhận menu rỗng');
+  expect(notifier.votes).toEqual([]);
+  // Bộ đếm không bị tiêu: tin tiếp theo vẫn là msg-1.
+  expect(await notifier.publishVote(prompt)).toBe('msg-1');
+});
+
 test('FakeMailer records sends and fails for listed addresses', async () => {
   const { mailer } = makeTestCtx();
   mailer.failFor.add('bad@example.com');

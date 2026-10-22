@@ -4,15 +4,17 @@
  * đều chạy lại được mà không gây trùng (nhắc có `notification_log`, đồng bộ tin
  * Discord dựa vào cờ `discordDirty`).
  *
- * Việc của task này: nhắc giờ, đăng/sửa bù tin Discord, dọn phiên web hết hạn.
- * Task 12 (tự kết thúc buổi, đóng vote) và Task 17 (chốt mùa, nhắc mod) thêm việc
+ * Việc hiện có: nhắc giờ, tự kết thúc buổi, đóng vote đến hạn, đăng/sửa bù tin buổi,
+ * đăng bù tin vote, dọn phiên web hết hạn. Task 17 (chốt mùa, nhắc mod) thêm việc
  * vào `defaultJobs()`.
  */
 
 import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import type { Ctx } from '../ctx.js';
+import { closeDueRounds, publishPendingVoteMessages } from '../modules/mvp/votes.js';
 import { runReminders } from '../modules/reminders/service.js';
+import { autoEndSessions } from '../modules/sessions/end.js';
 import { syncSessionMessage } from '../modules/sessions/service.js';
 import { tryAcquireLease } from './lease.js';
 
@@ -69,11 +71,18 @@ export async function cleanupWebSessions(ctx: Ctx): Promise<number> {
   return count;
 }
 
-/** Các việc của một lượt, theo thứ tự chạy: nhắc giờ trước (gấp nhất), rồi Discord, rồi dọn dẹp. */
+/**
+ * Các việc của một lượt, theo thứ tự chạy: nhắc giờ trước (gấp nhất); tự kết thúc buổi
+ * và đóng vote (đổi trạng thái, tự đăng Discord); rồi đăng bù tin buổi và tin vote
+ * (gom cả những gì hai việc trước không đăng được); cuối cùng dọn dẹp.
+ */
 export function defaultJobs(): Job[] {
   return [
     { name: 'reminders', run: runReminders },
+    { name: 'auto-end', run: autoEndSessions },
+    { name: 'close-votes', run: closeDueRounds },
     { name: 'session-sync', run: retrySessionSync },
+    { name: 'vote-sync', run: publishPendingVoteMessages },
     { name: 'web-session-cleanup', run: cleanupWebSessions },
   ];
 }

@@ -22,6 +22,7 @@ export class FakeMailer implements Mailer {
 /**
  * Ghi lại mọi lời gọi Discord. Khi `down` là true, mọi hàm đều ném lỗi.
  * `publishSession`/`publishVote` trả `msg-<n>` từ MỘT bộ đếm chung, bắt đầu từ 1.
+ * `publishVote` với danh sách ứng viên rỗng ném lỗi (Discord từ chối menu 0 lựa chọn).
  * `updateSession` với id trong `goneMessageIds` ném `MessageGoneError` (tin đã bị xoá).
  */
 export class FakeNotifier implements DiscordNotifier {
@@ -57,6 +58,8 @@ export class FakeNotifier implements DiscordNotifier {
 
   async publishVote(prompt: VotePrompt): Promise<string> {
     this.assertUp();
+    // Discord từ chối menu chọn không có lựa chọn nào — bản giả bắt chước để test không lọt lỗi này.
+    if (prompt.nominees.length === 0) throw new Error('Discord không nhận menu rỗng');
     this.votes.push(prompt);
     return this.nextMessageId();
   }

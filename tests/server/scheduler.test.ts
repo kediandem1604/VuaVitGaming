@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../src/server/ctx.js';
+import { castVote } from '../../src/server/modules/mvp/votes.js';
 import { createSession, setAttendance } from '../../src/server/modules/sessions/service.js';
 import { DEFAULT_LEASE_TTL_MS, tryAcquireLease } from '../../src/server/scheduler/lease.js';
 import { defaultJobs, retrySessionSync, runTick, startScheduler } from '../../src/server/scheduler/scheduler.js';
@@ -209,8 +210,11 @@ test('retry while Discord is still down keeps sessions dirty and never throws', 
 // defaultJobs
 // ---------------------------------------------------------------------------
 
-test('default jobs are reminders, session sync and web session cleanup, in that order', () => {
-  expect(defaultJobs().map((j) => j.name)).toEqual(['reminders', 'session-sync', 'web-session-cleanup']);
+/** Thứ tự chạy trong một lượt: nhắc giờ, tự kết thúc, đóng vote, tin buổi, tin vote, dọn phiên web. */
+const DEFAULT_JOB_NAMES = ['reminders', 'auto-end', 'close-votes', 'session-sync', 'vote-sync', 'web-session-cleanup'];
+
+test('default jobs run reminders, auto-end, close-votes, session-sync, vote-sync, web-session-cleanup in that order', () => {
+  expect(defaultJobs().map((j) => j.name)).toEqual(DEFAULT_JOB_NAMES);
 });
 
 test('web-session-cleanup deletes only expired web sessions', async () => {
@@ -253,15 +257,52 @@ test('a tick with the default jobs sends reminders, resyncs dirty sessions and c
   setNow('2026-10-22T13:45:00Z');
   const results = await runTick(ctx, defaultJobs());
 
-  expect(results).toEqual([
-    { name: 'reminders', ok: true },
-    { name: 'session-sync', ok: true },
-    { name: 'web-session-cleanup', ok: true },
-  ]);
+  expect(results).toEqual(DEFAULT_JOB_NAMES.map((name) => ({ name, ok: true })));
   expect(notifier.dms.map((d) => d.discordId)).toEqual(['dM']);
   expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-1', discordDirty: false });
   expect(notifier.published[0]?.attendees).toHaveLength(1);
   expect(await testDb.webSession.count()).toBe(0);
+});
+
+test('ticks auto-end a stale session, publish its vote once Discord is back, and close the vote when due', async () => {
+  const { ctx, notifier, setNow } = await setup();
+  silenceConsoleError();
+  const m = await createMember(testDb, { displayName: 'An' });
+  // Buổi 15:00 VN có một người tham gia; admin quên kết thúc. Lúc 19:00 VN (now) là đúng 4 giờ.
+  const stale = await insertSession(testDb, { startsAt: new Date('2026-10-22T08:00:00Z') });
+  await testDb.attendance.create({
+    data: { sessionId: stale.id, memberId: m.id, status: 'going', updatedAt: new Date('2026-10-22T07:00:00Z') },
+  });
+
+  // Lượt 1, Discord sập: buổi vẫn `ended`, đợt vote vẫn mở, các tin chờ đăng bù.
+  notifier.down = true;
+  let results = await runTick(ctx, defaultJobs());
+  expect(results).toEqual(DEFAULT_JOB_NAMES.map((name) => ({ name, ok: true })));
+  expect(await sessionRow(stale.id)).toMatchObject({ status: 'ended', discordMessageId: null, discordDirty: true });
+  const round = await testDb.voteRound.findUniqueOrThrow({ where: { sessionId: stale.id } });
+  expect(round).toMatchObject({ status: 'open', closesAt: new Date('2026-10-23T00:00:00Z') });
+  expect(await testDb.voteMessage.count({ where: { roundId: round.id, discordMessageId: null } })).toBe(3);
+
+  // Lượt 2, Discord trở lại: tin buổi đăng bù trước, rồi ba tin vote.
+  notifier.down = false;
+  results = await runTick(ctx, defaultJobs());
+  expect(results.every((r) => r.ok)).toBe(true);
+  expect(await sessionRow(stale.id)).toMatchObject({ status: 'ended', discordMessageId: 'msg-1', discordDirty: false });
+  expect(notifier.published[0]).toMatchObject({ id: stale.id, status: 'ended', attendees: [{ memberId: m.id, displayName: 'An' }] });
+  expect(notifier.votes.map((v) => v.categoryName)).toEqual(['Giết nhiều nhất', 'Pha xử lý ngu nhất', 'Pha dí người ngu nhất']);
+  expect(await testDb.voteMessage.count({ where: { roundId: round.id, discordMessageId: null } })).toBe(0);
+
+  // Có người vote; đến giờ đóng → lượt 3 đóng đợt, công bố kết quả, sửa các tin vote.
+  const voter = await createMember(testDb);
+  await castVote(ctx, { roundId: round.id, categoryId: notifier.votes[0]!.categoryId, voterId: voter.id, nomineeId: m.id });
+  setNow('2026-10-23T00:00:00Z');
+  results = await runTick(ctx, defaultJobs());
+  expect(results.every((r) => r.ok)).toBe(true);
+  expect((await testDb.voteRound.findUniqueOrThrow({ where: { id: round.id } })).status).toBe('closed');
+  expect(notifier.announcements).toHaveLength(1);
+  expect(notifier.announcements[0]).toContain('• Giết nhiều nhất: An (1 phiếu)');
+  expect(notifier.closedVotes.map((c) => c.messageId)).toEqual(['msg-2', 'msg-3', 'msg-4']);
+  expect(await testDb.award.count()).toBe(1);
 });
 
 // ---------------------------------------------------------------------------

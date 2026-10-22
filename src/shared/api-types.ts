@@ -47,6 +47,33 @@ export interface SessionDto {
   myStatus: 'going' | null;
 }
 
+/** Một người thắng một hạng mục tri ân. */
+export interface HallWinnerDto {
+  memberId: number;
+  displayName: string;
+  avatarUrl: string | null;
+  voteCount: number;
+}
+
+/** Một hạng mục của buổi; `winners` rỗng khi không ai được vote. */
+export interface HallAwardDto {
+  categoryName: string;
+  winners: HallWinnerDto[];
+}
+
+/** Một buổi đã đóng vote; `label` = `{chế độ} {HH:mm}` giờ VN. */
+export interface HallSessionDto {
+  sessionId: number;
+  label: string;
+  awards: HallAwardDto[];
+}
+
+/** Sảnh tri ân một ngày VN (`date` dạng `YYYY-MM-DD`): các buổi trong ngày đã đóng vote, theo giờ bắt đầu. */
+export interface HallOfDayDto {
+  date: string;
+  sessions: HallSessionDto[];
+}
+
 /** Thân phản hồi của mọi lỗi API. */
 export interface ApiErrorBody {
   error: { code: string; message: string };
