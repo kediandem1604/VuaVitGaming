@@ -7,6 +7,7 @@
 
 import { Client, Events, GatewayIntentBits } from 'discord.js';
 import type { Interaction } from 'discord.js';
+import type { DiscordStatus } from '../../shared/api-types.js';
 import type { Config } from '../config.js';
 import type { Ctx } from '../ctx.js';
 import type { DiscordNotifier, GuildDirectory } from '../ports.js';
@@ -22,6 +23,8 @@ export interface Bot {
   directory: GuildDirectory;
   /** Đăng nhập và chờ tới khi client sẵn sàng; reject nếu token sai hay không nối được. */
   start(): Promise<void>;
+  /** `ready` khi client đang nối Discord (cho `/healthz`); `down` trước khi đăng nhập hay khi mất kết nối. */
+  status(): DiscordStatus;
 }
 
 export function createBot(getCtx: () => Ctx, config: Config): Bot {
@@ -62,6 +65,7 @@ export function createBot(getCtx: () => Ctx, config: Config): Bot {
     notifier: new DiscordJsNotifier(client, config),
     directory: new DiscordGuildDirectory(client, guildId),
     start: () => loginAndWaitReady(client, token),
+    status: () => (client.isReady() ? 'ready' : 'down'),
   };
 }
 

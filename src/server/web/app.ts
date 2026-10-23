@@ -12,7 +12,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest, FastifyServerOptions } from 'fastify';
 import { ZodError } from 'zod';
-import type { ApiErrorBody } from '../../shared/api-types.js';
+import type { ApiErrorBody, DiscordStatus, HealthDto } from '../../shared/api-types.js';
 import type { Ctx } from '../ctx.js';
 import { AppError, appError } from '../lib/errors.js';
 import type { OAuthClient } from '../modules/auth/oauth.js';
@@ -32,6 +32,8 @@ export interface AppDeps {
   webDistDir?: string;
   /** Logger Fastify; mặc định tắt (test im lặng). */
   logger?: FastifyServerOptions['logger'];
+  /** Trạng thái bot Discord cho `/healthz`; bỏ trống thì luôn báo `down`. */
+  discordStatus?: () => DiscordStatus;
 }
 
 const RATE_LIMIT_PER_MINUTE = 120;
@@ -63,6 +65,8 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   app.addHook('onRequest', jsonGuard);
   acceptEmptyJsonBody(app);
 
+  healthRoute(app, deps.discordStatus ?? (() => 'down'));
+
   await app.register(authRoutes, { oauth: deps.oauth });
   await app.register(meRoutes);
   await app.register(sessionRoutes);
@@ -77,6 +81,22 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   }
 
   return app;
+}
+
+// ---------------------------------------------------------------------------
+// Sức khoẻ
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /healthz` cho Railway (và người vận hành): 200 chừng nào web còn trả lời,
+ * kèm trạng thái bot. Discord sập KHÔNG đổi mã trạng thái — khởi động lại web không
+ * chữa được Discord, còn nhắc email và API vẫn cần chạy. Không giới hạn tốc độ vì
+ * Railway gọi liên tục từ cùng một IP; không cần đăng nhập; không nằm dưới /api.
+ */
+function healthRoute(app: FastifyInstance, discordStatus: () => DiscordStatus): void {
+  app.get('/healthz', { config: { rateLimit: false } }, async (): Promise<HealthDto> => {
+    return { ok: true, discord: discordStatus() };
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -41,6 +41,7 @@ async function main(): Promise<void> {
     oauth: createDiscordOAuthClient(config),
     webDistDir: webDistDir(),
     logger: true,
+    discordStatus: bot.status,
   });
   let scheduler: { stop(): void } | undefined;
   installShutdown(app, bot, () => scheduler?.stop());

@@ -256,3 +256,15 @@ export interface SettingsDto {
 export interface ApiErrorBody {
   error: { code: string; message: string };
 }
+
+/** Bot Discord đang nối (`ready`) hay không (`down`: chưa đăng nhập, mất kết nối…). */
+export type DiscordStatus = 'ready' | 'down';
+
+/**
+ * `GET /healthz` (không cần đăng nhập, không giới hạn tốc độ). Luôn 200 khi tiến trình
+ * web còn sống — Discord sập không được làm Railway khởi động lại web.
+ */
+export interface HealthDto {
+  ok: true;
+  discord: DiscordStatus;
+}
