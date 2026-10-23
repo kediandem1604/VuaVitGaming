@@ -27,7 +27,13 @@ export interface Bot {
   status(): DiscordStatus;
 }
 
-export function createBot(getCtx: () => Ctx, config: Config): Bot {
+export interface BotOptions {
+  /** Thoát tiến trình khi phiên Discord bị vô hiệu; mặc định `process.exit` (test truyền hàm giả). */
+  exit?: (code: number) => void;
+}
+
+export function createBot(getCtx: () => Ctx, config: Config, opts: BotOptions = {}): Bot {
+  const exit = opts.exit ?? ((code: number) => process.exit(code));
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
   const { guildId, token } = config.discord;
 
@@ -58,7 +64,12 @@ export function createBot(getCtx: () => Ctx, config: Config): Bot {
   client.on(Events.Error, (err) => console.error('[bot] Lỗi client Discord:', err));
   client.on(Events.ShardError, (err, shardId) => console.error(`[bot] Lỗi shard ${shardId}:`, err));
   client.on(Events.Warn, (message) => console.warn(`[bot] Cảnh báo Discord: ${message}`));
-  client.on(Events.Invalidated, () => console.error('[bot] Phiên Discord bị vô hiệu — cần khởi động lại tiến trình'));
+  // Phiên bị vô hiệu thì discord.js không tự nối lại: thoát mã 1 để Railway (Restart Policy
+  // "On Failure") khởi động lại container. Nhắc giờ / tin bỏ lỡ được bộ hẹn giờ gửi bù khi lên lại.
+  client.on(Events.Invalidated, () => {
+    console.error('[bot] Phiên Discord bị vô hiệu — thoát để Railway khởi động lại tiến trình');
+    exit(1);
+  });
 
   return {
     client,

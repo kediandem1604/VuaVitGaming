@@ -27,3 +27,11 @@ export async function tryAcquireLease(ctx: Ctx, holderId: string, ttlMs = DEFAUL
   `;
   return rows.length > 0;
 }
+
+/**
+ * Trả khoá nếu `holderId` đang giữ (khoá của người khác giữ nguyên). Gọi lúc tắt máy
+ * gọn gàng: bản deploy mới lấy được khoá ngay thay vì chờ khoá hết hạn (tối đa 90 s).
+ */
+export async function releaseLease(ctx: Ctx, holderId: string): Promise<void> {
+  await ctx.db.$executeRaw`DELETE FROM scheduler_lease WHERE id = 1 AND holder = ${holderId}`;
+}

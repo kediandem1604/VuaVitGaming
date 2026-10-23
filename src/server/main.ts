@@ -19,6 +19,7 @@ import { db } from './db.js';
 import { createSmtpMailer } from './mail/smtp-mailer.js';
 import { createDiscordOAuthClient } from './modules/auth/oauth.js';
 import { startScheduler } from './scheduler/scheduler.js';
+import type { Scheduler } from './scheduler/scheduler.js';
 import { buildApp } from './web/app.js';
 
 // Chỉ ghi log: một lỗi lạc không làm sập cả web lẫn bot.
@@ -43,8 +44,8 @@ async function main(): Promise<void> {
     logger: true,
     discordStatus: bot.status,
   });
-  let scheduler: { stop(): void } | undefined;
-  installShutdown(app, bot, () => scheduler?.stop());
+  let scheduler: Scheduler | undefined;
+  installShutdown(app, bot, () => scheduler?.stop() ?? Promise.resolve());
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
   console.log(`Đang chạy tại cổng ${config.port}`);
@@ -83,16 +84,17 @@ function webDistDir(): string | undefined {
 
 /**
  * SIGINT/SIGTERM: dừng bộ hẹn giờ, đóng web, ngắt Discord, ngắt database rồi thoát 0
- * — mỗi bước lỗi chỉ ghi log. Bộ hẹn giờ dừng trước để không bắt đầu lượt mới
- * trong lúc đang ngắt kết nối.
+ * — mỗi bước lỗi chỉ ghi log. Bộ hẹn giờ dừng trước (chờ lượt đang dở chạy xong rồi
+ * trả khoá thuê) để không có việc nào bị cắt ngang khi database đã ngắt, và bản deploy
+ * mới chạy bộ hẹn giờ được ngay.
  */
-function installShutdown(app: FastifyInstance, bot: Bot, stopScheduler: () => void): void {
+function installShutdown(app: FastifyInstance, bot: Bot, stopScheduler: () => Promise<void>): void {
   let stopping = false;
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     if (stopping) return;
     stopping = true;
     console.log(`Nhận ${signal}, đang dừng…`);
-    await attempt('dừng bộ hẹn giờ', async () => stopScheduler());
+    await attempt('dừng bộ hẹn giờ', stopScheduler);
     await attempt('đóng web', () => app.close());
     await attempt('ngắt Discord', () => bot.client.destroy());
     await attempt('ngắt database', () => db.$disconnect());

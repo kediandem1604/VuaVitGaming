@@ -17,7 +17,7 @@ import { runReminders } from '../modules/reminders/service.js';
 import { runSeasonJobs } from '../modules/seasons/service.js';
 import { autoEndSessions } from '../modules/sessions/end.js';
 import { syncSessionMessage } from '../modules/sessions/service.js';
-import { tryAcquireLease } from './lease.js';
+import { releaseLease, tryAcquireLease } from './lease.js';
 
 export interface Job {
   name: string;
@@ -99,18 +99,29 @@ export interface SchedulerOptions {
   jobs?: Job[];
 }
 
+export interface Scheduler {
+  /**
+   * Ngừng hẹn lượt mới, chờ lượt đang dở chạy xong, rồi trả khoá thuê (nếu đang giữ) để
+   * bản deploy mới chạy được ngay. Không bao giờ reject; gọi lại vô hại.
+   */
+  stop(): Promise<void>;
+}
+
 /**
  * Chạy một lượt ngay rồi mỗi `intervalMs`. Lượt trước chưa xong thì bỏ qua lượt
  * này (không chạy chồng). Không giữ được khoá → không chạy việc nào; lỗi khi lấy
- * khoá chỉ ghi log. `stop()` ngừng hẹn lượt mới (lượt đang dở chạy nốt). Timer
- * được `unref` nên không tự giữ tiến trình sống.
+ * khoá chỉ ghi log. Timer được `unref` nên không tự giữ tiến trình sống. Tắt tiến
+ * trình thì `await stop()` trước khi ngắt database (xem `Scheduler.stop`).
  */
-export function startScheduler(ctx: Ctx, opts: SchedulerOptions = {}): { stop(): void } {
+export function startScheduler(ctx: Ctx, opts: SchedulerOptions = {}): Scheduler {
   const intervalMs = opts.intervalMs ?? SCHEDULER_INTERVAL_MS;
   const holderId = opts.holderId ?? defaultHolderId();
   const jobs = opts.jobs ?? defaultJobs();
   let running = false;
   let stopped = false;
+  /** Lượt đang chạy (để `stop()` chờ nó). */
+  let inFlight: Promise<void> = Promise.resolve();
+  let stopping: Promise<void> | null = null;
 
   const acquire = async (): Promise<boolean> => {
     try {
@@ -133,14 +144,30 @@ export function startScheduler(ctx: Ctx, opts: SchedulerOptions = {}): { stop():
     }
   };
 
-  const timer = setInterval(() => void tick(), intervalMs);
+  const startTick = (): void => {
+    if (running || stopped) return;
+    inFlight = tick();
+  };
+
+  const timer = setInterval(startTick, intervalMs);
   timer.unref();
-  void tick();
+  startTick();
+
+  const stopNow = async (): Promise<void> => {
+    stopped = true;
+    clearInterval(timer);
+    await inFlight; // tick không bao giờ reject
+    try {
+      await releaseLease(ctx, holderId);
+    } catch (err) {
+      console.error('[scheduler] Không trả được khoá thuê (khoá tự hết hạn sau 90 giây):', err);
+    }
+  };
 
   return {
-    stop(): void {
-      stopped = true;
-      clearInterval(timer);
+    stop(): Promise<void> {
+      stopping ??= stopNow();
+      return stopping;
     },
   };
 }

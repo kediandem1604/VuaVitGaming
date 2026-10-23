@@ -348,15 +348,50 @@ test('startScheduler ticks immediately, skips ticks while one is running, and st
     release();
     await vi.waitFor(() => expect(slow.runs()).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
   } finally {
-    scheduler.stop();
+    await scheduler.stop();
   }
 
-  // Lượt đang dở (nếu có) xong nốt, rồi không còn lượt mới.
-  await sleep(40);
+  // stop() đã chờ lượt đang dở xong; từ đó không còn lượt mới.
   const after = slow.runs();
   await sleep(60);
   expect(slow.runs()).toBe(after);
-  scheduler.stop(); // Gọi lại vô hại.
+  await scheduler.stop(); // Gọi lại vô hại.
+});
+
+test('stop() waits for the running tick to finish, then releases the lease for the next process', async () => {
+  const { ctx } = makeTestCtx();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let finished = false;
+  const slow = countingJob('slow', gate);
+  const job: Job = {
+    name: 'slow',
+    run: async (c) => {
+      await slow.job.run(c);
+      finished = true;
+    },
+  };
+
+  const scheduler = startScheduler(ctx, { intervalMs: 10, holderId: 'S', jobs: [job] });
+  await vi.waitFor(() => expect(slow.runs()).toBe(1), { timeout: 5_000 });
+  expect((await leaseRow())?.holder).toBe('S');
+
+  let stopped = false;
+  const stopping = scheduler.stop().then(() => {
+    stopped = true;
+  });
+  await sleep(50);
+  // Lượt đang chạy chưa xong: stop() còn chờ, khoá vẫn giữ.
+  expect(stopped).toBe(false);
+  expect((await leaseRow())?.holder).toBe('S');
+
+  release();
+  await stopping;
+  expect(finished).toBe(true);
+  expect(slow.runs()).toBe(1);
+  // Khoá đã trả: tiến trình mới (deploy kế tiếp) lấy được ngay, không phải chờ hết hạn.
+  expect(await leaseRow()).toBeNull();
+  expect(await tryAcquireLease(ctx, 'next')).toBe(true);
 });
 
 test('a runner that does not hold the lease never runs jobs; it takes over after the lease expires', async () => {
@@ -366,8 +401,9 @@ test('a runner that does not hold the lease never runs jobs; it takes over after
   const b = countingJob('b');
   const first = startScheduler(ctx, { intervalMs: 10, holderId: 'B', jobs: [b.job] });
   await sleep(80);
-  first.stop();
+  await first.stop();
   expect(b.runs()).toBe(0);
+  // stop() chỉ trả khoá của chính mình: khoá của A còn nguyên.
   expect((await leaseRow())?.holder).toBe('A');
 
   // Khoá của A hết hạn → B lấy được và chạy.
@@ -375,10 +411,10 @@ test('a runner that does not hold the lease never runs jobs; it takes over after
   const second = startScheduler(ctx, { intervalMs: 10, holderId: 'B', jobs: [b.job] });
   try {
     await vi.waitFor(() => expect(b.runs()).toBeGreaterThanOrEqual(1), { timeout: 5_000 });
+    expect((await leaseRow())?.holder).toBe('B');
   } finally {
-    second.stop();
+    await second.stop();
   }
-  expect((await leaseRow())?.holder).toBe('B');
 });
 
 test('a lease error is logged, never thrown, and skips the tick', async () => {
@@ -397,7 +433,7 @@ test('a lease error is logged, never thrown, and skips the tick', async () => {
 
   const scheduler = startScheduler(broken, { intervalMs: 10, jobs: [job.job] });
   await vi.waitFor(() => expect(errors).toHaveBeenCalled(), { timeout: 5_000 });
-  scheduler.stop();
+  await expect(scheduler.stop()).resolves.toBeUndefined(); // trả khoá lỗi cũng chỉ ghi log
 
   expect(job.runs()).toBe(0);
   expect(errors.mock.calls[0]?.[0]).toContain('[scheduler]');
@@ -408,8 +444,8 @@ test('the default holder id names the host and the process and is unique per sch
   const { ctx } = makeTestCtx();
   const a = startScheduler(ctx, { intervalMs: 60_000, jobs: [] });
   await vi.waitFor(async () => expect((await leaseRow())?.holder).toBeDefined(), { timeout: 5_000 });
-  a.stop();
   const holder = (await leaseRow())?.holder ?? '';
+  await a.stop();
   expect(holder).toContain(`-${process.pid}-`);
   expect(holder.length).toBeGreaterThan(`-${process.pid}-`.length + 4);
 });
