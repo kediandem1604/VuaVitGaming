@@ -123,6 +123,12 @@ test('the reminder switches keep their checkbox nature and names, and patch on t
   expect(dm).toHaveAttribute('type', 'checkbox');
   expect(email).toBeChecked();
   expect(dm).toBeChecked();
+  // Máng công tắc (ruling R15): tắt `night-700` với vòng `night-600` (≥ 3:1 trên panel) để thấy
+  // được khi tắt; bật `gold` (vòng cũng vàng). Vòng là box-shadow nên núm `after:` không xê dịch.
+  const track = email.nextElementSibling;
+  expect(track).toHaveAttribute('aria-hidden', 'true');
+  expect(track).toHaveClass('bg-night-700', 'ring-2', 'ring-night-600', 'peer-checked:bg-gold', 'peer-checked:ring-gold');
+  expect(track).not.toHaveClass('border-2');
   // Chưa có email: lời nhắc màu vàng cảnh báo (trong cả hai khối Email và Nhắc giờ).
   for (const note of screen.getAllByText('Chưa có email — bạn chỉ nhận nhắc qua Discord')) {
     expect(note).toHaveClass('text-gold');

@@ -231,8 +231,10 @@ interface SwitchProps {
 
 /**
  * Checkbox đóng vai công tắc: input ẩn (vẫn focus/đọc được), hình vẽ bằng `peer`. Máng tắt
- * `night-700`, bật `gold`; núm trắng viền `night-950`; focus bàn phím viền `gold` 3px như
- * mọi phần tử bấm được. Chuyển động trượt chỉ khi máy không giảm chuyển động (`motion-safe`).
+ * `night-700` có vòng `ring-2 ring-night-600` (3,31:1 trên panel `night-800`, đạt ≥ 3:1 nên
+ * thấy được máng khi tắt), bật `gold` với vòng cũng vàng; vòng là box-shadow nên không đẩy núm
+ * định vị tuyệt đối. Núm trắng viền `night-950`; focus bàn phím viền `gold` 3px như mọi phần tử
+ * bấm được. Chuyển động trượt chỉ khi máy không giảm chuyển động (`motion-safe`).
  */
 function Switch({ id, label, checked, disabled, onChange }: SwitchProps) {
   return (
@@ -250,7 +252,7 @@ function Switch({ id, label, checked, disabled, onChange }: SwitchProps) {
         />
         <span
           aria-hidden="true"
-          className="relative h-7 w-12 rounded-full bg-night-700 after:absolute after:top-0.5 after:left-0.5 after:size-6 after:rounded-full after:border-2 after:border-night-950 after:bg-white peer-checked:bg-gold peer-checked:after:translate-x-5 peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-gold peer-disabled:opacity-50 motion-safe:transition motion-safe:after:transition"
+          className="relative h-7 w-12 rounded-full bg-night-700 ring-2 ring-night-600 after:absolute after:top-0.5 after:left-0.5 after:size-6 after:rounded-full after:border-2 after:border-night-950 after:bg-white peer-checked:bg-gold peer-checked:ring-gold peer-checked:after:translate-x-5 peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-gold peer-disabled:opacity-50 motion-safe:transition motion-safe:after:transition"
         />
       </span>
     </label>
