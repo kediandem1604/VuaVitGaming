@@ -22,9 +22,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Có `/` cuối: proxy so khớp theo tiền tố, nên `/api` sẽ bắt luôn file `/api.ts` của web.
     proxy: {
-      '/api': API_ORIGIN,
-      '/auth': API_ORIGIN,
+      '/api/': API_ORIGIN,
+      '/auth/': API_ORIGIN,
     },
   },
 });
