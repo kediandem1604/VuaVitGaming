@@ -506,6 +506,29 @@ test('JSON guard: DELETE without a body may omit content-type; role image upload
   expect((await app.inject({ method: 'POST', url: '/auth/logout', headers: { 'content-type': 'text/plain' }, payload: 'x' })).statusCode).toBe(204);
 });
 
+test('JSON guard: a percent-encoded /api path is guarded like the route the router runs', async () => {
+  directory.members.set('1', guildInfo('1'));
+  const sid = await loginAs('1');
+  const textPlain = { 'content-type': 'text/plain' };
+
+  // Router giải mã %: `/%61pi/me` là `/api/me`, nên text/plain bị chặn y như vậy.
+  const post = await app.inject({ method: 'POST', url: '/%61pi/me', headers: textPlain, payload: 'x' });
+  expect(post.statusCode).toBe(415);
+  expect(post.json()).toEqual(errorBody('UNSUPPORTED_MEDIA_TYPE', 'Chỉ nhận dữ liệu JSON'));
+
+  // Route thật (PATCH /api/me) gọi qua đường dẫn mã hoá: guard chặn trước handler, hồ sơ không đổi.
+  for (const url of ['/%61pi/me', '/a%70i/me', '/%61%70%69/me']) {
+    const res = await app.inject({ method: 'PATCH', url, cookies: { ggd_sid: sid }, headers: textPlain, payload: '{"notifyDm":false}' });
+    expect(res.statusCode, url).toBe(415);
+  }
+  expect((await getMe(sid)).json()).toMatchObject({ notifyDm: true });
+
+  // Ngoại lệ ảnh vẫn theo route thật: mã hoá đường dẫn không làm mất ngoại lệ, cũng không mở thêm.
+  expect((await app.inject({ method: 'PUT', url: '/api/admin/roles/12/%69mage', headers: { 'content-type': 'image/png' } })).statusCode).toBe(401);
+  expect((await app.inject({ method: 'PUT', url: '/%61pi/admin/roles/12/image', headers: textPlain, payload: 'x' })).statusCode).toBe(415);
+  expect((await app.inject({ method: 'PUT', url: '/%61pi/admin/roles/12/other', headers: { 'content-type': 'image/png' } })).statusCode).toBe(415);
+});
+
 test('profile update persists', async () => {
   directory.members.set('1', guildInfo('1'));
   const sid = await loginAs('1');
@@ -695,6 +718,47 @@ test('static files and the SPA fallback do not use up the API rate limit (shared
   });
 });
 
+test('percent-encoded /api paths are rate-limited like the route the router runs', async () => {
+  // `/%61pi/me`, `/a%70i/me`… đều chạy handler của `/api/me` nên phải chung một xô với nó.
+  const encoded = ['/%61pi/me', '/a%70i/me', '/%61%70%69/me'];
+  for (let i = 0; i < 120; i += 1) {
+    const url = encoded[i % encoded.length] ?? '';
+    expect((await app.inject({ url })).statusCode, url).toBe(401);
+  }
+  const limited = await app.inject({ url: '/%61pi/me' });
+  expect(limited.statusCode).toBe(429);
+  expect(limited.json()).toEqual(errorBody('RATE_LIMITED', 'Bạn thao tác quá nhanh, thử lại sau'));
+  expect((await app.inject({ url: '/api/me' })).statusCode).toBe(429);
+});
+
+test('a percent-encoded /auth path is rate-limited like /auth (no unlimited OAuth round-trips)', async () => {
+  for (let i = 0; i < 120; i += 1) expect((await app.inject({ url: '/%61uth/login' })).statusCode).toBe(302);
+  expect((await app.inject({ url: '/%61uth/login' })).statusCode).toBe(429);
+  expect((await app.inject({ url: '/%61uth/callback?code=x&state=y' })).statusCode).toBe(429);
+  expect((await app.inject({ url: '/auth/login' })).statusCode).toBe(429);
+  expect(oauth.exchanged).toEqual([]);
+});
+
+test('with the web build served, encoded API paths count while static files and SPA pages never do', async () => {
+  await withWebBuild(async (dir) => {
+    const web = await buildApp(ctx, { oauth, webDistDir: dir });
+    try {
+      for (let i = 0; i < 120; i += 1) expect((await web.inject({ url: '/%61pi/me' })).statusCode).toBe(401);
+      expect((await web.inject({ url: '/%61pi/me' })).statusCode).toBe(429);
+      // Đường dẫn /api lạ (rơi vào route tĩnh `/*`) vẫn tính như trước, kể cả khi mã hoá.
+      expect((await web.inject({ url: '/api/khong-co' })).statusCode).toBe(429);
+      expect((await web.inject({ url: '/%61pi/khong-co' })).statusCode).toBe(429);
+
+      // Hết lượt API nhưng tải trang vẫn được: file tĩnh, trang SPA, kể cả đường dẫn mã hoá.
+      for (const url of ['/', '/assets/app.js', '/%61ssets/app.js', '/hom-nay', '/h%C3%B4m-nay', '/tri-an?ngay=2026-10-22']) {
+        expect((await web.inject({ url })).statusCode, url).toBe(200);
+      }
+    } finally {
+      await web.close();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Header bảo mật
 // ---------------------------------------------------------------------------
@@ -753,6 +817,13 @@ test('serves the web build and falls back to index.html for app routes', async (
       expect(api.statusCode).toBe(404);
       expect(api.json()).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
       expect((await web.inject({ url: '/auth/nope' })).json()).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
+      // Đường dẫn mã hoá được hiểu như router hiểu: /%61pi là /api → 404 JSON; trang SPA mã hoá vẫn là SPA.
+      for (const url of ['/%61pi/khong-co', '/%61uth/khong-co', '/a%70i']) {
+        const res = await web.inject({ url });
+        expect(res.statusCode, url).toBe(404);
+        expect(res.json()).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
+      }
+      expect((await web.inject({ url: '/h%C3%B4m-nay' })).body).toContain('GGD Hub');
       // Chỉ GET mới nhận index.html.
       expect((await web.inject({ method: 'POST', url: '/sessions' })).statusCode).toBe(404);
 

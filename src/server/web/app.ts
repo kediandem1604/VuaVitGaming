@@ -24,7 +24,7 @@ import { adminModeRoutes } from './routes/admin-modes.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
 import { mvpRoutes } from './routes/mvp.js';
-import { ROLE_IMAGE_TYPES, roleRoutes } from './routes/roles.js';
+import { ROLE_IMAGE_TYPES, ROLE_IMAGE_UPLOAD_ROUTE, roleRoutes } from './routes/roles.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { statsRoutes } from './routes/stats.js';
 
@@ -64,7 +64,8 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
     timeWindow: '1 minute',
     // Chỉ API và đăng nhập: file tĩnh và trang SPA không tính, vì nhiều người sau một NAT
     // (CGNAT di động) chung một IP — tải trang thôi cũng đủ làm cả nhóm bị chặn "Tham gia".
-    allowList: (request) => !isApiOrAuth(pathOf(request)),
+    // Xét theo route đã khớp, không theo URL thô: `/%61pi/me` chạy handler của `/api/me`.
+    allowList: (request) => !isApiOrAuth(routePath(request)),
     errorResponseBuilder: () => appError('RATE_LIMITED', 'Bạn thao tác quá nhanh, thử lại sau'),
   });
 
@@ -178,7 +179,7 @@ function statusCodeOf(err: unknown): number | null {
 }
 
 function sendNotFound(request: FastifyRequest, reply: FastifyReply, serveWeb: boolean): FastifyReply {
-  const path = pathOf(request);
+  const path = routePath(request);
   if (serveWeb && (request.method === 'GET' || request.method === 'HEAD') && !isApiOrAuth(path)) {
     // Đường dẫn của SPA (React Router): trả index.html, trình duyệt không được cache.
     return reply.header('cache-control', 'no-cache').sendFile('index.html');
@@ -191,23 +192,23 @@ function sendNotFound(request: FastifyRequest, reply: FastifyReply, serveWeb: bo
 // ---------------------------------------------------------------------------
 
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
-const ROLE_IMAGE_UPLOAD = /^\/api\/admin\/roles\/[^/]+\/image$/;
 const IMAGE_TYPES = new Set(ROLE_IMAGE_TYPES);
 
 /**
  * Thao tác ghi dưới /api phải gửi `application/json` (chống CSRF kiểu form, cùng
  * với cookie sameSite=lax). Ngoại lệ: `PUT /api/admin/roles/:id/image` nhận ảnh;
- * DELETE không có body được bỏ content-type.
+ * DELETE không có body được bỏ content-type. Xét theo route đã khớp (`routePath`),
+ * nên đường dẫn mã hoá % (`/%61pi/me`) bị chặn y như đường dẫn thường.
  */
 async function jsonGuard(request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | undefined> {
   if (!MUTATING_METHODS.has(request.method)) return undefined;
-  const path = pathOf(request);
+  const path = routePath(request);
   if (!isUnder(path, '/api')) return undefined;
 
   const type = mediaTypeOf(request.headers['content-type']);
   if (type === 'application/json') return undefined;
   if (type === undefined && request.method === 'DELETE') return undefined;
-  if (request.method === 'PUT' && type !== undefined && IMAGE_TYPES.has(type) && ROLE_IMAGE_UPLOAD.test(path)) {
+  if (request.method === 'PUT' && type !== undefined && IMAGE_TYPES.has(type) && path === ROLE_IMAGE_UPLOAD_ROUTE) {
     return undefined;
   }
   return reply.code(415).send(errorBody('UNSUPPORTED_MEDIA_TYPE', 'Chỉ nhận dữ liệu JSON'));
@@ -239,8 +240,37 @@ function acceptEmptyJsonBody(app: FastifyInstance): void {
 // Đường dẫn
 // ---------------------------------------------------------------------------
 
+/** Đường dẫn THÔ (chưa giải mã %), bỏ query string — chỉ dùng để ghi log. */
 function pathOf(request: FastifyRequest): string {
   return request.url.split('?', 1)[0] ?? '';
+}
+
+/**
+ * Đường dẫn để quyết định một request là API/đăng nhập hay trang web (giới hạn tốc độ,
+ * guard JSON, 404 JSON hay index.html). Không bao giờ dùng URL thô: router giải mã %
+ * trước khi chọn route, nên `/%61pi/me` chạy handler của `/api/me` — xét URL thô thì
+ * nó lọt khỏi giới hạn tốc độ và guard JSON.
+ *
+ * - Khớp một route cụ thể → mẫu route router đã chọn (`/api/sessions/:id`).
+ * - Không khớp route nào (404), hoặc chỉ khớp route bắt-tất-cả của file tĩnh (`/*`, cũng
+ *   là nơi `/api/khong-co` rơi vào khi có thư mục web) → đường dẫn đã giải mã %.
+ */
+function routePath(request: FastifyRequest): string {
+  const route = request.routeOptions.url;
+  if (route !== undefined && !route.endsWith('*')) return route;
+  return decodedPathOf(request);
+}
+
+/**
+ * Đường dẫn đã giải mã %. Chuỗi mã hoá hỏng thì coi như API (giới hạn tốc độ, guard JSON,
+ * 404 JSON) — chặt hơn là thả; thực tế router đã trả 400 cho URL hỏng trước khi tới đây.
+ */
+function decodedPathOf(request: FastifyRequest): string {
+  try {
+    return decodeURIComponent(pathOf(request));
+  } catch {
+    return '/api';
+  }
 }
 
 function isUnder(path: string, prefix: string): boolean {

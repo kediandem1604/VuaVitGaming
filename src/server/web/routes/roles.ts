@@ -16,6 +16,8 @@ import { idParams } from '../schemas.js';
 
 /** Content-type ảnh được nhận ở `PUT /api/admin/roles/:id/image` (guard JSON trong app.ts dùng cùng danh sách). */
 export const ROLE_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp'];
+/** Mẫu route tải ảnh vai trò — guard JSON trong app.ts so đúng mẫu này (route đã khớp) để cho ảnh đi qua. */
+export const ROLE_IMAGE_UPLOAD_ROUTE = '/api/admin/roles/:id/image';
 /** Hơn 1 MiB một chút để body đúng 1 MiB qua được; service kiểm giới hạn chính xác. */
 const IMAGE_BODY_LIMIT = 1_100_000;
 /** Ảnh đổi hiếm; trình duyệt giữ 5 phút rồi hỏi lại bằng ETag. */
@@ -97,7 +99,7 @@ export async function roleRoutes(app: FastifyInstance): Promise<void> {
     return updateRole(app.ctx, id, patchBody.parse(request.body));
   });
 
-  app.put('/api/admin/roles/:id/image', { preHandler: requireAdmin, errorHandler: imageUploadErrorHandler }, async (request, reply) => {
+  app.put(ROLE_IMAGE_UPLOAD_ROUTE, { preHandler: requireAdmin, errorHandler: imageUploadErrorHandler }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
     // Body không phải buffer ảnh (vd gửi JSON, hoặc rỗng) → cùng lỗi với file giả ảnh.
     if (!Buffer.isBuffer(request.body)) throw appError('INVALID_IMAGE');
