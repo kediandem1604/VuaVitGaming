@@ -10,3 +10,6 @@ export const idParams = z.object({ id: z.coerce.number().int().positive().max(2_
 
 // Chỉ kiểm tra dạng ở đây; ngày không tồn tại (30/02) do src/server/lib/time.ts bắt.
 export const VN_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Mã mùa `YYYY-MM` (tháng 01–12) trong query. */
+export const SEASON_ID = /^\d{4}-(0[1-9]|1[0-2])$/;

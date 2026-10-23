@@ -23,6 +23,7 @@ import { meRoutes } from './routes/me.js';
 import { mvpRoutes } from './routes/mvp.js';
 import { ROLE_IMAGE_TYPES, roleRoutes } from './routes/roles.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { statsRoutes } from './routes/stats.js';
 
 export interface AppDeps {
   oauth: OAuthClient;
@@ -67,6 +68,7 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(mvpRoutes);
   await app.register(adminCategoryRoutes);
   await app.register(roleRoutes);
+  await app.register(statsRoutes);
 
   if (deps.webDistDir !== undefined) {
     await app.register(fastifyStatic, { root: deps.webDistDir });

@@ -3,7 +3,12 @@ import { MessageFlags } from 'discord.js';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { GuildMemberSource } from '../../../src/server/bot/guild-directory.js';
 import { handleInteraction } from '../../../src/server/bot/interactions.js';
-import type { InteractionLike, SelectMenuInteractionLike } from '../../../src/server/bot/interactions.js';
+import type {
+  AutocompleteInteractionLike,
+  CommandInteractionLike,
+  InteractionLike,
+  SelectMenuInteractionLike,
+} from '../../../src/server/bot/interactions.js';
 import type { Ctx } from '../../../src/server/ctx.js';
 import { closeVoteRound } from '../../../src/server/modules/mvp/votes.js';
 import { endSession } from '../../../src/server/modules/sessions/end.js';
@@ -110,6 +115,16 @@ class FakeInteraction implements InteractionLike, SelectMenuInteractionLike {
 
   isStringSelectMenu(): this is SelectMenuInteractionLike {
     return this.opts.kind === 'select';
+  }
+
+  // Lệnh slash và autocomplete có bản giả riêng ở commands.test.ts; `kind: 'command'` ở
+  // đây chỉ là "không phải nút cũng không phải menu".
+  isChatInputCommand(): this is CommandInteractionLike {
+    return false;
+  }
+
+  isAutocomplete(): this is AutocompleteInteractionLike {
+    return false;
   }
 
   inCachedGuild(): this is SelectMenuInteractionLike & { member: GuildMemberSource } {

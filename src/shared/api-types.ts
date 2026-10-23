@@ -188,6 +188,18 @@ export interface HallDto {
   roles: HallRoleDto[];
 }
 
+/** Một role mà người đang đăng nhập đang hoá thân trong mùa hiện tại (`GET /api/me/titles`), kèm điểm. */
+export interface HeldRoleDto {
+  role: RoleDto;
+  score: number;
+}
+
+/** Một mùa (`GET /api/seasons`, mới nhất trước): mã `YYYY-MM` và đã chốt chưa. Mùa hiện tại luôn có mặt. */
+export interface SeasonDto {
+  id: string;
+  closed: boolean;
+}
+
 /** Thân phản hồi của mọi lỗi API. */
 export interface ApiErrorBody {
   error: { code: string; message: string };

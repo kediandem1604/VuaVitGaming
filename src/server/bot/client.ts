@@ -10,6 +10,7 @@ import type { Interaction } from 'discord.js';
 import type { Config } from '../config.js';
 import type { Ctx } from '../ctx.js';
 import type { DiscordNotifier, GuildDirectory } from '../ports.js';
+import { commandDefinitions } from './commands.js';
 import { DiscordJsNotifier } from './discord-notifier.js';
 import { DiscordGuildDirectory, toGuildMemberInfo } from './guild-directory.js';
 import { handleInteraction } from './interactions.js';
@@ -32,17 +33,18 @@ export function createBot(getCtx: () => Ctx, config: Config): Bot {
   client.on(Events.GuildMemberRemove, safeHandler('guildMemberRemove', handlers.guildMemberRemove));
   client.on(Events.GuildMemberUpdate, safeHandler('guildMemberUpdate', handlers.guildMemberUpdate));
 
-  // Nút Tham gia/Huỷ, menu vote (Task 13) và lệnh slash (Task 14) đều đi qua một cửa.
+  // Nút Tham gia/Huỷ, menu vote, lệnh slash và autocomplete đều đi qua một cửa.
   client.on(
     Events.InteractionCreate,
     safeHandler('interactionCreate', (interaction: Interaction) => handleInteraction(getCtx(), interaction)),
   );
 
-  // Mỗi lần sẵn sàng (đăng nhập lại cũng vậy): quét toàn bộ server rồi đồng bộ.
+  // Mỗi lần sẵn sàng (đăng nhập lại cũng vậy): đăng ký lệnh slash rồi quét toàn bộ server để đồng bộ.
   client.on(
     Events.ClientReady,
     safeHandler('clientReady', async (ready: Client<true>) => {
       console.log(`[bot] Đã đăng nhập Discord với tên ${ready.user.tag}`);
+      await registerCommands(ready, guildId);
       const guild = await ready.guilds.fetch(guildId);
       const members = await guild.members.fetch();
       const infos = members.filter((m) => !m.user.bot).map((m) => toGuildMemberInfo(m));
@@ -61,6 +63,21 @@ export function createBot(getCtx: () => Ctx, config: Config): Bot {
     directory: new DiscordGuildDirectory(client, guildId),
     start: () => loginAndWaitReady(client, token),
   };
+}
+
+/**
+ * Đăng ký lệnh slash THEO SERVER (`set` thay cả bộ, nên lệnh bỏ đi cũng biến mất):
+ * cập nhật ngay, trong khi lệnh toàn cục mất tới một giờ. Lỗi chỉ ghi log — bot vẫn
+ * chạy với bộ lệnh đã đăng ký lần trước, và đồng bộ thành viên vẫn tiếp tục.
+ */
+async function registerCommands(ready: Client<true>, guildId: string): Promise<void> {
+  const definitions = commandDefinitions();
+  try {
+    await ready.application.commands.set(definitions, guildId);
+    console.log(`[bot] Đã đăng ký ${definitions.length} lệnh slash cho server ${guildId}`);
+  } catch (err) {
+    console.error('[bot] Không đăng ký được lệnh slash:', err);
+  }
 }
 
 /** `login` reject khi token sai hay không nối được; nếu không thì chờ `clientReady`. */

@@ -380,6 +380,13 @@ function toReportDto(r: ReportRow): ReportDto {
   };
 }
 
+/** Một lần khai dạng DTO (API trả về sau khi khai/sửa); không có → `NOT_FOUND`. */
+export async function getReportDto(ctx: Ctx, reportId: number): Promise<ReportDto> {
+  const row = isId(reportId) ? await ctx.db.statReport.findUnique({ where: { id: reportId }, select: REPORT_SELECT }) : null;
+  if (!row) throw appError('NOT_FOUND');
+  return toReportDto(row);
+}
+
 /** Lần khai của một người, mới nhất trước; `limit` mặc định 50, tối đa 100 (lớn hơn bị cắt). */
 export async function listMyReports(ctx: Ctx, memberId: number, limit = 50): Promise<ReportDto[]> {
   if (!Number.isInteger(limit) || limit < 1) throw appError('VALIDATION', 'Giới hạn không hợp lệ');
