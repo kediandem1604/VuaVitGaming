@@ -22,8 +22,10 @@
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import type { Ctx } from '../../ctx.js';
+import { chunkLines } from '../../lib/chunk.js';
 import { appError } from '../../lib/errors.js';
 import { formatVnDay, formatVnTime, toVnDate, vnDayRange } from '../../lib/time.js';
+import { HOT_TX } from '../../lib/tx.js';
 import { MessageGoneError } from '../../ports.js';
 import type { SessionView, VotePrompt } from '../../ports.js';
 import type { HallOfDayDto, HallSessionDto } from '../../../shared/api-types.js';
@@ -85,7 +87,7 @@ export async function openVoteRound(ctx: Ctx, sessionId: number, categoryIds: nu
 
   let roundId: number | null;
   try {
-    roundId = await ctx.db.$transaction((tx) => createRoundTx(tx, sessionId, categoryIds, now, voteDurationHours));
+    roundId = await ctx.db.$transaction((tx) => createRoundTx(tx, sessionId, categoryIds, now, voteDurationHours), HOT_TX);
   } catch (err) {
     // Bên kia vừa mở đợt cho buổi này (sessionId là unique): dùng đợt của họ.
     if (!isUniqueViolation(err)) throw err;
@@ -221,8 +223,12 @@ export interface VoteReceipt {
  * → không tự vote (`SELF_VOTE`) → người được vote đang tham gia buổi và còn trong
  * server (`NOT_NOMINEE`). Trả về tên người được vote và hạng mục (đọc trong cùng giao dịch).
  *
- * Khoá dòng đợt (`FOR UPDATE`) trong giao dịch để phiếu bỏ đúng lúc đóng đợt không
- * lọt ra ngoài bảng kết quả: hoặc phiếu vào trước và được tính, hoặc thấy đợt đã đóng.
+ * Khoá CHIA SẺ dòng đợt (`FOR SHARE`) trong giao dịch: nhiều người vote cùng lúc không
+ * phải xếp hàng chờ nhau, nhưng câu `UPDATE … WHERE status = 'open'` của `closeVoteRound`
+ * xung đột với khoá này — nên phiếu bỏ đúng lúc đóng đợt không lọt ra ngoài bảng kết
+ * quả: hoặc phiếu vào trước (đóng đợt chờ nó lưu xong rồi mới tính), hoặc thấy đợt đã đóng.
+ * Một người đổi phiếu liên tục vẫn chỉ có một phiếu: `upsert` theo khoá unique là một câu
+ * `INSERT … ON CONFLICT DO UPDATE` của PostgreSQL.
  */
 export async function castVote(ctx: Ctx, input: VoteInput): Promise<VoteReceipt> {
   const parsed = voteSchema.safeParse(input);
@@ -230,7 +236,7 @@ export async function castVote(ctx: Ctx, input: VoteInput): Promise<VoteReceipt>
   const { roundId, categoryId, voterId, nomineeId } = parsed.data;
 
   return ctx.db.$transaction(async (tx) => {
-    const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM vote_rounds WHERE id = ${roundId} FOR UPDATE`;
+    const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM vote_rounds WHERE id = ${roundId} FOR SHARE`;
     if (locked.length === 0) throw appError('NOT_FOUND');
     const round = await tx.voteRound.findUniqueOrThrow({
       where: { id: roundId },
@@ -262,7 +268,7 @@ export async function castVote(ctx: Ctx, input: VoteInput): Promise<VoteReceipt>
       update: { nomineeId, updatedAt: now },
     });
     return { nomineeName: nominee.member.displayName, categoryName: inRound.category.name };
-  });
+  }, HOT_TX);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +340,7 @@ export async function closeVoteRound(ctx: Ctx, roundId: number): Promise<void> {
     // đúng lúc này vẫn có thể nhận id ngay sau đây và sẽ được sửa ở lượt đăng bù.
     await tx.voteMessage.updateMany({ where: { roundId }, data: { resultPending: true } });
     return true;
-  });
+  }, HOT_TX);
   if (!closed) return;
 
   try {
@@ -393,7 +399,9 @@ async function deliverRoundResults(ctx: Ctx, roundId: number): Promise<void> {
     const label = sessionLabel({ modeName: round.session.mode.nameVi, startsAt: round.session.startsAt });
     let announced = false;
     try {
-      await ctx.notifier.announce(buildAnnouncement(label, results));
+      // Nhiều hạng mục / hoà nhiều người có thể vượt 2000 ký tự: đăng từng phần theo thứ tự;
+      // một phần lỗi thì giữ cờ và lượt sau đăng lại cả thông báo (phần đã đăng có thể lặp — chấp nhận).
+      for (const part of buildAnnouncement(label, results)) await ctx.notifier.announce(part);
       announced = true;
     } catch (err) {
       console.error(`[mvp] Không công bố được kết quả đợt vote ${roundId}: ${messageOf(err)}`);
@@ -431,15 +439,18 @@ function winnersText(winners: { displayName: string; voteCount: number }[]): str
   return `${winners.map((w) => w.displayName).join(', ')} (${first.voteCount} phiếu)`;
 }
 
-/** Thông báo kết quả cả đợt vào kênh thông báo. */
+/**
+ * Thông báo kết quả cả đợt vào kênh thông báo, chia thành các phần ≤ 2000 ký tự cắt ở
+ * ranh giới dòng (giới hạn một tin Discord); phần sau không lặp lại tiêu đề.
+ */
 function buildAnnouncement(
   label: string,
   categories: { category: { name: string }; winners: { displayName: string; voteCount: number }[] }[],
-): string {
-  return [
+): string[] {
+  return chunkLines([
     `🏆 Kết quả tri ân buổi ${label}`,
     ...categories.map((c) => `• ${c.category.name}: ${winnersText(c.winners)}`),
-  ].join('\n');
+  ]);
 }
 
 /** Kết quả thay cho menu chọn trên từng tin vote. */

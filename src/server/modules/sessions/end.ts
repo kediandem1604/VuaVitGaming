@@ -10,6 +10,7 @@
 
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
+import { HOT_TX } from '../../lib/tx.js';
 import { defaultCategoryIds, listApplicableCategories } from '../mvp/categories.js';
 import { createRoundTx, publishPendingVoteMessages } from '../mvp/votes.js';
 import { getSettings } from '../settings/service.js';
@@ -51,7 +52,7 @@ export async function endSession(ctx: Ctx, sessionId: number, categoryIds?: numb
       throw appError(exists ? 'SESSION_NOT_OPEN' : 'NOT_FOUND');
     }
     return createRoundTx(tx, sessionId, chosen, now, voteDurationHours);
-  });
+  }, HOT_TX);
 
   await syncSessionMessage(ctx, sessionId);
   if (roundId !== null) await publishPendingVoteMessages(ctx);

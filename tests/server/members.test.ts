@@ -1,5 +1,6 @@
-import type { PrismaClient } from '@prisma/client';
-import { beforeEach, expect, test } from 'vitest';
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { beforeEach, expect, test, vi } from 'vitest';
+import type { Ctx } from '../../src/server/ctx.js';
 import {
   accessLevelFromRoles,
   buildWelcomeText,
@@ -11,6 +12,7 @@ import {
   updateProfile,
   upsertMemberFromGuild,
 } from '../../src/server/modules/members/service.js';
+import { setAttendance } from '../../src/server/modules/sessions/service.js';
 import type { GuildMemberInfo } from '../../src/server/ports.js';
 import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
@@ -335,6 +337,86 @@ test('syncGuildMembers releases the seats of members missing from the guild', as
     status: 'cancelled',
     updatedAt: new Date('2026-10-22T13:00:00Z'),
   });
+});
+
+/**
+ * Bản sao ctx mà mọi giao dịch của nó gọi `onAttendanceUpdateMany` ngay sau mỗi
+ * `tx.attendance.updateMany` (giao dịch vẫn mở, vẫn giữ mọi khoá đã lấy).
+ */
+function pausingCtx(ctx: Ctx, onAttendanceUpdateMany: () => Promise<void>): Ctx {
+  const wrapTx = (tx: Prisma.TransactionClient): Prisma.TransactionClient =>
+    new Proxy(tx, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop) as unknown;
+        if (prop === 'attendance') {
+          return new Proxy(value as object, {
+            get(delegate, name) {
+              const fn = Reflect.get(delegate, name) as unknown;
+              if (name !== 'updateMany' || typeof fn !== 'function') {
+                return typeof fn === 'function' ? (fn as (...a: unknown[]) => unknown).bind(delegate) : fn;
+              }
+              return async (...args: unknown[]) => {
+                const result = await (fn as (...a: unknown[]) => Promise<unknown>).apply(delegate, args);
+                await onAttendanceUpdateMany();
+                return result;
+              };
+            },
+          });
+        }
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+  const db = new Proxy({} as PrismaClient, {
+    get(_target, prop) {
+      if (prop === '$transaction') {
+        return (fn: (tx: Prisma.TransactionClient) => Promise<unknown>, opts?: unknown) =>
+          (testDb.$transaction as (f: unknown, o?: unknown) => Promise<unknown>)((tx: Prisma.TransactionClient) => fn(wrapTx(tx)), opts);
+      }
+      const value = Reflect.get(testDb, prop) as unknown;
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(testDb) : value;
+    },
+  });
+  return { ...ctx, db };
+}
+
+/** Số kết nối của DB test đang đứng chờ một khoá. */
+async function lockWaiters(): Promise<number> {
+  const [row] = await testDb.$queryRaw<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'
+  `;
+  return row?.n ?? 0;
+}
+
+test('leaving the server while pressing Leave on the same session never deadlocks (sessions are locked first)', async () => {
+  const { ctx } = makeTestCtx();
+  const m = (await upsertMemberFromGuild(ctx, info('dl'))).member;
+  const s = await createSession(testDb);
+  await testDb.attendance.create({ data: { sessionId: s.id, memberId: m.id, status: 'going', updatedAt: JOINED_AT } });
+
+  // Rời server: dừng ngay sau khi huỷ chỗ (giao dịch còn mở, còn giữ khoá) cho tới khi được thả.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let paused!: () => void;
+  const pausedAtUpdate = new Promise<void>((resolve) => (paused = resolve));
+  const leaving = markMemberLeft(
+    pausingCtx(ctx, async () => {
+      paused();
+      await gate;
+    }),
+    'dl',
+  );
+  await pausedAtUpdate;
+
+  // Đúng lúc đó người ấy bấm "Huỷ" ở buổi: phải xếp hàng sau lần rời server, không được
+  // giữ khoá buổi rồi chờ dòng điểm danh (thứ tự ngược nhau → deadlock).
+  const pressing = setAttendance(ctx, s.id, m.id, false);
+  await vi.waitFor(async () => expect(await lockWaiters()).toBeGreaterThan(0));
+  release();
+
+  await expect(leaving).resolves.toBeUndefined();
+  await expect(pressing).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  expect(await attendance(s.id, m.id)).toMatchObject({ status: 'cancelled' });
+  expect((await sessionRow(s.id)).discordDirty).toBe(true);
 });
 
 // ---------------------------------------------------------------------------

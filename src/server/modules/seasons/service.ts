@@ -25,6 +25,7 @@
 import { Prisma } from '@prisma/client';
 import type { Faction } from '../../../shared/api-types.js';
 import type { Ctx } from '../../ctx.js';
+import { chunkLines } from '../../lib/chunk.js';
 import { appError } from '../../lib/errors.js';
 import {
   dateOnlyToDb,
@@ -36,6 +37,7 @@ import {
   toVnDate,
   vnDayRange,
 } from '../../lib/time.js';
+import { HOT_TX } from '../../lib/tx.js';
 // Vòng import với leaderboard.ts (bên đó dùng `checkSeasonId`, `isSeasonClosed`) là an
 // toàn: hai bên chỉ gọi hàm của nhau lúc chạy, không dùng gì ở cấp module.
 import { computeSeasonLeaders } from '../stats/leaderboard.js';
@@ -43,8 +45,6 @@ import { computeSeasonLeaders } from '../stats/leaderboard.js';
 const SEASON_ID = /^\d{4}-(0[1-9]|1[0-2])$/;
 /** Lý do ghi vào lần khai còn chờ duyệt bị từ chối khi mùa chốt. */
 export const SEASON_CLOSED_REASON = 'Mùa đã chốt';
-/** Giới hạn độ dài một tin Discord. */
-const DISCORD_MESSAGE_MAX = 2000;
 
 /** Mã mùa phải đúng dạng `YYYY-MM` (tháng 01–12); sai → `VALIDATION`. */
 export function checkSeasonId(seasonId: string): void {
@@ -145,7 +145,7 @@ export async function closeSeason(ctx: Ctx, seasonId: string): Promise<{ titles:
       if (rows.length > 0) titles = (await tx.roleTitle.createMany({ data: rows, skipDuplicates: true })).count;
     }
     return { titles, autoRejected };
-  });
+  }, HOT_TX);
 
   try {
     await deliverSeasonSummary(ctx, seasonId);
@@ -187,26 +187,7 @@ export function buildSeasonSummary(seasonId: string, titles: SeasonTitle[]): str
     if (own.length === 0) continue;
     lines.push(FACTION_HEADING[faction], ...own.map((t) => `• ${t.roleName}: ${t.displayName} (${t.score})`));
   }
-  return chunkLines(lines, DISCORD_MESSAGE_MAX);
-}
-
-/** Ghép các dòng thành từng đoạn ≤ `max` ký tự, chỉ cắt giữa hai dòng (dòng dài quá `max` thì cắt cứng). */
-function chunkLines(lines: string[], max: number): string[] {
-  const chunks: string[] = [];
-  let current: string | null = null;
-  for (const line of lines) {
-    for (let i = 0; i < Math.max(1, line.length); i += max) {
-      const piece = line.slice(i, i + max);
-      if (current === null) current = piece;
-      else if (current.length + 1 + piece.length <= max) current += `\n${piece}`;
-      else {
-        chunks.push(current);
-        current = piece;
-      }
-    }
-  }
-  if (current !== null) chunks.push(current);
-  return chunks;
+  return chunkLines(lines);
 }
 
 /** Danh hiệu của mùa từ `role_titles`, trong phe theo thứ tự danh mục (sortOrder rồi id). */

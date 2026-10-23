@@ -10,6 +10,7 @@ import type { AccessLevel, Member, MemberStatus } from '@prisma/client';
 import { z } from 'zod';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
+import { HOT_TX } from '../../lib/tx.js';
 import type { GuildMemberInfo } from '../../ports.js';
 
 // ---------------------------------------------------------------------------
@@ -148,13 +149,18 @@ async function markLeft(ctx: Ctx, where: Prisma.MemberWhereInput): Promise<numbe
     });
     await releaseSeats(tx, memberIds, now);
     return count;
-  });
+  }, HOT_TX);
 }
 
 /**
  * Huỷ chỗ `going` của những người này ở các buổi còn `scheduled` (buổi đã kết thúc giữ
  * nguyên lịch sử) và đánh dấu `discordDirty` để bộ hẹn giờ sửa lại tin Discord — module
  * thành viên không gọi Discord. Quay lại server không trả lại chỗ.
+ *
+ * Khoá các dòng buổi liên quan (`FOR UPDATE`, theo id tăng dần) TRƯỚC khi đụng dòng điểm
+ * danh — cùng thứ tự buổi → điểm danh với `setAttendance`. Ngược thứ tự thì người rời
+ * server đúng lúc bấm "Huỷ" ở một buổi sẽ làm hai giao dịch chờ nhau (deadlock). Trạng
+ * thái buổi được kiểm tra lại sau khi khoá: buổi vừa kết thúc trong lúc đó giữ nguyên lịch sử.
  */
 async function releaseSeats(tx: Prisma.TransactionClient, memberIds: number[], now: Date): Promise<void> {
   const seats = await tx.attendance.findMany({
@@ -162,7 +168,16 @@ async function releaseSeats(tx: Prisma.TransactionClient, memberIds: number[], n
     select: { sessionId: true },
   });
   if (seats.length === 0) return;
-  const sessionIds = [...new Set(seats.map((s) => s.sessionId))];
+  const candidates = [...new Set(seats.map((s) => s.sessionId))].sort((a, b) => a - b);
+
+  const locked = await tx.$queryRaw<{ id: number }[]>`
+    SELECT id FROM game_sessions
+    WHERE id IN (${Prisma.join(candidates)}) AND status = 'scheduled'
+    ORDER BY id
+    FOR UPDATE
+  `;
+  if (locked.length === 0) return;
+  const sessionIds = locked.map((s) => s.id);
 
   await tx.attendance.updateMany({
     where: { memberId: { in: memberIds }, sessionId: { in: sessionIds }, status: 'going' },

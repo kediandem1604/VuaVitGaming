@@ -656,6 +656,94 @@ test('voting after closesAt fails', async () => {
   expect(await testDb.vote.count()).toBe(1);
 });
 
+test('concurrent votes from different voters in one round all succeed', async () => {
+  const { ctx } = await setup();
+  const { session: s, members } = await sessionWith(['An', 'Bình']);
+  const [a, b] = members as [typeof members[0], typeof members[0]];
+  const voters = await Promise.all([1, 2, 3, 4, 5].map((i) => createMember(testDb, { discordId: `cv${i}` })));
+  const kills = await category('Giết nhiều nhất');
+  await endSession(ctx, s.id, [kills.id]);
+  const roundId = (await roundOf(s.id)).id;
+
+  const results = await Promise.allSettled(
+    voters.map((v, i) => castVote(ctx, { roundId, categoryId: kills.id, voterId: v.id, nomineeId: i % 2 === 0 ? a.id : b.id })),
+  );
+  expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled', 'fulfilled']);
+  expect(await testDb.vote.count({ where: { roundId } })).toBe(5);
+
+  // Một người bấm đổi phiếu liên tục: vẫn đúng một phiếu, không lỗi trùng khoá.
+  const voter = voters[0]!;
+  const flips = await Promise.allSettled(
+    [a, b, a, b].map((n) => castVote(ctx, { roundId, categoryId: kills.id, voterId: voter.id, nomineeId: n.id })),
+  );
+  expect(flips.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled']);
+  expect(await testDb.vote.count({ where: { roundId, voterId: voter.id } })).toBe(1);
+});
+
+test('votes racing the close are either counted in the result or refused as closed', async () => {
+  const { ctx } = await setup();
+  const { session: s, members } = await sessionWith(['An', 'Bình']);
+  const [a] = members as [typeof members[0], typeof members[0]];
+  const voters = await Promise.all([1, 2, 3, 4, 5, 6, 7, 8].map((i) => createMember(testDb, { discordId: `rv${i}` })));
+  const kills = await category('Giết nhiều nhất');
+  await endSession(ctx, s.id, [kills.id]);
+  const roundId = (await roundOf(s.id)).id;
+
+  const votes = voters.map((v) => castVote(ctx, { roundId, categoryId: kills.id, voterId: v.id, nomineeId: a.id }));
+  const [close, ...results] = await Promise.allSettled([closeVoteRound(ctx, roundId), ...votes]);
+  expect(close?.status).toBe('fulfilled');
+
+  const accepted = results.filter((r) => r.status === 'fulfilled').length;
+  for (const r of results) {
+    if (r.status === 'rejected') expect(r.reason).toMatchObject({ code: 'ROUND_CLOSED' });
+  }
+  // Mọi phiếu đã lưu đều nằm trong kết quả; không phiếu nào lọt ra sau khi đóng.
+  expect(await testDb.vote.count({ where: { roundId } })).toBe(accepted);
+  const awards = await awardsOf(roundId);
+  expect(awards.map((w) => w.voteCount)).toEqual(accepted === 0 ? [] : [accepted]);
+});
+
+test('a long result announcement is split into ≤ 2000-character parts, posted in order, retried whole', async () => {
+  const { ctx, notifier } = await setup();
+  const errors = silenceConsoleError();
+  // 12 người tên dài; mỗi hạng mục ai cũng được đúng một phiếu (vòng tròn) → hoà 12 người mỗi hạng mục.
+  const names = Array.from({ length: 12 }, (_, i) => `Người chơi có cái tên rất là dài để thử chia tin số ${String(i + 1).padStart(2, '0')}`);
+  const { session: s, members } = await sessionWith(names);
+  await endSession(ctx, s.id);
+  const round = await testDb.voteRound.findUniqueOrThrow({ where: { sessionId: s.id }, include: { messages: true } });
+  expect(round.messages.length).toBeGreaterThanOrEqual(3);
+  await testDb.vote.createMany({
+    data: round.messages.flatMap((m) =>
+      members.map((voter, i) => ({ roundId: round.id, categoryId: m.categoryId, voterId: voter.id, nomineeId: members[(i + 1) % members.length]!.id })),
+    ),
+  });
+
+  // Discord nhận phần đầu rồi lỗi ở phần sau: cờ vẫn bật, chưa coi là đã công bố.
+  const announce = vi.spyOn(notifier, 'announce');
+  announce.mockImplementationOnce(async (text) => void notifier.announcements.push(text));
+  announce.mockRejectedValueOnce(new Error('Discord lỗi'));
+  await closeVoteRound(ctx, round.id);
+  expect(notifier.announcements).toHaveLength(1);
+  expect((await roundRow(round.id)).announcePending).toBe(true);
+  expect(errors).toHaveBeenCalled();
+
+  // Lượt đăng bù đăng lại cả thông báo, từng phần theo thứ tự, rồi mới tắt cờ.
+  notifier.announcements.length = 0;
+  await retryRoundResults(ctx);
+  const parts = notifier.announcements;
+  expect(parts.length).toBeGreaterThanOrEqual(2);
+  for (const part of parts) expect(part.length).toBeLessThanOrEqual(2000);
+  expect(parts[0]).toMatch(/^🏆 Kết quả tri ân buổi Cổ điển \(Classic\) 21:00 22\/10\n/);
+  const full = parts.join('\n');
+  expect(full.split('\n').filter((line) => line.startsWith('• '))).toHaveLength(round.messages.length);
+  for (const name of names) expect(full).toContain(name);
+  expect((await roundRow(round.id)).announcePending).toBe(false);
+
+  const posted = parts.length;
+  await retryRoundResults(ctx);
+  expect(notifier.announcements).toHaveLength(posted); // đã công bố xong: không đăng thêm lần nào
+});
+
 test('tally', () => {
   expect(tallyWinners([1, 1, 2])).toEqual([{ memberId: 1, voteCount: 2 }]);
   expect(tallyWinners([1, 2])).toEqual([{ memberId: 1, voteCount: 1 }, { memberId: 2, voteCount: 1 }]);

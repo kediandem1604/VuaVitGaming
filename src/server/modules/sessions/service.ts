@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { formatVnDay, formatVnTime, vnDayRange } from '../../lib/time.js';
+import { HOT_TX } from '../../lib/tx.js';
 import { MessageGoneError } from '../../ports.js';
 import type { SessionView } from '../../ports.js';
 
@@ -205,7 +206,7 @@ export async function setAttendance(
     const status = going ? 'going' : 'cancelled';
     if (current) await tx.attendance.update({ where, data: { status, updatedAt: ctx.now() } });
     else await tx.attendance.create({ data: { sessionId, memberId, status, updatedAt: ctx.now() } });
-  });
+  }, HOT_TX);
 
   await syncSessionMessage(ctx, sessionId);
   return getSessionView(ctx, sessionId);
