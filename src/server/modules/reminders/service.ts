@@ -4,42 +4,41 @@
  * `runReminders` mỗi phút.
  *
  * Không bao giờ gửi trùng: trước khi gửi, ghi một dòng `notification_log` với khoá
- * chính `(buổi, người, loại, kênh)`; dòng đã có (`P2002`) nghĩa là lần chạy khác đã
- * lo rồi → bỏ qua. Gửi lỗi thì ghi `error` vào dòng đó và KHÔNG thử lại ở lần sau
+ * chính `(buổi, người, loại, kênh)`; dòng đã có (`ON CONFLICT DO NOTHING` không chèn gì)
+ * nghĩa là lần chạy khác đã lo rồi → bỏ qua. Gửi lỗi thì ghi `error` vào dòng đó và KHÔNG thử lại ở lần sau
  * (một DM lỗi không thành mười DM lỗi); người khác vẫn nhận bình thường.
  *
- * Cửa sổ nửa mở: `pre15` khi `startsAt − lead ≤ now < startsAt`, `start` khi
- * `startsAt ≤ now < startsAt + 10 phút`. Khởi động lại sau cửa sổ thì nhắc đó mất
+ * Cửa sổ nửa mở (`./windows.ts`): `pre15` khi `startsAt − lead ≤ now < startsAt`, `start`
+ * khi `startsAt ≤ now < startsAt + 10 phút`. Khởi động lại sau cửa sổ thì nhắc đó mất
  * luôn (quá 10 phút sau giờ bắt đầu, nhắc "vào game" không còn ý nghĩa).
+ *
+ * Admin đổi giờ buổi (`updateSession`) thì log của các loại nhắc chưa tới hạn theo giờ mới
+ * bị xoá để nhắc lại đúng giờ mới. Vì vậy dòng log chỉ được ghi khi buổi VẪN `scheduled`
+ * và vẫn đúng giờ bắt đầu mà lần chạy này đã đọc — xem `deliver`.
  */
 
-import { Prisma } from '@prisma/client';
 import type { Channel, ReminderKind } from '@prisma/client';
 import type { Ctx } from '../../ctx.js';
 import { getSessionView } from '../sessions/service.js';
 import { getSettings } from '../settings/service.js';
 import { buildReminder } from './messages.js';
 import type { ReminderMessage } from './messages.js';
+import { START_WINDOW_MS, reminderKindsDue } from './windows.js';
 
-/** Sau giờ bắt đầu bao lâu thì thôi không nhắc `start` nữa. */
-const START_WINDOW_MS = 10 * 60 * 1000;
+export { reminderKindsDue } from './windows.js';
+
 /** Cột `error` của notification_log giữ tối đa chừng này ký tự. */
 const ERROR_MAX_CHARS = 500;
 
 const MINUTE_MS = 60 * 1000;
 
-/** Loại nhắc đang đến hạn tại `now` cho buổi bắt đầu lúc `startsAt` (tối đa một loại). */
-export function reminderKindsDue(startsAt: Date, now: Date, leadMinutes: number): ReminderKind[] {
-  const s = startsAt.getTime();
-  const t = now.getTime();
-  if (s - leadMinutes * MINUTE_MS <= t && t < s) return ['pre15'];
-  if (s <= t && t < s + START_WINDOW_MS) return ['start'];
-  return [];
-}
-
-/** Một lần gửi: tới ai, loại gì, kênh nào (địa chỉ = email hoặc discordId tuỳ kênh). */
+/**
+ * Một lần gửi: tới ai, loại gì, kênh nào (địa chỉ = email hoặc discordId tuỳ kênh), cho
+ * buổi bắt đầu lúc `startsAt` (giờ đã đọc lúc quyết định gửi).
+ */
 interface Delivery {
   sessionId: number;
+  startsAt: Date;
   memberId: number;
   kind: ReminderKind;
   channel: Channel;
@@ -89,7 +88,13 @@ export async function runReminders(ctx: Ctx): Promise<{ sent: number; failed: nu
     for (const kind of reminderKindsDue(session.startsAt, now, lead)) {
       const deliveries = session.attendances.flatMap((a) => {
         if (kind === 'pre15' && a.updatedAt.getTime() > preCutoff) return [];
-        return channelsFor(a.member).map((c) => ({ sessionId: session.id, memberId: a.memberId, kind, ...c }));
+        return channelsFor(a.member).map((c) => ({
+          sessionId: session.id,
+          startsAt: session.startsAt,
+          memberId: a.memberId,
+          kind,
+          ...c,
+        }));
       });
       if (deliveries.length === 0) continue;
 
@@ -115,15 +120,25 @@ function channelsFor(m: MemberContact): { channel: Channel; address: string }[] 
 /**
  * Ghi log trước rồi gửi. Dòng log đã có → `skipped` (lần chạy khác đã gửi hoặc đã
  * thử); gửi lỗi → ghi `error` vào dòng đó, trả `failed`.
+ *
+ * Câu ghi log chỉ chèn khi buổi vẫn `scheduled` và vẫn bắt đầu lúc `d.startsAt`, đọc dòng
+ * buổi với `FOR SHARE`: nếu admin đang đổi giờ / huỷ (giữ khoá dòng) thì câu này chờ họ
+ * commit rồi xét lại điều kiện trên bản mới (READ COMMITTED) → không khớp → `skipped`.
+ * Nhờ vậy lần chạy đã đọc giờ cũ không gửi nhắc theo giờ cũ sau khi giờ đã đổi, và
+ * không để lại dòng log chặn mất nhắc theo giờ mới.
  */
 async function deliver(ctx: Ctx, d: Delivery, message: ReminderMessage): Promise<'sent' | 'failed' | 'skipped'> {
   const key = { sessionId: d.sessionId, memberId: d.memberId, kind: d.kind, channel: d.channel };
-  try {
-    await ctx.db.notificationLog.create({ data: { ...key, sentAt: ctx.now() } });
-  } catch (err) {
-    if (isUniqueViolation(err)) return 'skipped';
-    throw err;
-  }
+  const inserted = await ctx.db.$queryRaw<{ sessionId: number }[]>`
+    INSERT INTO notification_log (session_id, member_id, kind, channel, sent_at)
+    SELECT id, ${d.memberId}, ${d.kind}::"ReminderKind", ${d.channel}::"Channel", ${ctx.now()}::timestamptz
+    FROM game_sessions
+    WHERE id = ${d.sessionId} AND status = 'scheduled' AND starts_at = ${d.startsAt}::timestamptz
+    FOR SHARE
+    ON CONFLICT DO NOTHING
+    RETURNING session_id AS "sessionId"
+  `;
+  if (inserted.length === 0) return 'skipped';
 
   try {
     if (d.channel === 'email') await ctx.mailer.send(d.address, message.subject, message.text);
@@ -140,10 +155,6 @@ async function deliver(ctx: Ctx, d: Delivery, message: ReminderMessage): Promise
     });
     return 'failed';
   }
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
 }
 
 function messageOf(err: unknown): string {

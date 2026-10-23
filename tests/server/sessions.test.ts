@@ -6,6 +6,7 @@ import {
   listSessionsOnVnDate,
   setAttendance,
   syncSessionMessage,
+  updateSession,
 } from '../../src/server/modules/sessions/service.js';
 import { markMemberLeft, upsertMemberFromGuild } from '../../src/server/modules/members/service.js';
 import type { GuildMemberInfo } from '../../src/server/ports.js';
@@ -122,6 +123,169 @@ test('create while Discord down marks dirty', async () => {
   expect(notifier.published).toHaveLength(0);
   expect(errors).toHaveBeenCalledTimes(1);
   expect(errors.mock.calls[0]?.[0]).toContain(String(v.id));
+});
+
+// ---------------------------------------------------------------------------
+// updateSession
+// ---------------------------------------------------------------------------
+
+test('update sets room code, note and capacity, trims them, and edits the Discord message', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+
+  // Trong lúc sửa tin Discord, dòng buổi còn bẩn: chết giữa chừng thì bộ hẹn giờ sửa bù.
+  let dirtyDuringEdit: boolean | null = null;
+  vi.spyOn(notifier, 'updateSession').mockImplementationOnce(async (messageId, view) => {
+    dirtyDuringEdit = (await sessionRow(s.id)).discordDirty;
+    notifier.updated.push({ messageId, view });
+  });
+
+  const v = await updateSession(ctx, admin.id, s.id, { roomCode: '  XYZ123  ', note: '  Mang mic  ', capacity: 10 });
+  expect(v).toEqual({ ...s, roomCode: 'XYZ123', note: 'Mang mic', capacity: 10 });
+  expect(dirtyDuringEdit).toBe(true);
+  expect(notifier.published).toHaveLength(1);
+  expect(notifier.updated).toEqual([{ messageId: 'msg-1', view: v }]);
+  expect(await sessionRow(s.id)).toMatchObject({
+    roomCode: 'XYZ123',
+    note: 'Mang mic',
+    capacity: 10,
+    startsAt,
+    discordDirty: false,
+  });
+});
+
+test('update clears room code and note with null or blanks, and leaves absent fields alone', async () => {
+  const { ctx, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id, capacity: 8, roomCode: 'ABC', note: 'Ghi chú' });
+
+  expect(await updateSession(ctx, admin.id, s.id, { roomCode: null })).toMatchObject({ roomCode: null, note: 'Ghi chú', capacity: 8 });
+  expect(await updateSession(ctx, admin.id, s.id, { note: '   ' })).toMatchObject({ roomCode: null, note: null, capacity: 8 });
+  expect(await updateSession(ctx, admin.id, s.id, { roomCode: 'DEF', note: '' })).toMatchObject({ roomCode: 'DEF', note: null });
+});
+
+test('update validation', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id, roomCode: 'ABC' });
+  const before = await sessionRow(s.id);
+  const rejects = (patch: Parameters<typeof updateSession>[3], message?: string) =>
+    expect(updateSession(ctx, admin.id, s.id, patch)).rejects.toMatchObject(
+      message === undefined ? { code: 'VALIDATION' } : { code: 'VALIDATION', message },
+    );
+
+  await rejects({ capacity: 0 }, 'Sức chứa phải từ 1 đến 25');
+  await rejects({ capacity: 26 }, 'Sức chứa phải từ 1 đến 25');
+  await rejects({ capacity: 2.5 }, 'Sức chứa phải từ 1 đến 25');
+  await rejects({ roomCode: 'x'.repeat(21) }, 'Mã phòng tối đa 20 ký tự');
+  await rejects({ note: 'x'.repeat(301) }, 'Ghi chú tối đa 300 ký tự');
+  await rejects({ startsAt: new Date('không phải ngày') }, 'Dữ liệu không hợp lệ');
+  // Giờ mới không sớm hơn now − 5 phút (now = 12:00:00Z), như khi tạo buổi.
+  await rejects({ startsAt: new Date('2026-10-22T11:54:59Z') }, 'Giờ bắt đầu đã qua');
+  // Một trường hỏng thì không trường nào được lưu.
+  await rejects({ roomCode: 'MỚI', capacity: 0 });
+
+  expect(await sessionRow(s.id)).toEqual(before);
+  expect(notifier.updated).toHaveLength(0);
+
+  // Các biên hợp lệ.
+  await updateSession(ctx, admin.id, s.id, { capacity: 1, roomCode: 'x'.repeat(20), note: 'x'.repeat(300) });
+  await updateSession(ctx, admin.id, s.id, { capacity: 25, startsAt: new Date('2026-10-22T11:55:00Z') });
+  expect(await sessionRow(s.id)).toMatchObject({ capacity: 25, startsAt: new Date('2026-10-22T11:55:00Z') });
+});
+
+test('capacity cannot drop below the members going; members who left do not count', async () => {
+  const { ctx, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const [a, b, c] = [await createMember(testDb), await createMember(testDb), await createMember(testDb)];
+  for (const m of [a, b, c]) await setAttendance(ctx, s.id, m.id, true);
+  // Dòng going cũ của người đã rời server (dữ liệu trước khi có trả chỗ tự động).
+  await testDb.member.update({ where: { id: c.id }, data: { status: 'left' } });
+
+  await expect(updateSession(ctx, admin.id, s.id, { capacity: 1 })).rejects.toMatchObject({
+    code: 'VALIDATION',
+    message: 'Đã có 2 người tham gia, sức chứa không được nhỏ hơn 2',
+  });
+  expect((await sessionRow(s.id)).capacity).toBe(16);
+
+  expect(await updateSession(ctx, admin.id, s.id, { capacity: 2 })).toMatchObject({ capacity: 2 });
+  // Đủ chỗ rồi: người thứ ba không vào được.
+  const d = await createMember(testDb);
+  await expect(setAttendance(ctx, s.id, d.id, true)).rejects.toMatchObject({ code: 'SESSION_FULL' });
+});
+
+test('a capacity cut and a join racing for the last seat never leave the session over capacity', async () => {
+  const { ctx, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id, capacity: 3 });
+  const [a, b, c] = [await createMember(testDb), await createMember(testDb), await createMember(testDb)];
+  await setAttendance(ctx, s.id, a.id, true);
+  await setAttendance(ctx, s.id, b.id, true);
+
+  // Cả hai khoá dòng buổi trước khi kiểm: hoặc c vào rồi giảm sức chứa bị từ chối, hoặc
+  // giảm xong rồi c bị báo hết chỗ — không bao giờ 3 người trong buổi 2 chỗ.
+  const [cut, join] = await Promise.allSettled([
+    updateSession(ctx, admin.id, s.id, { capacity: 2 }),
+    setAttendance(ctx, s.id, c.id, true),
+  ]);
+  expect([cut.status, join.status].filter((status) => status === 'fulfilled')).toHaveLength(1);
+  expect(await goingCount(s.id)).toBeLessThanOrEqual((await sessionRow(s.id)).capacity);
+});
+
+test('only scheduled sessions can be edited', async () => {
+  const { ctx, admin } = await setup();
+  for (const status of ['cancelled', 'ended'] as const) {
+    const s = await insertSession(testDb, { status });
+    await expect(updateSession(ctx, admin.id, s.id, { roomCode: 'ABC' })).rejects.toMatchObject({ code: 'SESSION_NOT_OPEN' });
+    expect((await sessionRow(s.id)).roomCode).toBeNull();
+  }
+  await expect(updateSession(ctx, admin.id, 999, { roomCode: 'ABC' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+});
+
+test('an edit that changes nothing writes nothing and leaves Discord alone', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id, capacity: 8, roomCode: 'ABC', note: 'Ghi chú' });
+  const version = await xminOf(s.id);
+
+  const same = await updateSession(ctx, admin.id, s.id, {
+    startsAt: new Date(startsAt),
+    capacity: 8,
+    roomCode: ' ABC ',
+    note: 'Ghi chú',
+  });
+  expect(same).toEqual(s);
+  expect(await updateSession(ctx, admin.id, s.id, {})).toEqual(s);
+  expect(await xminOf(s.id)).toBe(version);
+  expect(notifier.updated).toHaveLength(0);
+});
+
+test('the room code can still be added after the start time', async () => {
+  const { ctx, setNow, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  setNow('2026-10-22T14:20:00Z'); // 20 phút sau giờ bắt đầu
+
+  // Form gửi kèm giờ cũ: giờ không đổi nên không bị kiểm "đã qua".
+  const v = await updateSession(ctx, admin.id, s.id, { startsAt, roomCode: 'VAO-NGAY' });
+  expect(v).toMatchObject({ roomCode: 'VAO-NGAY', startsAt });
+  // Đổi sang một giờ đã qua thì vẫn bị chặn.
+  await expect(updateSession(ctx, admin.id, s.id, { startsAt: new Date('2026-10-22T14:10:00Z') })).rejects.toMatchObject({
+    code: 'VALIDATION',
+    message: 'Giờ bắt đầu đã qua',
+  });
+});
+
+test('editing while Discord is down still saves and leaves the session dirty', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const errors = silenceConsoleError();
+  notifier.down = true;
+
+  const v = await updateSession(ctx, admin.id, s.id, { roomCode: 'ABC' });
+  expect(v.roomCode).toBe('ABC');
+  expect(await sessionRow(s.id)).toMatchObject({ roomCode: 'ABC', discordMessageId: 'msg-1', discordDirty: true });
+  expect(errors).toHaveBeenCalledTimes(1);
+
+  notifier.down = false;
+  await syncSessionMessage(ctx, s.id);
+  expect(notifier.updated.at(-1)?.view).toMatchObject({ roomCode: 'ABC' });
+  expect((await sessionRow(s.id)).discordDirty).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
