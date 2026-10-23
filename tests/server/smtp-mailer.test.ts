@@ -1,10 +1,15 @@
 import { createTransport } from 'nodemailer';
 import { expect, test, vi } from 'vitest';
+import type { SmtpMailConfig } from '../../src/server/config.js';
 import { createSmtpMailer, createSmtpTransport } from '../../src/server/mail/smtp-mailer.js';
 import { testConfig } from '../helpers/ctx.js';
 
 /** `from: 'GGD Hub <test@example.com>'`, cổng 465. */
-const smtp = testConfig().smtp;
+const smtp: SmtpMailConfig = (() => {
+  const mail = testConfig().mail;
+  if (mail.provider !== 'smtp') throw new Error('testConfig phải dùng SMTP');
+  return mail;
+})();
 
 /** Transport giả: ghi lại từng lời gọi `sendMail`, không gửi gì. */
 function stubTransport() {
