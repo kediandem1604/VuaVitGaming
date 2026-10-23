@@ -16,7 +16,8 @@
  * có bucket giới hạn tốc độ riêng.
  *
  * Toàn khối là một `role="img"` có `aria-label` "{role}: {tên}" nên trong lưới Đại
- * sảnh mỗi ô đọc được bằng một câu.
+ * sảnh mỗi ô đọc được bằng một câu. `nameplate={false}` bỏ bảng tên và nhãn "Mùa trước",
+ * nhãn đọc chỉ còn tên role — cho nhân vật thu nhỏ đứng cạnh chữ đã có.
  */
 
 import type { CSSProperties } from 'react';
@@ -37,6 +38,12 @@ interface CharacterProps {
   variant: CharacterVariant;
   /** Bề rộng tối đa (px). Nhân vật co theo ô chứa, luôn giữ tỉ lệ 3:4. */
   size?: number;
+  /**
+   * `false` → chỉ vẽ hình: không bảng tên, không nhãn "Mùa trước", `aria-label` chỉ là
+   * tên role — cho nhân vật thu nhỏ đứng cạnh tên role đã viết ra (gợi ý tìm role ở trang
+   * Khai điểm). Mặc định `true`.
+   */
+  nameplate?: boolean;
   className?: string;
 }
 
@@ -48,11 +55,13 @@ const DIMMED_OPACITY = 0.45;
 const PLATE_MAX_WIDTH = 112;
 const GLYPH_WIDTH_EM = 0.6;
 
-export function Character({ role, holderName, variant, size = 120, className }: CharacterProps) {
+export function Character({ role, holderName, variant, size = 120, nameplate = true, className }: CharacterProps) {
   const empty = variant === 'empty' || holderName === null;
   const dimmed = variant === 'previous';
   const text = empty ? EMPTY_TEXT : truncateName(holderName);
-  const label = `${role.nameVi}: ${empty ? EMPTY_TEXT : holderName}${dimmed && !empty ? ' (mùa trước)' : ''}`;
+  const label = nameplate
+    ? `${role.nameVi}: ${empty ? EMPTY_TEXT : holderName}${dimmed && !empty ? ' (mùa trước)' : ''}`
+    : role.nameVi;
   const drawn = !role.hasImage;
   const dressed = drawn && !empty;
   const kit = kitForRole(role.key);
@@ -84,8 +93,8 @@ export function Character({ role, holderName, variant, size = 120, className }: 
           {drawn && <GooseBody silhouette={empty} />}
           {dressed && <KitArt kit={kit} role={role} layer="front" />}
         </g>
-        <Nameplate text={text} muted={empty} />
-        {dimmed && <PreviousTag />}
+        {nameplate && <Nameplate text={text} muted={empty} />}
+        {nameplate && dimmed && <PreviousTag />}
       </svg>
     </div>
   );

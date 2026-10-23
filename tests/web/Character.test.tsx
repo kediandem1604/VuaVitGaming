@@ -107,6 +107,26 @@ test('empty variant says nobody holds the role', () => {
   expect(screen.queryByText('Mùa trước')).not.toBeInTheDocument();
 });
 
+test('nameplate={false} draws only the figure', () => {
+  const { unmount } = render(<Character role={swordsman} holderName="Kẹ" variant="current" nameplate={false} />);
+  // Không bảng tên: không còn phần tử `text` nào trong SVG, nhãn đọc chỉ là tên role.
+  expect(screen.getByRole('img', { name: 'Kiếm sĩ' })).toBeInTheDocument();
+  expect(screen.queryByText('Kẹ')).toBeNull();
+  expect(document.querySelector('svg text')).toBeNull();
+  // Hình vẫn đủ: bộ đồ, vòng sáng phe, nhún nhẹ.
+  expect(document.querySelector('[data-kit="sword"]')).not.toBeNull();
+  expect(part('glow')).toHaveAttribute('fill', DUCK);
+  expect(part('figure')).toHaveClass('goose-idle');
+  unmount();
+
+  // Biến thể `previous` cũng bỏ nhãn "Mùa trước" nhưng vẫn mờ hình.
+  render(<Character role={swordsman} holderName="Ngỗng Một" variant="previous" nameplate={false} />);
+  expect(screen.getByRole('img', { name: 'Kiếm sĩ' })).toBeInTheDocument();
+  expect(screen.queryByText('Mùa trước')).toBeNull();
+  expect(screen.queryByText('Ngỗng Một')).toBeNull();
+  expect(part('figure')).toHaveAttribute('opacity', '0.45');
+});
+
 test('long names are truncated and shrunk on the nameplate', () => {
   render(<Character role={swordsman} holderName={'a'.repeat(30)} variant="current" />);
   const plate = screen.getByText('a'.repeat(23) + '…');

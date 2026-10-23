@@ -128,6 +128,48 @@ test('a diacritic-less query finds Kiếm sĩ and selecting it labels the value 
   expect(await screen.findByText('Không có role nào khớp')).toBeInTheDocument();
 });
 
+test('suggestions show a mini character and the faction, and the chosen role becomes a card', async () => {
+  stubFetch(baseRoutes);
+  renderPage();
+
+  // "o" khớp cả ba role (goose, swordsman, dodo) nên thấy đủ ba phe.
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Role' }), { target: { value: 'o' } });
+  const listbox = await screen.findByRole('listbox', { name: 'Kết quả tìm role' });
+  const options = within(listbox).getAllByRole('option');
+  expect(options).toHaveLength(3);
+  const expected: Array<[string, string]> = [
+    ['Ngỗng', 'Phe Ngỗng'],
+    ['Kiếm sĩ', 'Phe Vịt'],
+    ['Chim đa đa', 'Phe thứ 3'],
+  ];
+  expected.forEach(([name, faction], index) => {
+    const option = options[index] as HTMLElement;
+    // Nhân vật thu nhỏ không có bảng tên: nhãn đọc chỉ là tên role.
+    expect(within(option).getByRole('img', { name })).toBeInTheDocument();
+    expect(option).toHaveTextContent(faction);
+  });
+  // Không gợi ý nào mang bảng tên trống của nhân vật.
+  expect(within(listbox).queryByText('Chưa ai hoá thân')).toBeNull();
+
+  fireEvent.click(options[1] as HTMLElement);
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  // Thẻ role đã chọn: nhân vật cùng tên, dòng "Đã chọn" và phe.
+  expect(screen.getByRole('img', { name: 'Kiếm sĩ' })).toBeInTheDocument();
+  expect(screen.queryByRole('img', { name: 'Ngỗng' })).not.toBeInTheDocument();
+  expect(screen.getByText(/Đã chọn/)).toHaveTextContent('Đã chọn: ⚔️ Kiếm sĩ (Swordsman)');
+  expect(screen.getByText('Phe Vịt')).toBeInTheDocument();
+});
+
+test('status chips are gold while pending, ok once approved and duck-soft when rejected', async () => {
+  stubFetch(baseRoutes);
+  renderPage();
+
+  const items = await screen.findAllByRole('listitem');
+  expect(within(items[0] as HTMLElement).getByText('Chờ duyệt')).toHaveClass('chip', 'bg-gold');
+  expect(within(items[1] as HTMLElement).getByText('Đã duyệt')).toHaveClass('chip', 'bg-ok');
+  expect(within(items[2] as HTMLElement).getByText('Bị từ chối')).toHaveClass('chip', 'bg-duck-soft');
+});
+
 test('the date input is bounded to the last three days and lists that day\'s sessions', async () => {
   const fetchMock = stubFetch(baseRoutes);
   renderPage();

@@ -1,9 +1,13 @@
 /**
- * Trang Khai điểm (spec §4.6): form khai một trận — tìm role (không phân biệt dấu,
+ * Trang Khai điểm (spec §4.6, §6): form khai một trận — tìm role (không phân biệt dấu,
  * `normalizeText` dùng chung với lệnh slash), giá trị có `max` = `maxPerGame` và nhãn
  * = `metricLabel` của role, ngày chơi trong [hôm nay − 3, hôm nay] giờ VN, buổi của
  * ngày đó (không bắt buộc), ghi chú ≤ 300 ký tự — rồi "Lần khai của tôi" với trạng
  * thái và ô sửa cho lần khai còn chờ duyệt.
+ *
+ * Giao diện Sảnh đêm: mỗi gợi ý role có nhân vật thu nhỏ (không bảng tên) + tên role +
+ * chip phe; role đã chọn hiện thành thẻ nhỏ có nhân vật; chip trạng thái lần khai: chờ
+ * duyệt `gold`, đã duyệt `ok`, bị từ chối `duck-soft`.
  *
  * Form chỉ chặn tại chỗ hai lỗi hiển nhiên (chưa chọn role, chưa nhập giá trị); mọi
  * quy tắc khác (giới hạn của role, cửa sổ 3 ngày, mùa đã chốt…) do server báo và
@@ -13,11 +17,14 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { ReportDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
+import type { Faction, ReportDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
 import { normalizeText } from '../../shared/text';
 import { apiGet, apiSend, errorMessage } from '../api';
+import { Character } from '../components/Character';
+import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
 import { cx } from '../lib/cx';
+import { FACTION_LABEL } from '../lib/factions';
 import { addDaysIso, formatDateLabel, formatTime, vnTodayIso } from '../lib/format';
 
 export const MY_REPORTS_KEY = ['reports', 'mine'] as const;
@@ -32,11 +39,26 @@ const VN_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const SUCCESS_MESSAGE = 'Đã gửi, chờ mod duyệt';
 
+/** Chip trạng thái: nền màu trạng thái, chữ mực tối (`gold-ink` trên vàng, `night-950` trên `ok`/`duck-soft`). */
 const STATUS_CHIP: Record<ReportStatus, { text: string; className: string }> = {
-  pending: { text: 'Chờ duyệt', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
-  approved: { text: 'Đã duyệt', className: 'bg-goose/10 text-goose' },
-  rejected: { text: 'Bị từ chối', className: 'bg-duck/10 text-duck' },
+  pending: { text: 'Chờ duyệt', className: 'bg-gold text-gold-ink' },
+  approved: { text: 'Đã duyệt', className: 'bg-ok text-night-950' },
+  rejected: { text: 'Bị từ chối', className: 'bg-duck-soft text-night-950' },
 };
+
+/** Chip phe cạnh tên role: chữ trắng trên bản `-strong` (`goose`/`duck` gốc không đủ tương phản). */
+const FACTION_CHIP: Record<Faction, string> = {
+  goose: 'bg-goose-strong',
+  duck: 'bg-duck-strong',
+  neutral: 'bg-third',
+};
+
+/** Nhân vật thu nhỏ trong gợi ý và trong thẻ role đã chọn (px, kèm lớp bề rộng tương ứng). */
+const SUGGESTION_FIGURE = { size: 40, className: 'w-10' };
+const CHOSEN_FIGURE = { size: 64, className: 'w-16' };
+
+const LABEL_CLASS = 'text-sm font-bold text-night-200';
+const HINT_CLASS = 'text-sm text-night-300';
 
 interface ReportBody {
   roleId: number;
@@ -58,19 +80,22 @@ export function ReportPage() {
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6">
-      <h1 className="text-2xl font-bold">Khai điểm</h1>
+      {/* Tiêu đề 30px ≥ 18px nên dùng được chữ nổi `text-raised` (spec §3.2). */}
+      <h1 className="text-raised text-3xl leading-none font-extrabold text-white">Khai điểm</h1>
 
-      <section className="card flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Khai một trận</h2>
+      <section className="panel flex flex-col gap-3">
+        <h2 className="text-xl leading-tight font-extrabold text-white">Khai một trận</h2>
         <QueryState query={roles}>{(list) => <ReportForm roles={list} />}</QueryState>
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Lần khai của tôi</h2>
+        <h2 className="text-xl leading-tight font-extrabold text-white">Lần khai của tôi</h2>
         <QueryState query={mine}>
           {(list) =>
             list.length === 0 ? (
-              <p className="text-slate-600 dark:text-slate-400">Bạn chưa khai điểm lần nào</p>
+              <EmptyState>
+                <p>Bạn chưa khai điểm lần nào</p>
+              </EmptyState>
             ) : (
               <ul className="flex flex-col gap-3">
                 {list.map((report) => (
@@ -151,7 +176,7 @@ function ReportForm({ roles }: { roles: RoleDto[] }) {
       />
 
       <div className="flex flex-col gap-1">
-        <label htmlFor={ids.value} className="text-sm font-medium">
+        <label htmlFor={ids.value} className={LABEL_CLASS}>
           {role ? role.metricLabel : 'Giá trị'}
         </label>
         <input
@@ -169,9 +194,7 @@ function ReportForm({ roles }: { roles: RoleDto[] }) {
             touch();
           }}
         />
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          {role ? `Tối đa ${role.maxPerGame} mỗi trận` : 'Chọn role để biết chỉ số cần khai'}
-        </p>
+        <p className={HINT_CLASS}>{role ? `Tối đa ${role.maxPerGame} mỗi trận` : 'Chọn role để biết chỉ số cần khai'}</p>
       </div>
 
       <DateField
@@ -209,11 +232,11 @@ function ReportForm({ roles }: { roles: RoleDto[] }) {
           {submit.isPending ? 'Đang gửi…' : 'Gửi khai điểm'}
         </button>
         {error && (
-          <p role="alert" className="text-sm text-duck">
+          <p role="alert" className="text-sm font-bold text-duck-soft">
             {error}
           </p>
         )}
-        <p role="status" aria-live="polite" className="min-h-5 text-sm text-goose">
+        <p role="status" aria-live="polite" className="min-h-5 text-sm font-bold text-ok">
           {submit.isSuccess && SUCCESS_MESSAGE}
         </p>
       </div>
@@ -244,7 +267,7 @@ function roleMatches(role: RoleDto, query: string): boolean {
 
 /**
  * Ô gõ tìm + danh sách gợi ý (combobox/listbox). Gõ chữ là bỏ role đang chọn và mở
- * gợi ý; chọn một gợi ý thì ô hiện tên role và đóng danh sách.
+ * gợi ý; chọn một gợi ý thì ô hiện tên role, đóng danh sách và hiện thẻ role đã chọn.
  */
 function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
   const inputId = useId();
@@ -269,7 +292,7 @@ function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={inputId} className="text-sm font-medium">
+      <label htmlFor={inputId} className={LABEL_CLASS}>
         Role
       </label>
       <input
@@ -290,36 +313,74 @@ function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
       />
       {open &&
         (matches.length === 0 ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">Không có role nào khớp</p>
+          <p className={HINT_CLASS}>Không có role nào khớp</p>
         ) : (
           <ul
             id={listId}
             role="listbox"
             aria-label="Kết quả tìm role"
-            className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white text-sm shadow-sm dark:border-slate-700 dark:bg-slate-900"
+            className="panel-inset flex max-h-80 flex-col gap-0.5 overflow-y-auto p-1"
           >
             {matches.map((role) => (
+              // Viền focus lùi vào trong (-outline-offset) để không bị khung cuộn cắt mất.
               <li
                 key={role.id}
                 role="option"
                 aria-selected={false}
                 tabIndex={0}
-                className="cursor-pointer px-3 py-2 hover:bg-slate-100 focus-visible:bg-slate-100 focus-visible:outline-none dark:hover:bg-slate-800 dark:focus-visible:bg-slate-800"
+                className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-night-700 focus-visible:-outline-offset-3 focus-visible:bg-night-700"
                 onClick={() => choose(role)}
                 onKeyDown={(event) => onKeyDown(event, role)}
               >
-                {role.icon} {role.nameVi} — {role.metricLabel}
+                <RoleFigure role={role} {...SUGGESTION_FIGURE} />
+                {/* Chip phe xuống dòng dưới tên khi hàng hẹp (320px với tên role dài). */}
+                <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="min-w-0 break-words">
+                    <span className="font-bold text-white">
+                      {role.icon} {role.nameVi}
+                    </span>
+                    <span className="text-night-300"> — {role.metricLabel}</span>
+                  </span>
+                  <FactionChip faction={role.faction} />
+                </span>
               </li>
             ))}
           </ul>
         ))}
       {selected && (
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          Đã chọn: {selected.icon} {selected.nameVi} ({selected.nameEn})
-        </p>
+        <div className="panel-inset flex items-center gap-3">
+          <RoleFigure role={selected} {...CHOSEN_FIGURE} />
+          <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
+            <p className="text-sm text-night-300">
+              Đã chọn:{' '}
+              <span className="font-bold text-white">
+                {selected.icon} {selected.nameVi}
+              </span>{' '}
+              ({selected.nameEn})
+            </p>
+            <FactionChip faction={selected.faction} />
+          </div>
+        </div>
       )}
     </div>
   );
+}
+
+/**
+ * Nhân vật thu nhỏ không bảng tên, chỉ để nhận ra role bằng bộ đồ; tên người giữ để
+ * trống (null sẽ ra hình bóng "chưa ai hoá thân"). Bọc trong ô bề rộng cố định vì
+ * `Character` tự rộng hết ô chứa.
+ */
+function RoleFigure({ role, size, className }: { role: RoleDto; size: number; className: string }) {
+  return (
+    <div className={cx('shrink-0', className)}>
+      <Character role={role} holderName="" variant="current" size={size} nameplate={false} />
+    </div>
+  );
+}
+
+function FactionChip({ faction }: { faction: Faction }) {
+  return <span className={cx('chip px-2 py-0.5 text-xs', FACTION_CHIP[faction])}>{FACTION_LABEL[faction]}</span>;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,7 +398,7 @@ interface DateFieldProps {
 function DateField({ id, today, value, onChange }: DateFieldProps) {
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium">
+      <label htmlFor={id} className={LABEL_CLASS}>
         Ngày chơi
       </label>
       <input
@@ -372,7 +433,7 @@ function SessionField({ id, playedOn, value, onChange }: SessionFieldProps) {
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium">
+      <label htmlFor={id} className={LABEL_CLASS}>
         Buổi chơi (không bắt buộc)
       </label>
       <select id={id} className="field" value={value} onChange={(event) => onChange(event.target.value)}>
@@ -383,10 +444,10 @@ function SessionField({ id, playedOn, value, onChange }: SessionFieldProps) {
           </option>
         ))}
       </select>
-      {sessions.isError && <p className="text-xs text-duck">Không tải được danh sách buổi, bạn vẫn khai được không kèm buổi</p>}
-      {valid && sessions.data && options.length === 0 && (
-        <p className="text-xs text-slate-500 dark:text-slate-400">Ngày này không có buổi chơi nào</p>
+      {sessions.isError && (
+        <p className="text-sm text-duck-soft">Không tải được danh sách buổi, bạn vẫn khai được không kèm buổi</p>
       )}
+      {valid && sessions.data && options.length === 0 && <p className={HINT_CLASS}>Ngày này không có buổi chơi nào</p>}
     </div>
   );
 }
@@ -401,10 +462,10 @@ function NoteField({ id, value, onChange }: NoteFieldProps) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between gap-2">
-        <label htmlFor={id} className="text-sm font-medium">
+        <label htmlFor={id} className={LABEL_CLASS}>
           Ghi chú
         </label>
-        <span className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
+        <span className={cx(HINT_CLASS, 'tabular-nums')}>
           {value.length}/{NOTE_MAX}
         </span>
       </div>
@@ -429,13 +490,13 @@ function ReportItem({ report }: { report: ReportDto }) {
   const chip = STATUS_CHIP[report.status];
 
   return (
-    <li className="card flex flex-col gap-2">
+    <li className="panel flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-semibold">
+        <span className="font-bold text-white">
           {report.role.icon} {report.role.nameVi}
         </span>
-        <span className={cx('rounded-full px-2 py-0.5 text-xs font-semibold', chip.className)}>{chip.text}</span>
-        <time dateTime={report.playedOn} className="ml-auto text-sm text-slate-600 tabular-nums dark:text-slate-400">
+        <span className={cx('chip', chip.className)}>{chip.text}</span>
+        <time dateTime={report.playedOn} className="ml-auto text-sm text-night-300 tabular-nums">
           {formatDateLabel(report.playedOn)}
         </time>
       </div>
@@ -444,11 +505,11 @@ function ReportItem({ report }: { report: ReportDto }) {
         <EditForm report={report} onDone={() => setEditing(false)} />
       ) : (
         <>
-          <p className="text-slate-800 dark:text-slate-200">{`${report.value} ${report.role.metricLabel}`}</p>
-          {report.sessionId !== null && <p className="text-sm text-slate-600 dark:text-slate-400">Buổi #{report.sessionId}</p>}
-          {report.note && <p className="text-sm text-slate-700 dark:text-slate-300">{report.note}</p>}
+          <p className="font-bold text-white">{`${report.value} ${report.role.metricLabel}`}</p>
+          {report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>}
+          {report.note && <p className="text-sm text-night-200">{report.note}</p>}
           {report.status === 'rejected' && report.rejectReason && (
-            <p className="text-sm text-duck">Lý do: {report.rejectReason}</p>
+            <p className="text-sm text-duck-soft">Lý do: {report.rejectReason}</p>
           )}
           {report.status === 'pending' && (
             <button type="button" className="btn-secondary self-start" onClick={() => setEditing(true)}>
@@ -499,7 +560,7 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
   return (
     <form noValidate onSubmit={onSubmit} className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <label htmlFor={ids.value} className="text-sm font-medium">
+        <label htmlFor={ids.value} className={LABEL_CLASS}>
           {report.role.metricLabel}
         </label>
         <input
@@ -527,7 +588,7 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
         </button>
       </div>
       {error && (
-        <p role="alert" className="text-sm text-duck">
+        <p role="alert" className="text-sm font-bold text-duck-soft">
           {error}
         </p>
       )}
