@@ -264,7 +264,7 @@ export async function cancelSession(ctx: Ctx, sessionId: number): Promise<void> 
  * Đăng (chưa có message id) hoặc sửa (đã có) tin Discord của buổi theo trạng thái
  * hiện tại. Không bao giờ ném lỗi; lỗi → ghi log và `discordDirty = true` để bộ hẹn giờ
  * thử lại. Buổi không tồn tại → chỉ ghi log. Tin cũ đã bị xoá trong Discord
- * (`MessageGoneError`) → bỏ id cũ và đăng tin mới ngay.
+ * (`MessageGoneError`) → đăng tin mới ngay, id mới thay id cũ.
  *
  * Các lần đồng bộ của cùng một buổi chạy nối đuôi nhau trong tiến trình (web + bot
  * chung một tiến trình): hai người bấm gần như cùng lúc thì lần sau đọc trạng thái
@@ -310,34 +310,66 @@ interface SyncQueue {
 const syncQueues = new Map<number, SyncQueue>();
 
 /**
- * Một lần đồng bộ. Xoá cờ `discordDirty` TRƯỚC khi đọc trạng thái (cập nhật có điều kiện),
- * rồi đọc và gửi; lỗi thì bật lại cờ. Nhờ vậy một dấu "cần sửa lại" ghi chen vào giữa
- * lúc đọc và lúc Discord nhận xong (vd rời server → trả chỗ) không bị lần này xoá mất:
- * nó còn nguyên và bộ hẹn giờ sửa bù.
+ * Một lần đồng bộ. Cờ `discordDirty` chỉ được xoá SAU KHI Discord đã nhận bản mới, và chỉ
+ * khi dòng buổi chưa bị ghi gì kể từ lúc đọc — nên tiến trình chết giữa lúc gọi Discord
+ * (OOM, SIGKILL, thoát khi phiên Discord bị vô hiệu) để lại dòng còn bẩn, bộ hẹn giờ sửa bù.
+ *
+ * "Chưa bị ghi gì" dựa vào cột hệ thống `xmin` của PostgreSQL (mã giao dịch đã ghi phiên
+ * bản dòng hiện tại): mọi nơi đánh dấu bẩn (tạo buổi, điểm danh, trả chỗ khi rời server,
+ * kết thúc, huỷ) đều UPDATE dòng buổi trong cùng giao dịch với thay đổi của họ, và UPDATE
+ * nào cũng tạo phiên bản mới — kể cả ghi lại đúng giá trị cũ; khoá dòng thì không. Đọc
+ * `xmin` TRƯỚC khi đọc buổi và người tham gia: thay đổi commit trước mốc đó nằm trong bản
+ * gửi đi; thay đổi commit sau mốc đó đổi `xmin`, câu xoá cờ có điều kiện không khớp và
+ * dòng vẫn bẩn (READ COMMITTED: UPDATE gặp phiên bản mới hơn thì xét lại điều kiện trên
+ * phiên bản mới nhất).
+ *
+ * Lỗi → ghi log và bật cờ (phòng khi dòng đang sạch, vd bấm lại khi không có gì đổi); với
+ * dòng có thay đổi, cờ vốn đã bật nên bật lại hỏng (DB chập chờn) cũng không mất gì.
  */
 async function syncNow(ctx: Ctx, sessionId: number): Promise<void> {
   try {
-    await ctx.db.gameSession.updateMany({ where: { id: sessionId, discordDirty: true }, data: { discordDirty: false } });
-    const row = await findSessionRow(ctx.db, sessionId);
-    if (!row) {
+    const version = await rowVersion(ctx, sessionId);
+    const row = version === null ? null : await findSessionRow(ctx.db, sessionId);
+    if (version === null || !row) {
       console.error(`[sessions] Không đồng bộ được tin Discord: không có buổi ${sessionId}`);
       return;
     }
     const view = toSessionView(row);
-    if (row.discordMessageId && (await updateExisting(ctx, sessionId, row.discordMessageId, view))) return;
+    if (row.discordMessageId && (await updateExisting(ctx, sessionId, row.discordMessageId, view))) {
+      await ctx.db.$executeRaw`
+        UPDATE game_sessions SET discord_dirty = false
+        WHERE id = ${sessionId} AND discord_dirty AND xmin::text = ${version}
+      `;
+      return;
+    }
 
+    // Tin mới (hoặc tin cũ đã bị xoá): lưu id mới và xoá cờ trong CÙNG một câu — một lần ghi
+    // riêng trước đó sẽ đổi `xmin` và che mất dấu "cần sửa lại" ghi chen vào lúc đang đăng.
     const messageId = await ctx.notifier.publishSession(view);
-    await ctx.db.gameSession.update({ where: { id: sessionId }, data: { discordMessageId: messageId } });
+    await ctx.db.$executeRaw`
+      UPDATE game_sessions
+      SET discord_message_id = ${messageId},
+          discord_dirty = CASE WHEN xmin::text = ${version} THEN false ELSE discord_dirty END
+      WHERE id = ${sessionId}
+    `;
   } catch (err) {
     console.error(`[sessions] Không đồng bộ được tin Discord của buổi ${sessionId}: ${messageOf(err)}`);
     await markDirty(ctx, sessionId);
   }
 }
 
+/** `xmin` (dạng chuỗi) của phiên bản hiện tại của dòng buổi — đổi sau mỗi lần ghi; không có buổi → null. */
+async function rowVersion(ctx: Ctx, sessionId: number): Promise<string | null> {
+  const rows = await ctx.db.$queryRaw<{ version: string }[]>`
+    SELECT xmin::text AS version FROM game_sessions WHERE id = ${sessionId}
+  `;
+  return rows[0]?.version ?? null;
+}
+
 /**
  * Sửa tin đã đăng; thành công → trả true. Tin không còn trong Discord
- * (`MessageGoneError`) → bỏ id cũ ngay (lần sau không sửa hụt nữa) và trả false
- * để đăng tin mới. Lỗi khác ném tiếp.
+ * (`MessageGoneError`) → trả false để đăng tin mới (id mới thay id cũ khi đăng xong;
+ * đăng hỏng thì lần thử lại gặp lại "tin đã mất" rồi đăng). Lỗi khác ném tiếp.
  */
 async function updateExisting(ctx: Ctx, sessionId: number, messageId: string, view: SessionView): Promise<boolean> {
   try {
@@ -345,7 +377,6 @@ async function updateExisting(ctx: Ctx, sessionId: number, messageId: string, vi
   } catch (err) {
     if (!(err instanceof MessageGoneError)) throw err;
     console.warn(`[sessions] Tin Discord ${messageId} của buổi ${sessionId} không còn tồn tại — đăng tin mới`);
-    await ctx.db.gameSession.update({ where: { id: sessionId }, data: { discordMessageId: null } });
     return false;
   }
   return true;

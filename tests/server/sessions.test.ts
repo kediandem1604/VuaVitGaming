@@ -471,23 +471,31 @@ test('a deleted Discord message is republished with a new id instead of being ed
   expect(notifier.updated.map((u) => u.messageId)).toEqual(['msg-2']);
 });
 
-test('when the republish after a deleted message fails, the old id is cleared and the session stays dirty', async () => {
+test('when the republish after a deleted message fails, the session stays dirty and the retry republishes', async () => {
   const { ctx, notifier, admin, classic } = await setup();
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const warns = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const errors = silenceConsoleError();
   const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const m = await createMember(testDb);
+  await setAttendance(ctx, s.id, m.id, true);
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-1', discordDirty: false });
 
+  // Không ghi gì giữa chừng (bỏ id cũ cũng là một lần ghi, sẽ che mất dấu "cần sửa lại" của
+  // người khác): đăng hỏng thì dòng giữ nguyên id cũ và vẫn bẩn.
   notifier.goneMessageIds.add('msg-1');
   vi.spyOn(notifier, 'publishSession').mockRejectedValueOnce(new Error('Discord lỗi'));
-  await expect(syncSessionMessage(ctx, s.id)).resolves.toBeUndefined();
-  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: null, discordDirty: true });
+  await setAttendance(ctx, s.id, m.id, false);
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-1', discordDirty: true });
   expect(errors).toHaveBeenCalledTimes(1);
+  expect(warns).toHaveBeenCalledTimes(1);
 
-  // Lần thử lại không đụng tới tin đã mất nữa: đăng tin mới luôn.
+  // Lần thử lại (bộ hẹn giờ): tin cũ vẫn báo đã mất → đăng tin mới, lưu id, xoá cờ.
   await syncSessionMessage(ctx, s.id);
-  expect(notifier.updated).toHaveLength(0);
+  expect(notifier.updated).toHaveLength(1);
   expect(notifier.published).toHaveLength(2);
+  expect(notifier.published[1]?.attendees).toEqual([]);
   expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-2', discordDirty: false });
+  expect(warns).toHaveBeenCalledTimes(2);
 });
 
 test('near-simultaneous presses never leave an older view on the Discord message', async () => {
@@ -580,6 +588,205 @@ test('a dirty mark written while a sync is talking to Discord survives that sync
   });
   await syncSessionMessage(ctx, t.id);
   expect(await sessionRow(t.id)).toMatchObject({ discordMessageId: 'msg-mid', discordDirty: true });
+});
+
+const xminOf = async (sessionId: number): Promise<string> => {
+  const rows = await testDb.$queryRaw<{ x: string }[]>`SELECT xmin::text AS x FROM game_sessions WHERE id = ${sessionId}`;
+  return rows[0]?.x ?? '';
+};
+
+test('postgres xmin marks every write to a session row: a same-value UPDATE changes it, row locks do not', async () => {
+  const s = await insertSession(testDb, { discordDirty: true });
+  const m = await createMember(testDb);
+  const before = await xminOf(s.id);
+
+  // Khoá dòng — FOR UPDATE (setAttendance, releaseSeats) hay FOR KEY SHARE của khoá ngoại khi
+  // chèn dòng điểm danh — không phải một lần ghi: xmin giữ nguyên.
+  await testDb.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM game_sessions WHERE id = ${s.id} FOR UPDATE`;
+  });
+  await testDb.attendance.create({ data: { sessionId: s.id, memberId: m.id, status: 'going' } });
+  expect(await xminOf(s.id)).toBe(before);
+
+  // Đánh dấu bẩn một dòng ĐÃ bẩn (giá trị không đổi) vẫn tạo phiên bản dòng mới, mỗi lần một xmin mới.
+  await testDb.gameSession.updateMany({ where: { id: s.id }, data: { discordDirty: true } });
+  const once = await xminOf(s.id);
+  expect(once).not.toBe(before);
+  await testDb.gameSession.updateMany({ where: { id: s.id }, data: { discordDirty: true } });
+  expect(await xminOf(s.id)).not.toBe(once);
+});
+
+/**
+ * Giao dịch khác đánh dấu buổi bẩn nhưng CHƯA commit, và chỉ commit khi thấy một câu
+ * UPDATE khác đang chờ khoá dòng đó. Trả về khi đã giữ khoá; `committed` xong khi giao dịch
+ * commit (bọc trong object: hàm async trả thẳng promise thì sẽ chờ luôn promise đó).
+ */
+async function markDirtyWhileNextWriteWaits(sessionId: number): Promise<{ committed: Promise<void> }> {
+  let locked!: () => void;
+  const hasLock = new Promise<void>((resolve) => (locked = resolve));
+  const done = testDb.$transaction(
+    async (tx) => {
+      await tx.gameSession.updateMany({ where: { id: sessionId }, data: { discordDirty: true } });
+      locked();
+      await vi.waitFor(
+        async () => {
+          const [row] = await testDb.$queryRaw<{ n: number }[]>`
+            SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE datname = current_database() AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock' AND query LIKE '%UPDATE game_sessions%'
+          `;
+          expect(row?.n).toBe(1);
+        },
+        { timeout: 5_000 },
+      );
+    },
+    { timeout: 10_000 },
+  );
+  await hasLock;
+  return { committed: done };
+}
+
+test('a mark committed while the clearing UPDATE waits on the row lock still wins (READ COMMITTED re-check)', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const m = await createMember(testDb);
+
+  // Sửa tin: câu xoá cờ có điều kiện bị chặn bởi giao dịch đang ghi dòng; giao dịch đó commit
+  // → PostgreSQL xét lại điều kiện trên phiên bản mới nhất (xmin mới) → không xoá.
+  let concurrent: Promise<void> = Promise.resolve();
+  vi.spyOn(notifier, 'updateSession').mockImplementationOnce(async (messageId, view) => {
+    concurrent = (await markDirtyWhileNextWriteWaits(s.id)).committed;
+    notifier.updated.push({ messageId, view });
+  });
+  await setAttendance(ctx, s.id, m.id, true);
+  await concurrent;
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-1', discordDirty: true });
+
+  // Đăng tin mới: câu lưu id + xoá cờ cũng vậy — id được lưu, cờ giữ nguyên.
+  notifier.down = true;
+  silenceConsoleError();
+  const t = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  notifier.down = false;
+  vi.spyOn(notifier, 'publishSession').mockImplementationOnce(async (view) => {
+    concurrent = (await markDirtyWhileNextWriteWaits(t.id)).committed;
+    notifier.published.push(view);
+    return 'msg-locked';
+  });
+  await syncSessionMessage(ctx, t.id);
+  await concurrent;
+  expect(await sessionRow(t.id)).toMatchObject({ discordMessageId: 'msg-locked', discordDirty: true });
+});
+
+test('the session stays dirty while Discord is being edited or published to, and is cleared only after', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  silenceConsoleError();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const m = await createMember(testDb, { displayName: 'An' });
+
+  // Tiến trình chết (OOM, SIGKILL, exit khi phiên Discord bị vô hiệu) giữa lúc gọi Discord:
+  // dòng lúc đó phải còn bẩn để bộ hẹn giờ của lần chạy sau sửa bù.
+  const seen: { dirty: boolean; messageId: string | null }[] = [];
+  const look = async (id: number) => {
+    const row = await sessionRow(id);
+    seen.push({ dirty: row.discordDirty, messageId: row.discordMessageId });
+  };
+  vi.spyOn(notifier, 'updateSession').mockImplementationOnce(async (messageId, view) => {
+    await look(s.id);
+    notifier.updated.push({ messageId, view });
+  });
+  await setAttendance(ctx, s.id, m.id, true);
+  expect(seen).toEqual([{ dirty: true, messageId: 'msg-1' }]);
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-1', discordDirty: false });
+
+  // Đăng tin mới (buổi tạo lúc Discord sập) cũng vậy.
+  notifier.down = true;
+  const t = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  notifier.down = false;
+  vi.spyOn(notifier, 'publishSession').mockImplementationOnce(async (view) => {
+    await look(t.id);
+    notifier.published.push(view);
+    return 'msg-new';
+  });
+  await syncSessionMessage(ctx, t.id);
+  expect(seen[1]).toEqual({ dirty: true, messageId: null });
+  expect(await sessionRow(t.id)).toMatchObject({ discordMessageId: 'msg-new', discordDirty: false });
+});
+
+test('a Discord call that throws leaves the session dirty, even when the database drops right after', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const errors = silenceConsoleError();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const m = await createMember(testDb);
+
+  // Discord lỗi và DB mất kết nối ngay sau đó: không còn bật lại cờ được — nó phải chưa từng bị xoá.
+  let restore = (): void => {};
+  vi.spyOn(notifier, 'updateSession').mockImplementationOnce(async () => {
+    restore = patchDelegate(testDb.gameSession, 'updateMany', () => (() => Promise.reject(new Error('mất kết nối'))) as never);
+    throw new Error('Discord lỗi');
+  });
+  try {
+    await setAttendance(ctx, s.id, m.id, true);
+  } finally {
+    restore();
+  }
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-1', discordDirty: true });
+  expect(errors.mock.calls.map((c) => String(c[0]))).toEqual([
+    expect.stringContaining(`buổi ${s.id}`),
+    expect.stringContaining('mất kết nối'),
+  ]);
+
+  // Lượt sau sửa bù rồi mới xoá cờ.
+  await syncSessionMessage(ctx, s.id);
+  expect(notifier.updated.at(-1)?.view.attendees).toEqual([{ memberId: m.id, displayName: m.displayName }]);
+  expect((await sessionRow(s.id)).discordDirty).toBe(false);
+});
+
+test('a seat freed by someone leaving the server during the Discord edit is not lost', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const an = await createMember(testDb, { discordId: 'an', displayName: 'An' });
+  const binh = await createMember(testDb, { discordId: 'binh', displayName: 'Bình' });
+  await setAttendance(ctx, s.id, an.id, true);
+
+  // Bình bấm tham gia; đúng lúc Discord đang nhận bản (An, Bình) thì An rời server → trả chỗ.
+  vi.spyOn(notifier, 'updateSession').mockImplementationOnce(async (messageId, view) => {
+    await markMemberLeft(ctx, 'an');
+    notifier.updated.push({ messageId, view });
+  });
+  await setAttendance(ctx, s.id, binh.id, true);
+  const names = () => notifier.updated.at(-1)?.view.attendees.map((a) => a.displayName);
+  expect(names()).toEqual(['An', 'Bình']);
+  // Bản vừa gửi đã cũ: dòng vẫn bẩn, lượt sau sửa thành chỉ còn Bình rồi mới xoá cờ.
+  expect((await sessionRow(s.id)).discordDirty).toBe(true);
+  await syncSessionMessage(ctx, s.id);
+  expect(names()).toEqual(['Bình']);
+  expect((await sessionRow(s.id)).discordDirty).toBe(false);
+});
+
+test('a deleted message is republished with the session still dirty, and a mark during the republish survives', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const m = await createMember(testDb);
+
+  notifier.goneMessageIds.add('msg-1');
+  let seen: { dirty: boolean; messageId: string | null } | undefined;
+  vi.spyOn(notifier, 'publishSession').mockImplementationOnce(async (view) => {
+    const row = await sessionRow(s.id);
+    seen = { dirty: row.discordDirty, messageId: row.discordMessageId };
+    await testDb.gameSession.updateMany({ where: { id: s.id }, data: { discordDirty: true } }); // ai đó đánh dấu chen vào
+    notifier.published.push(view);
+    return 'msg-2';
+  });
+  await setAttendance(ctx, s.id, m.id, true);
+  // Trong lúc đăng lại: id cũ còn nguyên (chưa ghi gì), dòng còn bẩn.
+  expect(seen).toEqual({ dirty: true, messageId: 'msg-1' });
+  // Id mới được lưu; dấu chen vào giữ cờ bẩn.
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-2', discordDirty: true });
+
+  await syncSessionMessage(ctx, s.id);
+  expect(notifier.updated.map((u) => u.messageId)).toEqual(['msg-2']);
+  expect(await sessionRow(s.id)).toMatchObject({ discordMessageId: 'msg-2', discordDirty: false });
 });
 
 test('creating and changing attendance save the session dirty, so a crash before the Discord sync is retried', async () => {
