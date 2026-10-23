@@ -1,6 +1,7 @@
 /**
- * Module buổi chơi: tạo buổi, điểm danh (tham gia / rời), huỷ buổi, danh sách
- * theo ngày VN và đồng bộ tin Discord của buổi.
+ * Module buổi chơi: tạo buổi, sửa buổi (mã phòng, ghi chú, sức chứa, giờ bắt đầu),
+ * điểm danh (tham gia / rời), huỷ buổi, danh sách theo ngày VN và đồng bộ tin Discord
+ * của buổi.
  *
  * Cả nút Discord lẫn web đều gọi vào đây nên kết quả hai bên giống hệt nhau.
  * Sức chứa được bảo đảm bằng khoá dòng buổi (`SELECT … FOR UPDATE`) trong một
@@ -18,6 +19,8 @@ import { formatVnDay, formatVnTime, vnDayRange } from '../../lib/time.js';
 import { HOT_TX } from '../../lib/tx.js';
 import { MessageGoneError } from '../../ports.js';
 import type { SessionView } from '../../ports.js';
+import { reminderKindsNotYetDue } from '../reminders/windows.js';
+import { getSettings } from '../settings/service.js';
 
 // ---------------------------------------------------------------------------
 // Đọc buổi chơi → SessionView
@@ -111,12 +114,17 @@ const START_GRACE_MS = 5 * 60 * 1000;
 
 const CAPACITY_MESSAGE = 'Sức chứa phải từ 1 đến 25';
 
+// Ràng buộc từng trường, dùng chung cho tạo và sửa buổi.
+const capacityField = z.number().int(CAPACITY_MESSAGE).min(1, CAPACITY_MESSAGE).max(25, CAPACITY_MESSAGE);
+const roomCodeField = z.string().trim().max(20, 'Mã phòng tối đa 20 ký tự').nullish();
+const noteField = z.string().trim().max(300, 'Ghi chú tối đa 300 ký tự').nullish();
+
 const createSchema = z.object({
   startsAt: z.date(),
   modeId: z.number().int(),
-  capacity: z.number().int(CAPACITY_MESSAGE).min(1, CAPACITY_MESSAGE).max(25, CAPACITY_MESSAGE).default(16),
-  roomCode: z.string().trim().max(20, 'Mã phòng tối đa 20 ký tự').nullish(),
-  note: z.string().trim().max(300, 'Ghi chú tối đa 300 ký tự').nullish(),
+  capacity: capacityField.default(16),
+  roomCode: roomCodeField,
+  note: noteField,
 });
 
 /** Lỗi zod không có thông báo riêng (sai kiểu, ngày không hợp lệ) → thông báo chung tiếng Việt. */
@@ -133,9 +141,7 @@ export async function createSession(ctx: Ctx, actorId: number, input: CreateSess
   if (!parsed.success) throw appError('VALIDATION', parsed.error.issues[0]?.message);
   const { startsAt, modeId, capacity, roomCode, note } = parsed.data;
 
-  if (startsAt.getTime() < ctx.now().getTime() - START_GRACE_MS) {
-    throw appError('VALIDATION', 'Giờ bắt đầu đã qua');
-  }
+  assertNotPast(ctx, startsAt);
   const mode = await ctx.db.gameMode.findUnique({ where: { id: modeId }, select: { active: true } });
   if (!mode?.active) throw appError('VALIDATION', 'Chế độ chơi không hợp lệ');
 
@@ -159,6 +165,110 @@ export async function createSession(ctx: Ctx, actorId: number, input: CreateSess
 
 function emptyToNull(s: string | null | undefined): string | null {
   return s ? s : null;
+}
+
+function assertNotPast(ctx: Ctx, startsAt: Date): void {
+  if (startsAt.getTime() < ctx.now().getTime() - START_GRACE_MS) {
+    throw appError('VALIDATION', 'Giờ bắt đầu đã qua');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sửa buổi
+// ---------------------------------------------------------------------------
+
+/** Trường vắng mặt (`undefined`) giữ nguyên; mã phòng / ghi chú `null` hoặc rỗng → xoá. */
+export interface UpdateSessionPatch {
+  startsAt?: Date;
+  /** 1–25, không nhỏ hơn số người đang tham gia. */
+  capacity?: number;
+  /** Cắt khoảng trắng, tối đa 20 ký tự; rỗng hoặc null → xoá mã phòng. */
+  roomCode?: string | null;
+  /** Cắt khoảng trắng, tối đa 300 ký tự; rỗng hoặc null → xoá ghi chú. */
+  note?: string | null;
+}
+
+const updateSchema = z.object({
+  startsAt: z.date().optional(),
+  capacity: capacityField.optional(),
+  roomCode: roomCodeField,
+  note: noteField,
+});
+
+/**
+ * Sửa một buổi còn `scheduled` (khác → `SESSION_NOT_OPEN`, không có → `NOT_FOUND`) — thường
+ * là thêm mã phòng ngay trước giờ chơi. Lỗi dữ liệu → `VALIDATION`, cùng luật với
+ * `createSession`; sức chứa mới nhỏ hơn số người đang tham gia cũng là `VALIDATION`. Giờ
+ * mới chỉ bị kiểm "đã qua" khi giờ thật sự đổi, nên vẫn thêm được mã phòng sau giờ bắt đầu.
+ *
+ * Trong một giao dịch, khoá dòng buổi (như `setAttendance`) rồi mới đếm chỗ, nên không ai
+ * vào chen được giữa lúc kiểm và lúc giảm sức chứa. Chỉ ghi khi có gì thật sự đổi; câu
+ * UPDATE đó bật luôn `discordDirty` để tin Discord được sửa lại (cả khi tiến trình chết
+ * trước lúc kịp sửa). Không đổi gì → không ghi, không đụng Discord.
+ *
+ * Đổi giờ bắt đầu: xoá trong cùng giao dịch các dòng `notification_log` của buổi thuộc loại
+ * nhắc CHƯA tới hạn theo giờ mới, để nhắc được gửi lại theo giờ mới; loại đã tới hạn theo
+ * giờ mới thì giữ (đã nhắc thì không nhắc lần hai). Bộ gửi nhắc chỉ ghi log khi giờ bắt đầu
+ * vẫn đúng giờ nó đã đọc (khoá chia sẻ dòng buổi), nên lần chạy đang dở với giờ cũ không
+ * chen log cũ vào sau khi giờ đã đổi.
+ *
+ * `actorId` chỉ dùng để ghi log ai đã sửa.
+ */
+export async function updateSession(
+  ctx: Ctx,
+  actorId: number,
+  sessionId: number,
+  patch: UpdateSessionPatch,
+): Promise<SessionView> {
+  const parsed = updateSchema.safeParse(patch, { errorMap: defaultErrorMap });
+  if (!parsed.success) throw appError('VALIDATION', parsed.error.issues[0]?.message);
+  const { startsAt, capacity, roomCode, note } = parsed.data;
+  // Đọc ngoài giao dịch: chỉ cần khi đổi giờ, và không giữ khoá dòng buổi lâu hơn cần thiết.
+  const lead = startsAt === undefined ? null : (await getSettings(ctx)).reminderLeadMinutes;
+
+  const changedFields = await ctx.db.$transaction(async (tx): Promise<string[]> => {
+    const locked = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM game_sessions WHERE id = ${sessionId} FOR UPDATE`;
+    if (locked.length === 0) throw appError('NOT_FOUND');
+
+    const current = await tx.gameSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { status: true, startsAt: true, capacity: true, roomCode: true, note: true },
+    });
+    if (current.status !== 'scheduled') throw appError('SESSION_NOT_OPEN');
+
+    const data: Prisma.GameSessionUpdateInput = {};
+    if (roomCode !== undefined && emptyToNull(roomCode) !== current.roomCode) data.roomCode = emptyToNull(roomCode);
+    if (note !== undefined && emptyToNull(note) !== current.note) data.note = emptyToNull(note);
+    if (capacity !== undefined && capacity !== current.capacity) {
+      const taken = await tx.attendance.count({
+        where: { sessionId, status: 'going', member: { status: 'active' } },
+      });
+      if (capacity < taken) {
+        throw appError('VALIDATION', `Đã có ${taken} người tham gia, sức chứa không được nhỏ hơn ${taken}`);
+      }
+      data.capacity = capacity;
+    }
+    const newStart = startsAt !== undefined && startsAt.getTime() !== current.startsAt.getTime() ? startsAt : null;
+    if (newStart) {
+      assertNotPast(ctx, newStart);
+      data.startsAt = newStart;
+    }
+    const fields = Object.keys(data);
+    if (fields.length === 0) return fields;
+
+    await tx.gameSession.update({ where: { id: sessionId }, data: { ...data, discordDirty: true } });
+    if (newStart && lead !== null) {
+      const kinds = reminderKindsNotYetDue(newStart, ctx.now(), lead);
+      if (kinds.length > 0) await tx.notificationLog.deleteMany({ where: { sessionId, kind: { in: kinds } } });
+    }
+    return fields;
+  }, HOT_TX);
+
+  if (changedFields.length > 0) {
+    console.log(`[sessions] Thành viên ${actorId} đã sửa buổi ${sessionId}: ${changedFields.join(', ')}`);
+    await syncSessionMessage(ctx, sessionId);
+  }
+  return getSessionView(ctx, sessionId);
 }
 
 // ---------------------------------------------------------------------------

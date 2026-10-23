@@ -1,6 +1,6 @@
 /**
  * Buổi chơi qua HTTP: danh sách theo ngày VN, điểm danh (giống hệt bấm nút Discord
- * vì cùng gọi `setAttendance`), mod tạo/huỷ/kết thúc buổi (kết thúc = chọn hạng mục
+ * vì cùng gọi `setAttendance`), mod tạo/sửa/huỷ/kết thúc buổi (kết thúc = chọn hạng mục
  * tri ân và mở vote); chế độ chơi cho form tạo buổi.
  */
 
@@ -19,6 +19,7 @@ import {
   listActiveModes,
   listSessionsOnVnDate,
   setAttendance,
+  updateSession,
 } from '../../modules/sessions/service.js';
 import type { SessionView } from '../../ports.js';
 import { currentMember, requireMember, requireMod } from '../auth-plugin.js';
@@ -47,6 +48,21 @@ const createBody = z
     note: z.string().nullish(),
   })
   .strict();
+
+/**
+ * Sửa buổi: chỉ gửi trường muốn đổi. Giờ bắt đầu đổi bằng ngày + giờ VN, luôn đi cùng
+ * nhau; `null` (hoặc chuỗi rỗng) xoá mã phòng / ghi chú. Thân rỗng `{}` không đổi gì.
+ */
+const updateBody = z
+  .object({
+    date: z.string().regex(VN_DATE).optional(),
+    time: z.string().regex(VN_TIME).optional(),
+    capacity: z.number().optional(),
+    roomCode: z.string().nullish(),
+    note: z.string().nullish(),
+  })
+  .strict()
+  .refine((body) => (body.date === undefined) === (body.time === undefined));
 
 export function toSessionDto(view: SessionView, avatars: ReadonlyMap<number, string | null>, meId: number): SessionDto {
   return {
@@ -111,6 +127,15 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     const me = currentMember(request);
     const view = await createSession(app.ctx, me.id, { startsAt: toStartsAt(date, time), ...rest });
     return reply.code(201).send(await toDto(app.ctx, view, me.id));
+  });
+
+  app.patch('/api/admin/sessions/:id', { preHandler: requireMod }, async (request): Promise<SessionDto> => {
+    const { id } = idParams.parse(request.params);
+    const { date, time, ...rest } = updateBody.parse(request.body);
+    const me = currentMember(request);
+    const startsAt = date !== undefined && time !== undefined ? toStartsAt(date, time) : undefined;
+    const view = await updateSession(app.ctx, me.id, id, { ...rest, ...(startsAt ? { startsAt } : {}) });
+    return toDto(app.ctx, view, me.id);
   });
 
   app.post('/api/admin/sessions/:id/cancel', { preHandler: requireMod }, async (request, reply) => {

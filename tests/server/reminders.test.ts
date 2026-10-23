@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { buildReminder } from '../../src/server/modules/reminders/messages.js';
 import { reminderKindsDue, runReminders } from '../../src/server/modules/reminders/service.js';
+import { cancelSession, updateSession } from '../../src/server/modules/sessions/service.js';
 import { updateSettings } from '../../src/server/modules/settings/service.js';
 import type { SessionView } from '../../src/server/ports.js';
 import { makeTestCtx } from '../helpers/ctx.js';
@@ -389,4 +390,170 @@ test('several sessions are handled in one run', async () => {
     [starting.id, 'start'],
   ]);
   expect(await testDb.notificationLog.count({ where: { sessionId: { in: [later.id, past.id, empty.id] } } })).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// Admin đổi giờ / huỷ buổi giữa chừng
+// ---------------------------------------------------------------------------
+
+const pre15Text = (time: string) =>
+  `Còn 15 phút nữa là tới buổi chơi Cổ điển (Classic) lúc ${time}. Chuẩn bị vào game nhé!\nhttp://localhost:3000`;
+const startText = 'Buổi chơi Cổ điển (Classic) bắt đầu rồi, vào game thôi! 🦆\nhttp://localhost:3000';
+
+/** Admin (không nhận nhắc) và một buổi 21:00 có `members` người nhận DM, tham gia từ sớm. */
+async function sessionWithDmMembers(members: number) {
+  const admin = await createMember(testDb, { accessLevel: 'admin', notifyDm: false });
+  const s = await createSession(testDb);
+  const going = [];
+  for (let i = 0; i < members; i += 1) {
+    const m = await createMember(testDb);
+    await join(s.id, m.id, at(-120 + i));
+    going.push(m);
+  }
+  return { admin, s, going };
+}
+
+test('moving a session later re-sends the reminder already sent for the old time', async () => {
+  const { ctx, notifier, setNow } = makeTestCtx();
+  const { admin, s } = await sessionWithDmMembers(1);
+
+  setNow(atIso(-15));
+  expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+
+  // 20:50: dời sang 22:00 → log pre15 của giờ cũ bị xoá để nhắc lại theo giờ mới.
+  setNow(atIso(-10));
+  await updateSession(ctx, admin.id, s.id, { startsAt: at(60) });
+  expect(await logRows()).toEqual([]);
+  for (const minutes of [-10, 0, 5]) {
+    // Giờ cũ trôi qua: không nhắc gì theo giờ cũ.
+    setNow(atIso(minutes));
+    expect(await runReminders(ctx)).toEqual({ sent: 0, failed: 0 });
+  }
+
+  setNow(atIso(45));
+  expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+  setNow(atIso(60));
+  expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+  expect(notifier.dms.map((d) => d.text)).toEqual([pre15Text('21:00'), pre15Text('22:00'), startText]);
+});
+
+test('moving a session within the reminder window it is already in does not remind twice', async () => {
+  const { ctx, notifier, setNow } = makeTestCtx();
+  const { admin, s } = await sessionWithDmMembers(1);
+
+  setNow(atIso(-15));
+  expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+
+  // 20:50, dời sang 21:05: cửa sổ pre15 của giờ mới [20:50, 21:05) đã mở → giữ log, không nhắc lại.
+  setNow(atIso(-10));
+  await updateSession(ctx, admin.id, s.id, { startsAt: at(5) });
+  expect((await logRows()).map((r) => r.kind)).toEqual(['pre15']);
+  setNow(atIso(0));
+  expect(await runReminders(ctx)).toEqual({ sent: 0, failed: 0 });
+
+  setNow(atIso(5));
+  expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+  expect(notifier.dms.map((d) => d.text)).toEqual([pre15Text('21:00'), startText]);
+});
+
+test('delaying a session that has already started re-sends both reminders for the new time', async () => {
+  const { ctx, notifier, setNow } = makeTestCtx();
+  const { admin, s } = await sessionWithDmMembers(1);
+
+  for (const minutes of [-15, 0]) {
+    setNow(atIso(minutes));
+    expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+  }
+
+  // 21:02: chờ thêm người, dời sang 21:30 → cả pre15 lẫn start đều chưa tới hạn theo giờ mới.
+  setNow(atIso(2));
+  await updateSession(ctx, admin.id, s.id, { startsAt: at(30) });
+  expect(await logRows()).toEqual([]);
+
+  for (const minutes of [15, 30]) {
+    setNow(atIso(minutes));
+    expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+  }
+  expect(notifier.dms.map((d) => d.text)).toEqual([pre15Text('21:00'), startText, pre15Text('21:30'), startText]);
+});
+
+test('a run that read the old start time reminds no one else once the time has changed', async () => {
+  const { ctx, notifier, setNow } = makeTestCtx();
+  const { admin, s, going } = await sessionWithDmMembers(2);
+  const [first, second] = going.map((m) => m.discordId);
+  setNow(atIso(-15));
+
+  // Admin dời buổi sang 22:00 đúng lúc lần chạy đang gửi DM cho người đầu tiên.
+  vi.spyOn(notifier, 'sendDm').mockImplementationOnce(async (discordId, text) => {
+    await updateSession(ctx, admin.id, s.id, { startsAt: at(60) });
+    notifier.dms.push({ discordId, text });
+  });
+  expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+  expect(notifier.dms.map((d) => d.discordId)).toEqual([first]);
+  // Người thứ hai không bị ghi log theo giờ cũ (log đó sẽ chặn mất nhắc theo giờ mới);
+  // log của người đầu đã bị lần đổi giờ xoá.
+  expect(await logRows()).toEqual([]);
+
+  setNow(atIso(45));
+  expect(await runReminders(ctx)).toEqual({ sent: 2, failed: 0 });
+  expect(notifier.dms.slice(1)).toEqual([
+    { discordId: first, text: pre15Text('22:00') },
+    { discordId: second, text: pre15Text('22:00') },
+  ]);
+});
+
+test('a session cancelled while a run is sending gets no further reminders', async () => {
+  const { ctx, notifier, setNow } = makeTestCtx();
+  const { s, going } = await sessionWithDmMembers(2);
+  const [first, second] = going.map((m) => m.discordId);
+  setNow(atIso(-15));
+
+  vi.spyOn(notifier, 'sendDm').mockImplementationOnce(async (discordId, text) => {
+    await cancelSession(ctx, s.id); // DM báo huỷ cho cả hai qua sendDm thật
+    notifier.dms.push({ discordId, text });
+  });
+  expect(await runReminders(ctx)).toEqual({ sent: 1, failed: 0 });
+  expect(notifier.dms.map((d) => [d.discordId, d.text.startsWith('Còn 15 phút')])).toEqual([
+    [first, false],
+    [second, false],
+    [first, true],
+  ]);
+  expect((await logRows()).map((r) => r.memberId)).toEqual([going[0]?.id]);
+});
+
+test('a reminder waiting on an edit that holds the session row re-checks the start time once it commits', async () => {
+  const { ctx, notifier, setNow } = makeTestCtx();
+  const { s } = await sessionWithDmMembers(1);
+  setNow(atIso(-15));
+
+  // Giao dịch đổi giờ (như updateSession: khoá dòng rồi ghi) chỉ commit khi thấy câu ghi log
+  // của bộ nhắc đang chờ khoá dòng buổi. Câu đó phải xét lại điều kiện trên bản mới → không chèn.
+  let locked!: () => void;
+  const hasLock = new Promise<void>((resolve) => (locked = resolve));
+  const edit = testDb.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM game_sessions WHERE id = ${s.id} FOR UPDATE`;
+      await tx.gameSession.update({ where: { id: s.id }, data: { startsAt: at(60), discordDirty: true } });
+      locked();
+      await vi.waitFor(
+        async () => {
+          const [row] = await testDb.$queryRaw<{ n: number }[]>`
+            SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE datname = current_database() AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO notification_log%'
+          `;
+          expect(row?.n).toBe(1);
+        },
+        { timeout: 5_000 },
+      );
+    },
+    { timeout: 10_000 },
+  );
+  await hasLock;
+
+  const run = runReminders(ctx);
+  await edit;
+  expect(await run).toEqual({ sent: 0, failed: 0 });
+  expect(notifier.dms).toEqual([]);
+  expect(await logRows()).toEqual([]);
 });

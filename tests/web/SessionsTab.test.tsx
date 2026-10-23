@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { EndOptionDto, ModeDto, OpenVoteRoundDto, SessionDto } from '../../src/shared/api-types';
-import { vnTodayIso } from '../../src/web/lib/format';
+import { addDaysIso, vnTodayIso } from '../../src/web/lib/format';
 import { SessionsTab } from '../../src/web/pages/admin/SessionsTab';
 
 const today = vnTodayIso();
@@ -111,15 +111,14 @@ test('creating a session posts date, time, mode, capacity and room code, then sh
   await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/sessions?date=')).length).toBeGreaterThan(1));
 });
 
-test('only scheduled sessions offer Kết thúc and Huỷ buổi', async () => {
+test('only scheduled sessions offer Kết thúc, Sửa and Huỷ buổi', async () => {
   stubFetch(baseRoutes);
   renderTab();
 
   const scheduled = await screen.findByRole('article', { name: '21:00 Cổ điển (Classic)' });
   expect(scheduled).toHaveTextContent('2/16');
   expect(scheduled).toHaveTextContent('Mã phòng: ABCD');
-  expect(within(scheduled).getByRole('button', { name: 'Kết thúc' })).toBeInTheDocument();
-  expect(within(scheduled).getByRole('button', { name: 'Huỷ buổi' })).toBeInTheDocument();
+  expect(within(scheduled).getAllByRole('button').map((b) => b.textContent)).toEqual(['Kết thúc', 'Sửa', 'Huỷ buổi']);
 
   const ended = screen.getByRole('article', { name: '19:00 Cổ điển (Classic)' });
   expect(ended).toHaveTextContent('Đã kết thúc');
@@ -238,4 +237,100 @@ test('a failed cancel shows the API message by that session', async () => {
   const scheduled = await screen.findByRole('article', { name: '21:00 Cổ điển (Classic)' });
   fireEvent.click(within(scheduled).getByRole('button', { name: 'Huỷ buổi' }));
   expect(await within(scheduled).findByRole('alert')).toHaveTextContent('Buổi chơi đã kết thúc hoặc bị huỷ');
+});
+
+const patchCalls = (fetchMock: ReturnType<typeof vi.fn>) =>
+  fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH');
+
+async function openEditDialog() {
+  const scheduled = await screen.findByRole('article', { name: '21:00 Cổ điển (Classic)' });
+  fireEvent.click(within(scheduled).getByRole('button', { name: 'Sửa' }));
+  return screen.findByRole('dialog', { name: 'Sửa buổi 21:00 Cổ điển (Classic)' });
+}
+
+test('editing the room code sends a PATCH with only that field, then closes and reloads the day', async () => {
+  let patched: unknown = null;
+  const fetchMock = stubFetch({
+    ...baseRoutes,
+    'PATCH /api/admin/sessions/5': (init) => {
+      patched = JSON.parse(String(init?.body));
+      return json(200, { ...sessions[0], roomCode: 'XYZ9' });
+    },
+  });
+  renderTab();
+
+  const dialog = await openEditDialog();
+  const room = within(dialog).getByLabelText('Mã phòng');
+  // Mã phòng nhận tiêu điểm ngay: việc hay làm nhất là thêm mã ngay trước giờ chơi.
+  expect(room).toHaveFocus();
+  expect(room).toHaveValue('ABCD');
+  expect(within(dialog).getByLabelText('Ngày')).toHaveValue(today);
+  expect(within(dialog).getByLabelText('Giờ bắt đầu')).toHaveValue('21:00');
+  expect(within(dialog).getByLabelText('Sức chứa')).toHaveValue(16);
+  expect(within(dialog).getByLabelText('Ghi chú')).toHaveValue('');
+
+  fireEvent.change(room, { target: { value: ' XYZ9 ' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Lưu' }));
+
+  await waitFor(() => expect(patched).toEqual({ roomCode: 'XYZ9' }));
+  expect(patchCalls(fetchMock).map(([url]) => String(url))).toEqual(['/api/admin/sessions/5']);
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  // Danh sách buổi được tải lại.
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/sessions?date=')).length).toBeGreaterThan(1));
+});
+
+test('moving a session to another day sends date and time together, clears the room code with null, and shows that day', async () => {
+  const tomorrow = addDaysIso(today, 1);
+  let patched: unknown = null;
+  const fetchMock = stubFetch({
+    ...baseRoutes,
+    'PATCH /api/admin/sessions/5': (init) => {
+      patched = JSON.parse(String(init?.body));
+      return json(200, { ...sessions[0], startsAt: `${tomorrow}T13:30:00.000Z`, roomCode: null });
+    },
+  });
+  renderTab();
+
+  const dialog = await openEditDialog();
+  fireEvent.change(within(dialog).getByLabelText('Mã phòng'), { target: { value: '   ' } });
+  fireEvent.change(within(dialog).getByLabelText('Ngày'), { target: { value: tomorrow } });
+  fireEvent.change(within(dialog).getByLabelText('Giờ bắt đầu'), { target: { value: '20:30' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Lưu' }));
+
+  await waitFor(() => expect(patched).toEqual({ roomCode: null, date: tomorrow, time: '20:30' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByLabelText('Xem buổi ngày')).toHaveValue(tomorrow);
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === `/api/sessions?date=${tomorrow}`)).toBe(true));
+});
+
+test('a failed edit shows the API message in the dialog and keeps it open', async () => {
+  stubFetch({
+    ...baseRoutes,
+    'PATCH /api/admin/sessions/5': () =>
+      json(400, { error: { code: 'VALIDATION', message: 'Đã có 2 người tham gia, sức chứa không được nhỏ hơn 2' } }),
+  });
+  renderTab();
+
+  const dialog = await openEditDialog();
+  const capacity = within(dialog).getByLabelText('Sức chứa');
+  fireEvent.change(capacity, { target: { value: '1' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Lưu' }));
+
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent('Đã có 2 người tham gia, sức chứa không được nhỏ hơn 2');
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  // Sửa lại thì thông báo lỗi biến mất.
+  fireEvent.change(capacity, { target: { value: '2' } });
+  expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('saving without changes just closes the edit dialog', async () => {
+  const fetchMock = stubFetch(baseRoutes);
+  renderTab();
+
+  const dialog = await openEditDialog();
+  fireEvent.change(within(dialog).getByLabelText('Mã phòng'), { target: { value: ' ABCD ' } }); // chỉ thêm khoảng trắng
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Lưu' }));
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(patchCalls(fetchMock)).toEqual([]);
 });
