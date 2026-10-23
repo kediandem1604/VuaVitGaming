@@ -335,3 +335,141 @@ test('mod can cancel; attendees are DMed and the message updated', async () => {
   expect((await post('/api/admin/sessions/abc/cancel', modSid)).statusCode).toBe(400);
   expect(notifier.dms).toHaveLength(1);
 });
+
+// ---------------------------------------------------------------------------
+// PATCH /api/admin/sessions/:id
+// ---------------------------------------------------------------------------
+
+const patch = (url: string, sid: string | undefined, payload?: unknown) =>
+  app.inject({
+    method: 'PATCH',
+    url,
+    cookies: sid ? { ggd_sid: sid } : {},
+    headers: { 'content-type': 'application/json' },
+    payload: payload === undefined ? '' : JSON.stringify(payload),
+  });
+
+test('only mods and admins can edit a session', async () => {
+  const { member: me, sid: memberSid } = await memberWithSid({ displayName: 'Tôi' });
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod' });
+  const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
+  const s = await createSession(ctx, me.id, { startsAt, modeId: await classicId() });
+  await setAttendance(ctx, s.id, me.id, true);
+  const url = `/api/admin/sessions/${s.id}`;
+
+  expect((await patch(url, undefined, { roomCode: 'ABC' })).statusCode).toBe(401);
+  const forbidden = await patch(url, memberSid, { roomCode: 'ABC' });
+  expect(forbidden.statusCode).toBe(403);
+  expect(forbidden.json()).toEqual(errorBody('FORBIDDEN', 'Bạn không có quyền làm việc này'));
+  expect((await testDb.gameSession.findUniqueOrThrow({ where: { id: s.id } })).roomCode).toBeNull();
+
+  const byMod = await patch(url, modSid, { roomCode: ' ABC123 ', note: 'Vào sớm', capacity: 10 });
+  expect(byMod.statusCode).toBe(200);
+  expect(byMod.json<SessionDto>()).toEqual({
+    id: s.id,
+    startsAt: '2026-10-22T14:00:00.000Z',
+    modeName: 'Cổ điển (Classic)',
+    capacity: 10,
+    roomCode: 'ABC123',
+    note: 'Vào sớm',
+    status: 'scheduled',
+    attendees: [{ memberId: me.id, displayName: 'Tôi', avatarUrl: null }],
+    myStatus: null, // mod không tham gia buổi này
+  });
+  // Tin Discord được sửa theo bản mới.
+  expect(notifier.updated.at(-1)?.view).toMatchObject({ roomCode: 'ABC123', note: 'Vào sớm', capacity: 10 });
+
+  // Admin xoá mã phòng bằng null, đổi giờ bằng ngày + giờ VN.
+  const byAdmin = await patch(url, adminSid, { roomCode: null, date: '2026-10-23', time: '20:30' });
+  expect(byAdmin.statusCode).toBe(200);
+  expect(byAdmin.json<SessionDto>()).toMatchObject({ roomCode: null, note: 'Vào sớm', startsAt: '2026-10-23T13:30:00.000Z' });
+  expect(await testDb.gameSession.findUniqueOrThrow({ where: { id: s.id } })).toMatchObject({
+    roomCode: null,
+    startsAt: new Date('2026-10-23T13:30:00Z'),
+    discordDirty: false,
+  });
+
+  // Thân rỗng: không đổi gì, vẫn trả buổi hiện tại.
+  const updates = notifier.updated.length;
+  const empty = await patch(url, modSid, {});
+  expect(empty.statusCode).toBe(200);
+  expect(empty.json<SessionDto>()).toMatchObject({ id: s.id, roomCode: null, capacity: 10 });
+  expect(notifier.updated).toHaveLength(updates);
+});
+
+test('edit session validation', async () => {
+  const { sid } = await memberWithSid({ accessLevel: 'mod' });
+  const admin = await createMember(testDb, { accessLevel: 'admin' });
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: await classicId(), roomCode: 'ABC' });
+  const url = `/api/admin/sessions/${s.id}`;
+  const before = await testDb.gameSession.findUniqueOrThrow({ where: { id: s.id } });
+
+  const generic = async (body: unknown, target = url) => {
+    const res = await patch(target, sid, body);
+    expect(res.statusCode, JSON.stringify(body)).toBe(400);
+    expect(res.json(), JSON.stringify(body)).toEqual(errorBody('VALIDATION', 'Dữ liệu không hợp lệ'));
+  };
+  await generic({ roomCode: 'XYZ', extra: 1 }); // body .strict()
+  await generic({ modeId: 2 }); // không đổi được chế độ chơi
+  await generic({ status: 'cancelled' });
+  await generic({ date: '2026-10-23' }); // ngày phải đi cùng giờ
+  await generic({ time: '20:30' });
+  await generic({ date: '2026-10-23', time: '25:00' });
+  await generic({ date: '23/10/2026', time: '20:30' });
+  await generic({ capacity: '10' });
+  await generic({ roomCode: 123 });
+  await generic(null);
+  await generic([]);
+  await generic(undefined);
+  for (const id of ['abc', '0', '-1', '1.5', '99999999999']) await generic({ roomCode: 'XYZ' }, `/api/admin/sessions/${id}`);
+
+  const noDay = await patch(url, sid, { date: '2026-02-30', time: '20:30' });
+  expect(noDay.statusCode).toBe(400);
+  expect(noDay.json()).toEqual(errorBody('VALIDATION', 'Ngày không hợp lệ'));
+
+  // Lỗi nghiệp vụ của service giữ nguyên thông báo.
+  const past = await patch(url, sid, { date: '2026-10-22', time: '18:00' }); // now = 19:00 VN
+  expect(past.statusCode).toBe(400);
+  expect(past.json()).toEqual(errorBody('VALIDATION', 'Giờ bắt đầu đã qua'));
+  expect((await patch(url, sid, { capacity: 26 })).json()).toEqual(errorBody('VALIDATION', 'Sức chứa phải từ 1 đến 25'));
+  expect((await patch(url, sid, { roomCode: 'x'.repeat(21) })).json()).toEqual(errorBody('VALIDATION', 'Mã phòng tối đa 20 ký tự'));
+  expect((await patch(url, sid, { note: 'x'.repeat(301) })).json()).toEqual(errorBody('VALIDATION', 'Ghi chú tối đa 300 ký tự'));
+
+  const m1 = await createMember(testDb);
+  const m2 = await createMember(testDb);
+  await setAttendance(ctx, s.id, m1.id, true);
+  await setAttendance(ctx, s.id, m2.id, true);
+  const tooSmall = await patch(url, sid, { capacity: 1 });
+  expect(tooSmall.statusCode).toBe(400);
+  expect(tooSmall.json()).toEqual(errorBody('VALIDATION', 'Đã có 2 người tham gia, sức chứa không được nhỏ hơn 2'));
+
+  expect(await testDb.gameSession.findUniqueOrThrow({ where: { id: s.id } })).toMatchObject({
+    roomCode: before.roomCode,
+    note: before.note,
+    capacity: before.capacity,
+    startsAt: before.startsAt,
+  });
+
+  // Buổi không có → 404; buổi đã huỷ / kết thúc → 409.
+  const missing = await patch('/api/admin/sessions/999', sid, { roomCode: 'XYZ' });
+  expect(missing.statusCode).toBe(404);
+  expect(missing.json()).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
+  const cancelled = await insertSession(testDb, { status: 'cancelled' });
+  const closed = await patch(`/api/admin/sessions/${cancelled.id}`, sid, { roomCode: 'XYZ' });
+  expect(closed.statusCode).toBe(409);
+  expect(closed.json()).toEqual(errorBody('SESSION_NOT_OPEN', 'Buổi chơi đã kết thúc hoặc bị huỷ'));
+});
+
+test('editing a session needs a JSON body like every other write', async () => {
+  const { sid } = await memberWithSid({ accessLevel: 'mod' });
+  const s = await insertSession(testDb);
+  const res = await app.inject({
+    method: 'PATCH',
+    url: `/api/admin/sessions/${s.id}`,
+    cookies: { ggd_sid: sid },
+    headers: { 'content-type': 'text/plain' },
+    payload: 'roomCode=ABC',
+  });
+  expect(res.statusCode).toBe(415);
+  expect((await testDb.gameSession.findUniqueOrThrow({ where: { id: s.id } })).roomCode).toBeNull();
+});
