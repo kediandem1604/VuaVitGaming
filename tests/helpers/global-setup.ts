@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { PrismaClient } from '@prisma/client';
 import { dataDirFor, startEmbeddedPostgres } from '../../scripts/embedded-pg.js';
 import { TEST_DATABASE_URL } from './setup.js';
 
@@ -15,6 +16,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
   try {
     await prismaMigrateDeploy(TEST_DATABASE_URL);
+    await dropLeftoverTestObjects(TEST_DATABASE_URL);
   } catch (err) {
     await pg.stop();
     throw err;
@@ -40,5 +42,21 @@ async function prismaMigrateDeploy(databaseUrl: string): Promise<void> {
 
   if (code !== 0) {
     throw new Error(`prisma migrate deploy thất bại (mã ${code ?? 'null'}):\n${output.join('')}`);
+  }
+}
+
+/**
+ * tests/server/seasons.test.ts tạo trigger `ggd_test_block` trên `role_titles` để ép
+ * giao dịch chốt mùa thất bại, rồi tự gỡ trong `finally`. Một lượt test bị giết giữa
+ * chừng có thể để nó lại (`resetDb` chỉ TRUNCATE, không đụng trigger) và làm mọi lần
+ * ghi `role_titles` sau đó hỏng — gỡ sẵn ở đây để lượt sau luôn sạch.
+ */
+async function dropLeftoverTestObjects(databaseUrl: string): Promise<void> {
+  const db = new PrismaClient({ datasourceUrl: databaseUrl });
+  try {
+    await db.$executeRawUnsafe('DROP TRIGGER IF EXISTS ggd_test_block ON role_titles');
+    await db.$executeRawUnsafe('DROP FUNCTION IF EXISTS ggd_test_block()');
+  } finally {
+    await db.$disconnect();
   }
 }
