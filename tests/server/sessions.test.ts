@@ -12,6 +12,7 @@ import type { GuildMemberInfo } from '../../src/server/ports.js';
 import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
 import { createMember, createSession as insertSession } from '../helpers/factories.js';
+import { patchDelegate } from '../helpers/prisma.js';
 
 beforeEach(resetDb);
 afterEach(() => vi.restoreAllMocks());
@@ -519,6 +520,96 @@ test('near-simultaneous presses never leave an older view on the Discord message
   expect((await sessionRow(s.id)).discordDirty).toBe(false);
 });
 
+test('rapid presses coalesce into at most one queued Discord edit, which shows everyone', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  const ms = await Promise.all([...Array(10)].map((_, i) => createMember(testDb, { discordId: `r${i}` })));
+  expect(notifier.published).toHaveLength(1);
+
+  // Lần sửa tin đầu tiên treo ở Discord cho tới khi cả 10 người đã bấm xong.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const updateSpy = vi.spyOn(notifier, 'updateSession').mockImplementationOnce(async (messageId, view) => {
+    await gate;
+    notifier.updated.push({ messageId, view });
+  });
+
+  const presses = ms.map((m) => setAttendance(ctx, s.id, m.id, true));
+  await vi.waitFor(async () => expect(await goingCount(s.id)).toBe(10));
+  await vi.waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1));
+  await new Promise((resolve) => setTimeout(resolve, 50)); // mọi lần bấm kịp xin đồng bộ
+  release();
+  await Promise.all(presses);
+
+  // Lần đang chạy + đúng một lần chờ dùng chung (đọc trạng thái mới nhất), không phải 10 lần.
+  expect(updateSpy.mock.calls.length).toBeLessThanOrEqual(2);
+  expect(notifier.published).toHaveLength(1);
+  const ids = (view: { attendees: { memberId: number }[] }) => view.attendees.map((a) => a.memberId).sort((x, y) => x - y);
+  expect(ids(notifier.updated.at(-1)!.view)).toEqual(ms.map((m) => m.id).sort((x, y) => x - y));
+  expect((await sessionRow(s.id)).discordDirty).toBe(false);
+});
+
+test('a dirty mark written while a sync is talking to Discord survives that sync', async () => {
+  const { ctx, notifier, admin, classic } = await setup();
+  silenceConsoleError();
+  const s = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  expect((await sessionRow(s.id)).discordDirty).toBe(false);
+
+  // Trong lúc Discord đang nhận bản sửa, nơi khác (vd rời server → trả chỗ) đánh dấu buổi cần sửa lại.
+  const markMidCall = () => testDb.gameSession.updateMany({ where: { id: s.id }, data: { discordDirty: true } });
+  vi.spyOn(notifier, 'updateSession').mockImplementationOnce(async (messageId, view) => {
+    await markMidCall();
+    notifier.updated.push({ messageId, view });
+  });
+  await syncSessionMessage(ctx, s.id);
+  expect(notifier.updated).toHaveLength(1);
+  expect((await sessionRow(s.id)).discordDirty).toBe(true);
+  // Lượt sau (bộ hẹn giờ) đồng bộ lại; lần này không ai chen vào nên cờ được xoá.
+  await syncSessionMessage(ctx, s.id);
+  expect(notifier.updated).toHaveLength(2);
+  expect((await sessionRow(s.id)).discordDirty).toBe(false);
+
+  // Cũng vậy khi đăng tin mới (buổi chưa có tin).
+  notifier.down = true;
+  const t = await createSession(ctx, admin.id, { startsAt, modeId: classic.id });
+  notifier.down = false;
+  vi.spyOn(notifier, 'publishSession').mockImplementationOnce(async (view) => {
+    await testDb.gameSession.updateMany({ where: { id: t.id }, data: { discordDirty: true } });
+    notifier.published.push(view);
+    return 'msg-mid';
+  });
+  await syncSessionMessage(ctx, t.id);
+  expect(await sessionRow(t.id)).toMatchObject({ discordMessageId: 'msg-mid', discordDirty: true });
+});
+
+test('creating and changing attendance save the session dirty, so a crash before the Discord sync is retried', async () => {
+  const { ctx, admin, classic } = await setup();
+  silenceConsoleError();
+  const m = await createMember(testDb, { displayName: 'An' });
+  const existing = await insertSession(testDb, { discordMessageId: 'msg-old' });
+  expect(existing.discordDirty).toBe(false);
+
+  // Mất kết nối DB ngay sau khi lưu xong (như tiến trình chết trước khi kịp đồng bộ Discord):
+  // mọi bước đồng bộ sau đó đều hỏng, cờ phải đã nằm sẵn trong dòng vừa lưu.
+  const lost = () => (() => Promise.reject(new Error('mất kết nối'))) as never;
+  const restoreFind = patchDelegate(testDb.gameSession, 'findUnique', lost);
+  const restoreUpdate = patchDelegate(testDb.gameSession, 'updateMany', lost);
+  try {
+    await expect(createSession(ctx, admin.id, { startsAt, modeId: classic.id })).rejects.toThrow('mất kết nối');
+    await expect(setAttendance(ctx, existing.id, m.id, true)).rejects.toThrow('mất kết nối');
+  } finally {
+    restoreFind();
+    restoreUpdate();
+  }
+
+  const rows = await testDb.gameSession.findMany({ orderBy: { id: 'asc' }, select: { id: true, discordDirty: true } });
+  expect(rows).toEqual([
+    { id: existing.id, discordDirty: true },
+    { id: existing.id + 1, discordDirty: true },
+  ]);
+  expect(await goingCount(existing.id)).toBe(1);
+});
+
 // ---------------------------------------------------------------------------
 // cancelSession
 // ---------------------------------------------------------------------------
@@ -594,4 +685,18 @@ test('cancel while Discord down still cancels and marks dirty', async () => {
   await expect(cancelSession(ctx, s.id)).resolves.toBeUndefined();
   expect(await sessionRow(s.id)).toMatchObject({ status: 'cancelled', discordDirty: true });
   expect(notifier.dms).toEqual([]);
+});
+
+test('cancelling saves the session dirty in the same update, so a crash before the Discord sync is retried', async () => {
+  const { ctx } = await setup();
+  const s = await insertSession(testDb, { discordMessageId: 'msg-old' });
+
+  // Mất kết nối ngay sau khi đổi trạng thái: không đọc lại được buổi, không đồng bộ được gì.
+  const restore = patchDelegate(testDb.gameSession, 'findUnique', () => (() => Promise.reject(new Error('mất kết nối'))) as never);
+  try {
+    await expect(cancelSession(ctx, s.id)).rejects.toThrow('mất kết nối');
+  } finally {
+    restore();
+  }
+  expect(await sessionRow(s.id)).toMatchObject({ status: 'cancelled', discordDirty: true });
 });

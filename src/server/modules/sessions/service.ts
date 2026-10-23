@@ -124,7 +124,9 @@ const defaultErrorMap: z.ZodErrorMap = () => ({ message: 'Dữ liệu không h�
 
 /**
  * Tạo buổi chơi rồi đăng tin Discord. Lỗi dữ liệu → `VALIDATION` với thông báo
- * tiếng Việt; Discord sập thì buổi vẫn được tạo (đánh dấu `discordDirty`).
+ * tiếng Việt. Buổi được lưu sẵn với `discordDirty = true` (lần đồng bộ thành công mới
+ * xoá): Discord sập — hay tiến trình chết ngay sau khi lưu — thì buổi vẫn được tạo và bộ
+ * hẹn giờ đăng bù tin.
  */
 export async function createSession(ctx: Ctx, actorId: number, input: CreateSessionInput): Promise<SessionView> {
   const parsed = createSchema.safeParse(input, { errorMap: defaultErrorMap });
@@ -146,6 +148,7 @@ export async function createSession(ctx: Ctx, actorId: number, input: CreateSess
       note: emptyToNull(note),
       status: 'scheduled',
       createdById: actorId,
+      discordDirty: true,
     },
     select: { id: true },
   });
@@ -170,6 +173,8 @@ function emptyToNull(s: string | null | undefined): string | null {
  * xếp hàng: người đến sau thấy số chỗ đã cập nhật, nên không bao giờ vượt sức chứa.
  * Lỗi: buổi không có → `NOT_FOUND`; không còn `scheduled` → `SESSION_NOT_OPEN`;
  * thành viên không có / đã rời server → `FORBIDDEN`; hết chỗ → `SESSION_FULL`.
+ * Có thay đổi thì cùng giao dịch đánh dấu `discordDirty` trên dòng buổi đã khoá, nên
+ * tiến trình chết giữa lúc lưu và lúc sửa tin Discord vẫn được bộ hẹn giờ sửa bù.
  */
 export async function setAttendance(
   ctx: Ctx,
@@ -206,6 +211,7 @@ export async function setAttendance(
     const status = going ? 'going' : 'cancelled';
     if (current) await tx.attendance.update({ where, data: { status, updatedAt: ctx.now() } });
     else await tx.attendance.create({ data: { sessionId, memberId, status, updatedAt: ctx.now() } });
+    await tx.gameSession.update({ where: { id: sessionId }, data: { discordDirty: true } });
   }, HOT_TX);
 
   await syncSessionMessage(ctx, sessionId);
@@ -221,10 +227,11 @@ export async function setAttendance(
  * tham gia (một DM lỗi chỉ được ghi log, những người khác vẫn nhận), rồi sửa tin Discord.
  */
 export async function cancelSession(ctx: Ctx, sessionId: number): Promise<void> {
-  // Điều kiện trong WHERE để hai admin huỷ cùng lúc chỉ có một bên DM mọi người.
+  // Điều kiện trong WHERE để hai admin huỷ cùng lúc chỉ có một bên DM mọi người. Cờ
+  // `discordDirty` bật cùng lúc: chết trước khi kịp sửa tin thì bộ hẹn giờ sửa bù.
   const { count } = await ctx.db.gameSession.updateMany({
     where: { id: sessionId, status: 'scheduled' },
-    data: { status: 'cancelled' },
+    data: { status: 'cancelled', discordDirty: true },
   });
   if (count === 0) {
     const exists = await ctx.db.gameSession.findUnique({ where: { id: sessionId }, select: { id: true } });
@@ -255,28 +262,62 @@ export async function cancelSession(ctx: Ctx, sessionId: number): Promise<void> 
 
 /**
  * Đăng (chưa có message id) hoặc sửa (đã có) tin Discord của buổi theo trạng thái
- * hiện tại. Không bao giờ ném lỗi: thành công → `discordDirty = false`; lỗi → ghi log
- * và `discordDirty = true` để bộ hẹn giờ thử lại. Buổi không tồn tại → chỉ ghi log.
- * Tin cũ đã bị xoá trong Discord (`MessageGoneError`) → bỏ id cũ và đăng tin mới ngay.
+ * hiện tại. Không bao giờ ném lỗi; lỗi → ghi log và `discordDirty = true` để bộ hẹn giờ
+ * thử lại. Buổi không tồn tại → chỉ ghi log. Tin cũ đã bị xoá trong Discord
+ * (`MessageGoneError`) → bỏ id cũ và đăng tin mới ngay.
  *
  * Các lần đồng bộ của cùng một buổi chạy nối đuôi nhau trong tiến trình (web + bot
  * chung một tiến trình): hai người bấm gần như cùng lúc thì lần sau đọc trạng thái
  * sau khi lần trước đã gửi xong, nên tin Discord không bị một bản cũ đè lên bản mới.
+ * Mỗi buổi có tối đa MỘT lần đang chờ (chưa bắt đầu): người gọi đến khi đã có lần chờ
+ * thì dùng chung lần đó — nó đọc trạng thái lúc bắt đầu chạy, tức là sau mọi thay đổi
+ * của họ — nên cả hội bấm dồn dập chỉ tốn lần đang chạy + một lần sửa tin, không phải
+ * mỗi lần bấm một lần (Discord giới hạn tốc độ sửa tin). Lần chờ dùng `ctx` của người
+ * gọi đầu tiên (mọi người gọi trong tiến trình dùng chung một ctx).
  */
 export function syncSessionMessage(ctx: Ctx, sessionId: number): Promise<void> {
-  const previous = syncQueues.get(sessionId) ?? Promise.resolve();
-  const run = previous.then(() => syncNow(ctx, sessionId)); // syncNow không bao giờ reject
-  syncQueues.set(sessionId, run);
-  return run.finally(() => {
-    if (syncQueues.get(sessionId) === run) syncQueues.delete(sessionId);
-  });
+  const queue = syncQueues.get(sessionId);
+  if (queue?.pending) return queue.pending;
+
+  const entry: SyncQueue = queue ?? { tail: Promise.resolve(), pending: null };
+  const previous = entry.tail;
+  let run: Promise<void>;
+  const task = (): Promise<void> => {
+    if (entry.pending === run) entry.pending = null; // đã bắt đầu: người gọi sau xếp lần mới
+    return syncNow(ctx, sessionId);
+  };
+  // syncNow không bao giờ reject; `then(task, task)` để một lần lỗi lạ cũng không chặn hàng.
+  run = previous.then(task, task);
+  entry.pending = run;
+  entry.tail = run;
+  syncQueues.set(sessionId, entry);
+
+  const cleanup = (): void => {
+    if (syncQueues.get(sessionId) === entry && entry.tail === run) syncQueues.delete(sessionId);
+  };
+  run.then(cleanup, cleanup);
+  return run;
 }
 
-/** Lần đồng bộ đang chạy (hoặc xếp hàng) của từng buổi; xoá khi xong để không giữ mãi. */
-const syncQueues = new Map<number, Promise<void>>();
+interface SyncQueue {
+  /** Lần đồng bộ cuối cùng đã xếp hàng (đang chạy hoặc đang chờ). */
+  tail: Promise<void>;
+  /** Lần đang chờ, chưa bắt đầu — người gọi mới dùng chung; null khi không có. */
+  pending: Promise<void> | null;
+}
 
+/** Hàng đồng bộ của từng buổi; xoá khi lần cuối xong để không giữ mãi. */
+const syncQueues = new Map<number, SyncQueue>();
+
+/**
+ * Một lần đồng bộ. Xoá cờ `discordDirty` TRƯỚC khi đọc trạng thái (cập nhật có điều kiện),
+ * rồi đọc và gửi; lỗi thì bật lại cờ. Nhờ vậy một dấu "cần sửa lại" ghi chen vào giữa
+ * lúc đọc và lúc Discord nhận xong (vd rời server → trả chỗ) không bị lần này xoá mất:
+ * nó còn nguyên và bộ hẹn giờ sửa bù.
+ */
 async function syncNow(ctx: Ctx, sessionId: number): Promise<void> {
   try {
+    await ctx.db.gameSession.updateMany({ where: { id: sessionId, discordDirty: true }, data: { discordDirty: false } });
     const row = await findSessionRow(ctx.db, sessionId);
     if (!row) {
       console.error(`[sessions] Không đồng bộ được tin Discord: không có buổi ${sessionId}`);
@@ -286,10 +327,7 @@ async function syncNow(ctx: Ctx, sessionId: number): Promise<void> {
     if (row.discordMessageId && (await updateExisting(ctx, sessionId, row.discordMessageId, view))) return;
 
     const messageId = await ctx.notifier.publishSession(view);
-    await ctx.db.gameSession.update({
-      where: { id: sessionId },
-      data: { discordMessageId: messageId, discordDirty: false },
-    });
+    await ctx.db.gameSession.update({ where: { id: sessionId }, data: { discordMessageId: messageId } });
   } catch (err) {
     console.error(`[sessions] Không đồng bộ được tin Discord của buổi ${sessionId}: ${messageOf(err)}`);
     await markDirty(ctx, sessionId);
@@ -297,7 +335,7 @@ async function syncNow(ctx: Ctx, sessionId: number): Promise<void> {
 }
 
 /**
- * Sửa tin đã đăng; thành công → xoá cờ, trả true. Tin không còn trong Discord
+ * Sửa tin đã đăng; thành công → trả true. Tin không còn trong Discord
  * (`MessageGoneError`) → bỏ id cũ ngay (lần sau không sửa hụt nữa) và trả false
  * để đăng tin mới. Lỗi khác ném tiếp.
  */
@@ -310,7 +348,6 @@ async function updateExisting(ctx: Ctx, sessionId: number, messageId: string, vi
     await ctx.db.gameSession.update({ where: { id: sessionId }, data: { discordMessageId: null } });
     return false;
   }
-  await ctx.db.gameSession.update({ where: { id: sessionId }, data: { discordDirty: false } });
   return true;
 }
 
