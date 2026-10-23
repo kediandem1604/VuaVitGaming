@@ -10,8 +10,10 @@ import { ApiError, errorMessage } from './api';
 import { Layout } from './components/Layout';
 import { useCurrentMember, useMe } from './hooks/useMe';
 import { LoginPage } from './pages/LoginPage';
+import { MvpPage } from './pages/MvpPage';
 import { ForbiddenPage, NotFoundPage, PlaceholderPage } from './pages/PlaceholderPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { TodayPage } from './pages/TodayPage';
 
 export function App() {
   return (
@@ -19,10 +21,10 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<Shell />}>
-          <Route index element={<PlaceholderPage title="Hôm nay" />} />
+          <Route index element={<TodayPage />} />
           <Route path="dai-sanh" element={<PlaceholderPage title="Đại sảnh hoá thân" />} />
           <Route path="bang-xep-hang" element={<PlaceholderPage title="Bảng xếp hạng" />} />
-          <Route path="tri-an" element={<PlaceholderPage title="Tri ân" />} />
+          <Route path="tri-an" element={<MvpPage />} />
           <Route path="khai-diem" element={<PlaceholderPage title="Khai điểm" />} />
           <Route path="ho-so" element={<ProfilePage />} />
           <Route
