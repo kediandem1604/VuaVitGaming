@@ -3,6 +3,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError } from './api';
 import { App } from './App';
+// Font Baloo 2 (biến thiên 400–800, có bộ dấu tiếng Việt) phải nạp trước styles.css để `--font-sans` có mặt chữ.
+import '@fontsource-variable/baloo-2';
 import './styles.css';
 
 const queryClient = new QueryClient({

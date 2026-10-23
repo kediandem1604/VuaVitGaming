@@ -1,48 +1,152 @@
 @import "tailwindcss";
 
-/* Màu phe (Global Constraints): Ngỗng, Vịt, Phe thứ 3. */
-:root {
-  --goose: #2F80ED;
-  --duck: #E5484D;
-  --neutral: #8E4EC6;
-  color-scheme: light dark;
+/*
+ * Tạm thời: giao diện chỉ có bản tối (spec §3.6) nhưng các trang chưa làm lại vẫn dùng
+ * lớp `dark:` theo `prefers-color-scheme`; máy đặt giao diện sáng sẽ thấy lớp sáng cũ
+ * trên nền đêm. Biến thể này cho `dark:` luôn khớp. Xoá ở Task 11 cùng các lớp `dark:`.
+ */
+@custom-variant dark (&:where(*));
+
+/*
+ * Bộ nhận diện "Sảnh đêm" (spec §3). Token màu khai báo ở đây phải khớp với
+ * `src/web/lib/palette.ts` — test `tests/web/palette.test.ts` so từng giá trị.
+ * Màu phe (Global Constraints) giữ nguyên: Ngỗng `goose`, Vịt `duck`, Phe thứ 3 `third`.
+ * Chữ trắng không đặt thẳng lên `goose`/`duck` (chỉ ~3.9:1) mà lên bản `-strong`;
+ * chữ màu phe trên nền tối dùng bản `-soft`.
+ */
+@theme {
+  --color-night-950: #0E1130;
+  --color-night-900: #1B1F4A;
+  --color-night-800: #2A3070;
+  --color-night-700: #3A4180;
+  --color-night-600: #7680D4;
+  --color-night-300: #AEB6FF;
+  --color-night-200: #D6DAFF;
+  --color-gold: #FFD23F;
+  --color-gold-ink: #3A2600;
+  --color-goose: #2F80ED;
+  --color-duck: #E5484D;
+  --color-third: #8E4EC6;
+  --color-goose-strong: #1F6FD6;
+  --color-duck-strong: #C9353A;
+  --color-goose-soft: #7CB8FF;
+  --color-duck-soft: #FF8A8F;
+  --color-third-soft: #C9A2F2;
+  --color-ok: #7CF29A;
+
+  /* Baloo 2 (OFL, đủ dấu tiếng Việt) đóng gói kèm app qua @fontsource-variable/baloo-2, nạp ở main.tsx. */
+  --font-sans: 'Baloo 2 Variable', system-ui, sans-serif;
 }
 
-/* Token màu cho Tailwind: bg-goose, text-duck, border-third… */
-@theme inline {
-  --color-goose: var(--goose);
-  --color-duck: var(--duck);
-  --color-third: var(--neutral);
+@layer base {
+  /* Chỉ có giao diện tối (spec §3.6). */
+  :root {
+    color-scheme: dark;
+  }
+
+  /*
+   * Nền đêm: `night-900` phủ hai lớp chấm sao mờ lệch nhau (radial-gradient lặp,
+   * không dùng ảnh). Chữ thường `night-200`, độ đậm 500 (spec §3.2).
+   */
+  body {
+    @apply bg-night-900 font-medium text-night-200 antialiased;
+    background-image:
+      radial-gradient(circle, rgb(255 255 255 / 0.18) 1px, transparent 1.6px),
+      radial-gradient(circle, rgb(174 182 255 / 0.12) 1px, transparent 1.6px);
+    background-size:
+      96px 96px,
+      152px 152px;
+    background-position:
+      0 0,
+      48px 76px;
+  }
+
+  /* Viền focus bàn phím cho mọi phần tử bấm được: outline 3px `gold`, cách 2px (spec §3.3). */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid var(--color-gold);
+    outline-offset: 2px;
+  }
 }
 
-body {
-  @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+/*
+ * Hình khối dùng chung (spec §3.3). Tailwind 4 chỉ cho `@apply` các utility nên khai
+ * báo bằng `@utility`; utility nhiều thuộc tính xếp trước utility ít thuộc tính, nên
+ * `panel p-0` hay `chip bg-gold` vẫn ghi đè được từng phần.
+ */
+@utility panel {
+  @apply rounded-2xl border-3 border-night-950 bg-night-800 p-4;
 }
 
-/* Lớp dùng chung. Tailwind 4 chỉ cho `@apply` các utility, nên khai báo bằng `@utility`. */
+/* Bí danh tạm cho các trang chưa đổi sang `panel` — xoá ở Task 11. */
 @utility card {
-  @apply rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900;
+  @apply panel;
 }
 
+@utility panel-inset {
+  @apply rounded-xl border-2 border-night-950 bg-night-900 p-3;
+}
+
+/*
+ * Nút khối kiểu game: viền 3px, viền đáy 6px tạo độ dày. Khi nhấn, viền đáy còn 3px
+ * và nút dịch xuống 3px — mép dưới đứng yên nên trông như lún. `disabled` không lún,
+ * nền `night-700` chữ `night-300`. Lún là trạng thái tức thời, không có chuyển động.
+ */
 @utility btn {
-  @apply inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition
-    focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-goose
-    disabled:cursor-not-allowed disabled:opacity-50;
+  @apply inline-flex items-center justify-center gap-2 rounded-xl border-3 border-night-950 px-4 py-2 text-base leading-tight font-bold select-none;
+  border-bottom-width: 6px;
+
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      filter: brightness(1.08);
+    }
+  }
+
+  &:active:not(:disabled) {
+    border-bottom-width: 3px;
+    transform: translateY(3px);
+  }
+
+  &:disabled {
+    @apply cursor-not-allowed bg-night-700 text-night-300;
+  }
 }
 
 @utility btn-primary {
-  @apply btn bg-goose text-white hover:bg-blue-600;
+  @apply btn bg-gold text-gold-ink;
 }
 
 @utility btn-secondary {
-  @apply btn border border-slate-300 bg-white text-slate-800 hover:bg-slate-100
-    dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800;
+  @apply btn bg-night-700 text-white;
 }
 
+@utility btn-danger {
+  @apply btn bg-duck-strong text-white;
+}
+
+/* Ô nhập liệu: chữ 16px để iOS không tự zoom; focus đổi viền sang `gold` (ngoài outline chung). */
 @utility field {
-  @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base
-    placeholder:text-slate-400 focus:border-goose focus:outline-none focus:ring-2 focus:ring-goose/30
-    dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500;
+  @apply w-full rounded-xl border-2 border-night-600 bg-night-900 px-3 py-2 text-base text-white placeholder:text-night-300 focus:border-gold;
+}
+
+/* Viên thuốc bo tròn hẳn; biến thể phe thêm `bg-goose-strong` / `bg-duck-strong` / `bg-third` (chữ trắng). */
+@utility chip {
+  @apply inline-flex items-center gap-1 rounded-full border-2 border-night-950 bg-night-700 px-3 py-1 text-sm leading-tight font-bold text-white whitespace-nowrap;
+}
+
+/* Thẻ nhích lên 2px khi rê chuột — chỉ thiết bị có chuột và máy không giảm chuyển động (spec §3.5). */
+@utility lift {
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    transition: transform 150ms ease-out;
+
+    &:hover {
+      transform: translateY(-2px);
+    }
+  }
 }
 
 /*
