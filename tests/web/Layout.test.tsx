@@ -39,6 +39,14 @@ test('Quản trị appears in both navs for mod/admin only', () => {
   expect(screen.getAllByRole('link', { name: /Quản trị/ })).toHaveLength(2);
 });
 
+test('the brand link shows the duck mark without changing its name', () => {
+  renderLayout(me);
+  const brand = screen.getByRole('link', { name: 'GGD Hub' });
+  const mark = brand.querySelector('svg');
+  expect(mark).not.toBeNull();
+  expect(mark).toHaveAttribute('aria-hidden', 'true');
+});
+
 // jsdom không dựng bố cục, nên chỉ kiểm tra cấu trúc: hàng link trên, thanh dưới
 // cùng và phần đệm nội dung phải đổi ở CÙNG một breakpoint (lg), nếu không sẽ có
 // khoảng rộng vừa mất thanh dưới vừa chưa có hàng trên (hoặc có cả hai).

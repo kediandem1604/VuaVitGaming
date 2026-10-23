@@ -1,6 +1,7 @@
 /** Trang duy nhất không cần đăng nhập. `?error=` do `/auth/callback` gắn khi thất bại. */
 
 import { useSearchParams } from 'react-router';
+import { DuckSquad } from '../components/DuckSquad';
 
 const ERROR_MESSAGES: Record<string, string> = {
   not_member: 'Bạn cần vào server Discord trước',
@@ -17,10 +18,8 @@ export function LoginPage() {
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-4 py-8 text-center">
-      <div className="flex flex-col gap-2">
-        <span aria-hidden="true" className="text-6xl">
-          🦆
-        </span>
+      <div className="flex w-full max-w-md flex-col items-center gap-2">
+        <DuckSquad className="mb-2 w-full" />
         <h1 className="text-3xl font-bold text-goose">GGD Hub</h1>
         <p className="text-slate-600 dark:text-slate-400">Cộng đồng Goose Goose Duck Việt Nam</p>
       </div>

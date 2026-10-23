@@ -4,9 +4,9 @@
  * lên là hàng link chữ nằm trong thanh trên.
  *
  * Vì sao `lg` và vì sao không có emoji ở hàng trên: khung tối đa `max-w-5xl` cho
- * 992px dùng được; 7 link có emoji (~720px) + logo (~80) + khoảng cách (32) +
- * cụm người dùng (≤ ~270 với tên cắt ở 128px) ≈ 1100px, không bao giờ vừa.
- * Link chỉ chữ, `px-2.5` ≈ 520px cho 7 mục → tổng ≈ 900px, còn ~90px dư ở 1024.
+ * 992px dùng được; 7 link có emoji (~720px) + logo kèm đầu ngỗng (~115) + khoảng cách
+ * (32) + cụm người dùng (≤ ~270 với tên cắt ở 128px) ≈ 1135px, không bao giờ vừa.
+ * Link chỉ chữ, `px-2.5` ≈ 520px cho 7 mục → tổng ≈ 935px, còn ~55px dư ở 1024.
  * Ở 768–1023 thanh dưới cùng vẫn thừa chỗ (≥ 110px mỗi mục).
  */
 
@@ -16,6 +16,7 @@ import type { MeDto } from '../../shared/api-types';
 import { apiSend } from '../api';
 import { cx } from '../lib/cx';
 import { Avatar } from './Avatar';
+import { DuckMark } from './DuckMark';
 
 interface NavItem {
   to: string;
@@ -60,7 +61,8 @@ export function Layout({ me, children }: LayoutProps) {
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
         <div className="mx-auto max-w-5xl px-4 py-2">
           <div className="flex items-center gap-4">
-            <NavLink to="/" className="shrink-0 text-lg font-bold whitespace-nowrap text-goose">
+            <NavLink to="/" className="flex shrink-0 items-center gap-1.5 text-lg font-bold whitespace-nowrap text-goose">
+              <DuckMark className="size-7" />
               GGD Hub
             </NavLink>
 

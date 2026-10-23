@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Cùng hình với components/DuckMark.tsx — sửa một bên thì sửa cả bên kia. -->
+  <path d="M14 7 C12 2 17 0 19 3 C17 4 16 5 17 7 Z" fill="#F5F2EB" stroke="#0B1020" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M16 5 C24 5 28 11 28 18 C28 25 22 30 16 30 C10 30 4 25 4 18 C4 11 8 5 16 5 Z" fill="#F5F2EB" stroke="#0B1020" stroke-width="2"/>
+  <circle cx="11.5" cy="15.5" r="4" fill="#fff" stroke="#0B1020" stroke-width="1.5"/>
+  <circle cx="20.5" cy="15.5" r="4" fill="#fff" stroke="#0B1020" stroke-width="1.5"/>
+  <circle cx="12.2" cy="16.4" r="1.7" fill="#0B1020"/>
+  <circle cx="21.2" cy="16.4" r="1.7" fill="#0B1020"/>
+  <path d="M7.5 10.5 L14 12.5 M24.5 10.5 L18 12.5" stroke="#0B1020" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M9 21 C9 18.5 23 18.5 23 21 C23 25 19.5 27.5 16 27.5 C12.5 27.5 9 25 9 21 Z" fill="#F59E0B" stroke="#0B1020" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>
