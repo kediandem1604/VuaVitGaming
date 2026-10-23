@@ -45,7 +45,7 @@ Biểu đồ thống kê, hỗ trợ nhiều server Discord, app điện thoại
 | Kênh nhắc | Email + DM Discord, mỗi người tự tắt từng kênh |
 | Ai được vote MVP | Cả server; ứng viên là người có mặt ở buổi đó; không tự vote mình |
 | Ảnh nhân vật | Tự vẽ sẵn (SVG), admin tải ảnh khác thay được |
-| Hosting | Cloud rẻ: 1 dịch vụ Railway (~5$/tháng) + PostgreSQL Neon miễn phí |
+| Hosting | Cloud rẻ: 1 dịch vụ Railway + PostgreSQL của Railway trong cùng project, cùng vùng (Singapore), ~5–10$/tháng tổng cộng (ruling R37: Neon gói miễn phí không đủ vì bộ hẹn giờ mỗi phút giữ compute thức 24/7) |
 | Kiến trúc | Một ứng dụng TypeScript duy nhất |
 
 ## 3. Kiến trúc
@@ -67,7 +67,7 @@ Discord server ◄─► Bot (discord.js)      Web API (Fastify)  ◄─► Web 
 | Ngôn ngữ | TypeScript, Node.js 24 LTS | Một ngôn ngữ cho bot, server, web |
 | Bot | discord.js v14 | Thư viện bot Discord phổ biến và đầy đủ nhất |
 | Web API | Fastify | Nhẹ, có sẵn plugin cookie/static/rate-limit |
-| Database | PostgreSQL + Prisma | Ổn định, có migration, Neon có gói miễn phí |
+| Database | PostgreSQL + Prisma | Ổn định, có migration; Railway có sẵn PostgreSQL trong cùng project |
 | Giao diện | React + Vite + React Router + TanStack Query + Tailwind | Phổ biến, build ra file tĩnh để Fastify phục vụ |
 | Email | Nodemailer qua SMTP (mặc định Gmail + mật khẩu ứng dụng) | Không cần tên miền; đổi nhà cung cấp chỉ cần sửa cấu hình |
 | Test | Vitest + PostgreSQL thật chạy nhúng (`embedded-postgres`, không cần Docker) | Test logic tính điểm/vote trên DB thật |
@@ -392,4 +392,4 @@ Biến môi trường:
 | `DISCORD_ADMIN_ROLE_IDS`, `DISCORD_MOD_ROLE_IDS` | Role Discord được coi là admin / mod (phân tách bằng dấu phẩy) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | Gửi email |
 
-Deploy: một dịch vụ Railway chạy `npm start` (chạy migration rồi khởi động), PostgreSQL trên Neon. README tiếng Việt hướng dẫn từng bước: tạo app Discord và bật intent, mời bot vào server, tạo mật khẩu ứng dụng Gmail, tạo database Neon, deploy Railway, chạy dữ liệu mẫu.
+Deploy: một dịch vụ Railway chạy `npm start` (chạy migration rồi khởi động) + một dịch vụ PostgreSQL của Railway trong **cùng project** (`DATABASE_URL=${{Postgres.DATABASE_URL}}`, mạng nội bộ), cả hai cùng vùng Southeast Asia (Singapore), Replicas = 1; tổng ~5–10$/tháng. Neon chỉ là phương án thay thế, và phải dùng gói trả phí (gói miễn phí hết giờ compute giữa tháng vì bộ hẹn giờ chạy mỗi phút). README tiếng Việt hướng dẫn từng bước: tạo app Discord và bật intent, mời bot vào server, tạo mật khẩu ứng dụng Gmail, tạo project Railway kèm PostgreSQL, deploy ứng dụng vào cùng project, chạy dữ liệu mẫu, rồi chạy danh sách kiểm tra tay trên server Discord thử.

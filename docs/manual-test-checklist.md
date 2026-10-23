@@ -1,6 +1,6 @@
 # Danh sách kiểm tra tay — GGD Hub
 
-Chạy trên **một server Discord thử** (không phải server của hội) trước khi phát hành, sau mỗi lần nâng cấp lớn, hoặc khi đổi cấu hình Discord/Gmail/Neon. Chốt mùa **không cần** kiểm tra tay (đã có test tự động `tests/server/seasons.test.ts`; không cần đổi giờ máy).
+**Bắt buộc** chạy trên **một server Discord thử** (không phải server của hội) **trước khi mời cả hội** — phần nói chuyện với Discord thật (bot, nút, menu vote, lệnh slash, đăng nhập OAuth) chưa từng được chạy trước lần này, test tự động chỉ dùng bản giả. Chạy lại sau mỗi lần nâng cấp lớn, hoặc khi đổi cấu hình Discord/Gmail/database. Chốt mùa **không cần** kiểm tra tay (đã có test tự động `tests/server/seasons.test.ts`; không cần đổi giờ máy).
 
 Thời gian ước tính: 60–90 phút (trong đó ~20 phút chờ nhắc giờ và email).
 
@@ -16,6 +16,8 @@ Thời gian ước tính: 60–90 phút (trong đó ~20 phút chờ nhắc giờ
 
 - [ ] Log có đủ, theo thứ tự: `prisma migrate deploy` xong → `Đã nạp dữ liệu tham chiếu.` → `Đang chạy tại cổng 3000` → `[bot] Đã đăng nhập Discord với tên …` → `[bot] Đã đăng ký 3 lệnh slash cho server …` → `Bot Discord đã kết nối`.
 - [ ] Mở `{PUBLIC_URL}/healthz` → `{"ok":true,"discord":"ready"}`.
+- [ ] (Railway) **Kiểm tra `TRUST_PROXY_HOPS`**: mở `{PUBLIC_URL}` từ **hai mạng khác nhau** (vd máy tính qua wifi và điện thoại qua 4G) → **Railway → Deployments → View Logs** → các dòng log yêu cầu của Fastify (`"msg":"incoming request"`) có `"remoteAddress":"…"` phải là **IP thật, khác nhau** của hai thiết bị (so với trang kiểu "What is my IP" mở trên từng thiết bị) — **không** phải cùng một IP của proxy (thường dạng `10.x.x.x` hay `100.64.x.x`). Sai ⇒ cả hội dùng chung **một** bucket 120 yêu cầu/phút và ai cũng bị "Bạn thao tác quá nhanh"; sửa `TRUST_PROXY_HOPS` (README mục 6.3) rồi kiểm tra lại.
+- [ ] (Railway) **Settings → Deploy**: Replicas = `1`; ứng dụng và dịch vụ `Postgres` cùng vùng **Southeast Asia (Singapore)**.
 - [ ] Trong server thử gõ `/` → thấy ba lệnh của bot: `/baocao`, `/bxh`, `/hoso` (chưa thấy thì `Ctrl+R` làm tươi Discord).
 - [ ] Mở `{PUBLIC_URL}` → trang đăng nhập "GGD Hub — Cộng đồng Goose Goose Duck Việt Nam" với nút **Đăng nhập bằng Discord**.
 

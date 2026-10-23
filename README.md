@@ -4,7 +4,9 @@ Web + bot Discord cho cộng đồng **Goose Goose Duck** Việt Nam: hồ sơ v
 
 Tài liệu này viết cho người quản trị server Discord, **không cần biết lập trình**. Làm theo thứ tự từ mục 1 đến mục 6 là đưa được hệ thống lên mạng. Mục 7–8 dành cho người muốn chạy thử trên máy hoặc sửa code.
 
-> Ứng dụng là **một tiến trình duy nhất** (web + API + bot + bộ hẹn giờ), chạy trên Railway, dùng PostgreSQL trên Neon. Toàn bộ bí mật (token, mật khẩu) chỉ nằm trong biến môi trường — không bao giờ ghi vào code hay commit lên Git.
+> Ứng dụng là **một tiến trình duy nhất** (web + API + bot + bộ hẹn giờ), chạy trên Railway, dùng PostgreSQL của Railway trong **cùng một project**. Toàn bộ bí mật (token, mật khẩu) chỉ nằm trong biến môi trường — không bao giờ ghi vào code hay commit lên Git.
+
+> ⚠️ **Bắt buộc trước khi mời cả hội:** chạy hết [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) trên một **server Discord thử**. Mọi phần nói chuyện với Discord thật — bot, nút, menu vote, lệnh slash, đăng nhập Discord (OAuth) — mới chỉ được kiểm bằng bản giả trong test tự động, **chưa từng chạy với Discord thật**. Danh sách đó là lần kiểm tra thật đầu tiên.
 
 ## Mục lục
 
@@ -12,7 +14,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 2. [Tạo ứng dụng Discord và mời bot](#2-tạo-ứng-dụng-discord-và-mời-bot)
 3. [Lấy ID server, kênh và role](#3-lấy-id-server-kênh-và-role)
 4. [Email: mật khẩu ứng dụng Gmail](#4-email-mật-khẩu-ứng-dụng-gmail)
-5. [Database: Neon](#5-database-neon)
+5. [Database: PostgreSQL trên Railway](#5-database-postgresql-trên-railway)
 6. [Deploy lên Railway](#6-deploy-lên-railway)
 7. [Chạy ở máy (dành cho người sửa code)](#7-chạy-ở-máy-dành-cho-người-sửa-code)
 8. [Chạy test](#8-chạy-test)
@@ -29,8 +31,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 |---|---|
 | Tài khoản **Discord** có quyền quản trị server của hội | Tạo bot, lấy ID kênh/role |
 | Tài khoản **Gmail** (nên tạo riêng cho hội, vd `ggdhub.hoi@gmail.com`) | Gửi email nhắc giờ |
-| Tài khoản **Neon** (neon.tech, gói miễn phí) | Database PostgreSQL |
-| Tài khoản **Railway** (railway.app, gói Hobby ~5 USD/tháng) | Chạy ứng dụng 24/7 |
+| Tài khoản **Railway** (railway.app, gói Hobby) | Chạy ứng dụng 24/7 **và** database PostgreSQL, cùng một project — tổng cộng khoảng **5–10 USD/tháng** (gói Hobby 5 USD/tháng đã gồm 5 USD tài nguyên; phần dùng vượt mới tính thêm) |
 | Tài khoản **GitHub** chứa bản sao repo này | Railway kéo code từ GitHub để build |
 
 Chỉ khi muốn **chạy ở máy** (mục 7) hoặc **chạy test** (mục 8) mới cần cài thêm:
@@ -124,20 +125,41 @@ Ghi chú: Gmail thường giới hạn khoảng 500 email/ngày cho tài khoản
 
 ---
 
-## 5. Database: Neon
+## 5. Database: PostgreSQL trên Railway
 
-1. Vào <https://neon.tech> → đăng ký → **New Project**: tên tuỳ ý (vd `ggd-hub`), vùng **Singapore** (gần Việt Nam nhất), PostgreSQL 16 hoặc 17 đều được.
-2. Trang project → nút **Connect** (hoặc mục *Connection string*).
-3. Chọn **Direct connection** — *không* chọn "Pooled connection". Chuỗi direct **không** có chữ `-pooler` trong tên máy. Ứng dụng tự chạy migration (`prisma migrate deploy`) mỗi lần khởi động, việc này cần nối thẳng, không qua bộ gom kết nối.
-4. Chép chuỗi `postgresql://...` → `DATABASE_URL`. Chuỗi phải kết thúc bằng `?sslmode=require` (Neon bắt buộc mã hoá TLS; ứng dụng hiểu tham số này). Nếu Neon đính thêm `&channel_binding=require` thì xoá đoạn đó đi — ứng dụng không cần.
+**Mặc định (khuyên dùng): PostgreSQL của Railway, nằm trong cùng project với ứng dụng.** Một nơi quản lý và trả tiền, database và ứng dụng ở cùng một vùng (truy vấn nhanh), không bị giới hạn giờ chạy mỗi tháng.
+
+### 5.1 Tạo project và database
+
+1. <https://railway.app> → đăng ký (gói **Hobby**) → **New Project** → **Deploy PostgreSQL** (hoặc **Empty Project** → **+ Create** → **Database** → **PostgreSQL**). Railway tạo một dịch vụ tên `Postgres` có ổ đĩa riêng để giữ dữ liệu.
+2. Bấm vào dịch vụ `Postgres` → **Settings** → **Region** (hoặc **Deploy → Regions**) → chọn **Southeast Asia (Singapore)** — gần Việt Nam nhất. Đặt vùng **ngay lúc này**, trước khi có dữ liệu. Ứng dụng ở mục 6 phải đặt **cùng vùng** này.
+3. Chưa cần chép gì: ở mục 6.3, biến `DATABASE_URL` của ứng dụng chỉ là một **tham chiếu** tới database này:
+
+   ```
+   DATABASE_URL=${{Postgres.DATABASE_URL}}
+   ```
+
+   Railway tự thay bằng chuỗi kết nối nội bộ (`postgres.railway.internal`), đi trong mạng riêng của project: không ra Internet, không tính phí băng thông, không cần `?sslmode=require`. Nếu bạn đổi tên dịch vụ `Postgres` thì sửa chữ `Postgres` trong tham chiếu theo tên mới.
+
+Không phải tạo bảng bằng tay: lần khởi động đầu, ứng dụng tự tạo toàn bộ bảng và nạp dữ liệu tham chiếu (chế độ chơi, hơn 70 role của ba phe, hạng mục MVP mặc định). Những lần sau chỉ áp dụng phần thay đổi, không đụng dữ liệu đã có.
+
+Sao lưu: dịch vụ `Postgres` → tab **Backups** (nếu gói của bạn có) hoặc thỉnh thoảng chạy `pg_dump` bằng chuỗi `DATABASE_PUBLIC_URL` (tab **Variables** của dịch vụ `Postgres`).
+
+### 5.2 Phương án khác: Neon
+
+Dùng được, nhưng **không dùng gói miễn phí của Neon**:
+
+> ⚠️ Gói miễn phí của Neon tính theo **giờ compute mỗi tháng**; compute chỉ "ngủ" khi không có truy vấn. Bộ hẹn giờ của ứng dụng truy vấn **mỗi 60 giây**, nên compute thức **24/7** và hạn mức giờ miễn phí **hết giữa tháng** — từ lúc đó database ngừng, web/bot/nhắc giờ đều chết tới đầu tháng sau. Chọn Neon thì dùng **gói trả phí**.
+
+1. <https://neon.tech> → **New Project**: vùng **Singapore** (`aws-ap-southeast-1`), PostgreSQL 16 hoặc 17.
+2. Nút **Connect** → chọn **Direct connection** — *không* chọn "Pooled connection" (chuỗi direct **không** có `-pooler` trong tên máy; `prisma migrate deploy` lúc khởi động cần nối thẳng).
+3. Chép chuỗi `postgresql://...` → `DATABASE_URL`. Chuỗi phải kết thúc bằng `?sslmode=require`; nếu có thêm `&channel_binding=require` thì xoá đoạn đó.
 
    ```
    DATABASE_URL=postgresql://neondb_owner:MAT_KHAU@ep-xxxx-yyyy.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
    ```
 
-Không phải tạo bảng bằng tay: lần khởi động đầu, ứng dụng tự tạo toàn bộ bảng và nạp dữ liệu tham chiếu (chế độ chơi, hơn 70 role của ba phe, hạng mục MVP mặc định). Những lần sau chỉ áp dụng phần thay đổi, không đụng dữ liệu đã có.
-
-> Gói miễn phí của Neon tính theo **giờ compute mỗi tháng** và compute chỉ "ngủ" khi không có truy vấn. Bộ hẹn giờ của ứng dụng truy vấn mỗi phút, nên compute hầu như chạy liên tục. Sau vài ngày hãy xem mục **Usage** trên Neon; nếu sắp hết hạn mức thì nâng gói hoặc chuyển sang PostgreSQL của Railway (chỉ cần đổi `DATABASE_URL`).
+4. Ứng dụng trên Railway vẫn phải đặt vùng **Southeast Asia (Singapore)** (mục 6.1) cho gần database.
 
 ---
 
@@ -146,8 +168,9 @@ Không phải tạo bảng bằng tay: lần khởi động đầu, ứng dụng
 ### 6.1 Tạo dịch vụ
 
 1. Đưa repo này lên GitHub của bạn (repo private cũng được).
-2. <https://railway.app> → **New Project** → **Deploy from GitHub repo** → chọn repo. Railway thấy file `Dockerfile` ở gốc repo và tự dùng nó để build (kiểm tra: **Settings → Build → Builder** là *Dockerfile*).
-3. Lần build đầu sẽ **thất bại** vì chưa có biến môi trường — bình thường, làm tiếp bước dưới.
+2. Mở **project đã tạo ở mục 5.1** (project có dịch vụ `Postgres`) → **+ Create** → **GitHub Repo** → chọn repo. Ứng dụng phải nằm **trong cùng project** với database thì tham chiếu `${{Postgres.DATABASE_URL}}` và mạng nội bộ mới dùng được. Railway thấy file `Dockerfile` ở gốc repo và tự dùng nó để build (kiểm tra: **Settings → Build → Builder** là *Dockerfile*).
+3. Dịch vụ ứng dụng → **Settings → Deploy → Regions** (hoặc **Region**) → chọn **cùng vùng với database**: **Southeast Asia (Singapore)**. Lý do: mỗi lần bấm "Tham gia", vote hay duyệt điểm, ứng dụng chạy vài truy vấn nối tiếp nhau trong một giao dịch có khoá dòng. Cùng vùng thì mỗi truy vấn mất ~1 ms; khác vùng (vd ứng dụng ở Mỹ, database ở Singapore) thì mỗi truy vấn mất ~200 ms, một lần bấm thành cả giây, khoá bị giữ lâu nên người bấm sau phải chờ — lúc cả hội cùng bấm có thể quá giờ chờ và báo lỗi.
+4. Lần build đầu sẽ **thất bại** vì chưa có biến môi trường — bình thường, làm tiếp bước dưới.
 
 ### 6.2 Địa chỉ web
 
@@ -165,7 +188,7 @@ PUBLIC_URL=https://ggd-hub-production.up.railway.app
 SESSION_SECRET=<chuỗi ngẫu nhiên ít nhất 32 ký tự>
 TRUST_PROXY_HOPS=1
 
-DATABASE_URL=postgresql://...?sslmode=require
+DATABASE_URL=${{Postgres.DATABASE_URL}}
 
 DISCORD_TOKEN=...
 DISCORD_CLIENT_ID=...
@@ -185,7 +208,8 @@ MAIL_FROM=GGD Hub <...@gmail.com>
 ```
 
 - `SESSION_SECRET` là khoá ký cookie đăng nhập: chuỗi ngẫu nhiên bất kỳ, **ít nhất 32 ký tự**, không ai cần nhớ. Tạo nhanh nếu máy có Node.js: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Đổi khoá này sẽ đăng xuất mọi người.
-- `TRUST_PROXY_HOPS=1`: trước ứng dụng có đúng một lớp proxy (của Railway). Nếu sau này đặt thêm Cloudflare hay CDN khác phía trước, tăng lên `2`. Để sai số này, giới hạn tốc độ sẽ đếm nhầm (mọi người chung một IP → ai cũng bị "Bạn thao tác quá nhanh", hoặc ngược lại ai cũng né được).
+- `DATABASE_URL=${{Postgres.DATABASE_URL}}`: gõ **nguyên văn** như vậy (tham chiếu tới dịch vụ `Postgres` ở mục 5.1). Dùng Neon (mục 5.2) thì thay bằng chuỗi direct `…?sslmode=require` của Neon.
+- `TRUST_PROXY_HOPS=1`: trước ứng dụng có đúng một lớp proxy (của Railway). Nếu sau này đặt thêm Cloudflare hay CDN khác phía trước, tăng lên `2`. Để sai số này, giới hạn tốc độ sẽ đếm nhầm (mọi người chung một IP → ai cũng bị "Bạn thao tác quá nhanh", hoặc ngược lại ai cũng né được). Sau lần deploy đầu, **kiểm tra** số này bằng log (mục 1 của `docs/manual-test-checklist.md`).
 - **Không** đặt `DEV_LOGIN` trên Railway (và kể cả đặt, ứng dụng chỉ chấp nhận khi `PUBLIC_URL` bắt đầu bằng `http://localhost`).
 
 ### 6.4 Kiểm tra sức khoẻ và khởi động lại
@@ -195,7 +219,12 @@ MAIL_FROM=GGD Hub <...@gmail.com>
 - **Healthcheck Path**: `/healthz`. Ứng dụng trả `{"ok":true,"discord":"ready"}` khi bot đang nối Discord, `{"ok":true,"discord":"down"}` khi bot mất kết nối. Cả hai đều là mã 200 — Discord sập thì web và nhắc email vẫn phải chạy, Railway không được khởi động lại web vì Discord.
 - **Healthcheck Timeout**: `300` giây — lần khởi động đầu còn chạy migration và nạp dữ liệu.
 - **Restart Policy**: *On Failure*.
-- **Replicas**: giữ `1`. Chạy hai bản cùng lúc không sai (bộ hẹn giờ có khoá thuê), nhưng tốn tiền vô ích.
+- **Replicas phải là `1`** (một vùng, một bản). **Không** chạy hai bản cùng lúc:
+  - mỗi bản mở một phiên kết nối Discord (gateway) riêng, nên cả hai cùng nhận sự kiện "có người vào server" → **DM chào mừng gửi hai lần**;
+  - hàng đợi gửi tin Discord nằm trong bộ nhớ của từng tiến trình, hai bản không biết nhau → tin buổi chơi, menu vote, thông báo kết quả có thể **bị đăng hai lần** hoặc sửa đè nhau;
+  - giới hạn tốc độ (120 yêu cầu/phút mỗi IP) đếm riêng trong từng bản.
+
+  Khoá thuê của bộ hẹn giờ chỉ bảo vệ **bộ hẹn giờ** (lúc deploy, bản cũ và bản mới chạy chồng nhau vài giây), không bảo vệ những phần trên.
 
 ### 6.5 Lần khởi động đầu
 
@@ -207,7 +236,9 @@ MAIL_FROM=GGD Hub <...@gmail.com>
 4. `Đang chạy tại cổng 3000`
 5. `[bot] Đã đăng nhập Discord với tên GGD Hub#1234`, `[bot] Đã đăng ký 3 lệnh slash cho server …`, `Bot Discord đã kết nối`.
 
-Mở `PUBLIC_URL` → trang **Đăng nhập bằng Discord** → đăng nhập bằng tài khoản có role admin → thấy trang **Hôm nay** và mục **Quản trị** trên thanh menu. Sau đó chạy qua `docs/manual-test-checklist.md` trên một server Discord thử trước khi mời cả hội.
+Mở `PUBLIC_URL` → trang **Đăng nhập bằng Discord** → đăng nhập bằng tài khoản có role admin → thấy trang **Hôm nay** và mục **Quản trị** trên thanh menu.
+
+**Trước khi mời cả hội — bắt buộc:** trỏ ứng dụng vào một **server Discord thử** và chạy hết `docs/manual-test-checklist.md`. Đây là lần đầu tiên bot, nút, menu vote, lệnh slash và đăng nhập Discord chạy với Discord thật (test tự động chỉ dùng bản giả). Chỉ khi mọi mục đạt mới đổi các biến `DISCORD_*` sang server của hội.
 
 Mỗi lần bạn (hoặc người sửa code) đẩy commit mới lên nhánh mà Railway theo dõi, Railway tự build và deploy lại; migration mới (nếu có) tự chạy trước khi web mở cổng.
 
@@ -254,6 +285,7 @@ npm test
 - Test server chạy tuần tự trên một database (mỗi test xoá sạch và nạp lại dữ liệu mẫu), nên toàn bộ mất vài phút. Test web (React) chạy trong jsdom.
 - Chạy một file: `npx vitest run tests/server/web/health.test.ts --project server`.
 - `npm run typecheck` để kiểm tra kiểu.
+- **CI trên GitHub**: `.github/workflows/ci.yml` chạy `npm ci`, `npm run typecheck`, `npm test` và `docker build .` (Ubuntu, Node 24) cho mỗi lần push và pull request — bắt đầu chạy khi repo đã nằm trên GitHub (xem tab **Actions**). Workflow này chưa chạy được ở máy phát triển (Docker hỏng), nên lần chạy đầu trên GitHub cũng là lần kiểm tra đầu tiên của `Dockerfile` trước Railway.
 
 ---
 
@@ -268,7 +300,7 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 | `SESSION_SECRET` | Khoá ký cookie đăng nhập, ≥ 32 ký tự | chuỗi ngẫu nhiên |
 | `TRUST_PROXY_HOPS` | Số lớp proxy phía trước app, để lấy đúng IP người dùng cho giới hạn tốc độ | `1` (mặc định); `2` nếu có CDN trước Railway |
 | `DEV_LOGIN` | *Chỉ dev.* `1` bật `/auth/dev-login`; chỉ có tác dụng khi `PUBLIC_URL` bắt đầu bằng `http://localhost` | `0` / không đặt |
-| `DATABASE_URL` | Chuỗi kết nối PostgreSQL | Neon direct `…?sslmode=require`; dev `postgresql://ggd:ggd@localhost:54329/ggd_dev` |
+| `DATABASE_URL` | Chuỗi kết nối PostgreSQL | Railway: `${{Postgres.DATABASE_URL}}`; Neon: chuỗi direct `…?sslmode=require`; dev: `postgresql://ggd:ggd@localhost:54329/ggd_dev` |
 | `DISCORD_TOKEN` | Token bot (tab Bot) | |
 | `DISCORD_CLIENT_ID` | Application ID | |
 | `DISCORD_CLIENT_SECRET` | Client Secret (tab OAuth2) | |
@@ -329,7 +361,8 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 - **Bot mất kết nối** (Discord lỗi, deploy lại): dữ liệu vẫn lưu đầy đủ; tin buổi chơi / tin vote chưa đăng được sẽ do bộ hẹn giờ đăng bù trong vòng một phút sau khi bot nối lại. Trong lúc đó thành viên vẫn tham gia và xem mọi thứ trên web.
 - **Khởi động lại giữa giờ nhắc**: nhắc chưa gửi được gửi bù nếu chưa quá giờ bắt đầu 10 phút; quá thì bỏ (nhắc "vào game" lúc đó vô nghĩa).
 - **Một server Discord** mỗi bản cài. Hội thứ hai cần một bản cài khác (ứng dụng Discord, database, dịch vụ Railway riêng).
-- **Neon gói miễn phí** có hạn mức giờ compute; bộ hẹn giờ chạy mỗi phút khiến compute không ngủ (xem ghi chú ở mục 5).
+- **Chỉ chạy một bản** (Railway Replicas = 1, mục 6.4): hai bản cùng lúc gửi trùng DM chào mừng và có thể đăng trùng tin Discord.
+- **Neon gói miễn phí không dùng được**: bộ hẹn giờ truy vấn mỗi phút khiến compute không bao giờ ngủ, hạn mức giờ miễn phí hết giữa tháng (mục 5.2). Mặc định dùng PostgreSQL của Railway.
 - **Gmail** giới hạn số email mỗi ngày (≈ 500 với tài khoản cá nhân).
 - **Ảnh role** lưu trong database (ổ đĩa Railway bị xoá mỗi lần deploy), nên giới hạn 1 MB mỗi ảnh. Ảnh gốc của game thuộc bản quyền Gaggle Studios; hệ thống dùng nhân vật tự vẽ, admin tự chịu trách nhiệm nếu tải ảnh game lên.
 - Vote chỉ làm trong Discord (không vote trên web); chưa có biểu đồ thống kê; chưa có app điện thoại (web ưu tiên màn hình điện thoại).
@@ -346,7 +379,8 @@ Luôn bắt đầu từ **Railway → Deployments → View Logs**. Mọi thông 
 | `Cấu hình môi trường không hợp lệ — DISCORD_TOKEN: thiếu biến` | Thiếu hoặc gõ sai tên biến | Sửa trong **Variables** (ứng dụng tự deploy lại) |
 | `Không kết nối được Discord: Used disallowed intents` | Chưa bật Server Members Intent | Mục 2.1, bước 4 |
 | `Không kết nối được Discord: An invalid token was provided` | Token sai / đã reset | Reset Token rồi cập nhật `DISCORD_TOKEN` |
-| `prisma migrate deploy` báo `P1001: Can't reach database server` | `DATABASE_URL` sai, thiếu `?sslmode=require`, hoặc project Neon bị tạm dừng | Kiểm tra chuỗi direct ở Neon; mở Neon xem project còn hoạt động |
+| `prisma migrate deploy` báo `P1001: Can't reach database server` | Railway: `DATABASE_URL` không đúng `${{Postgres.DATABASE_URL}}`, tên dịch vụ database khác `Postgres`, ứng dụng và database không cùng project, hoặc dịch vụ `Postgres` đang dừng. Neon: chuỗi sai, thiếu `?sslmode=require`, hoặc project bị tạm dừng (hết giờ compute) | Railway: sửa tham chiếu trong **Variables**, xem dịch vụ `Postgres` còn chạy; Neon: kiểm tra chuỗi direct và mục **Usage** |
+| Mỗi lần bấm Tham gia / vote mất cả giây | Ứng dụng và database khác vùng | Đặt cả hai dịch vụ cùng **Southeast Asia (Singapore)** (mục 6.1) |
 | Email không đi, **Gửi lỗi** ghi `535 … Username and Password not accepted` | Mật khẩu ứng dụng sai hoặc chưa bật xác minh 2 bước | Tạo lại mật khẩu ứng dụng (mục 4) |
 | Đăng nhập web quay về trang đăng nhập với lỗi | `not_member`: người đó không ở trong server hoặc bot chưa đồng bộ hồ sơ (bot đang tắt); `state`/`oauth`: Redirect URL trong Discord không khớp `PUBLIC_URL/auth/callback` hoặc `DISCORD_CLIENT_SECRET` sai | Bật bot / mời người đó vào server; kiểm tra Redirects và secret |
 | Healthcheck thất bại, deploy không bao giờ "Active" | Ứng dụng chưa mở cổng 3000 (xem log), hoặc Healthcheck Path không phải `/healthz` | Sửa theo mục 6.4; tăng Healthcheck Timeout |
@@ -355,4 +389,6 @@ Luôn bắt đầu từ **Railway → Deployments → View Logs**. Mọi thông 
 | Lệnh slash không hiện trong Discord | Bot chưa được mời với scope `applications.commands`, hoặc client Discord chưa làm tươi | Mời lại bot bằng link ở mục 2.2; nhấn `Ctrl+R` trong Discord |
 | Bot không đăng được vào kênh | Bot không có quyền xem/gửi ở kênh đó | Thêm role bot vào quyền kênh (View Channels, Send Messages, Embed Links, Read Message History) |
 
-Trước khi mời cả hội, hãy chạy qua **`docs/manual-test-checklist.md`** trên một server Discord thử.
+| Ai đó nhận DM chào mừng hai lần, tin Discord bị đăng đôi | Đang chạy hơn một bản | **Settings → Deploy → Replicas** về `1` (mục 6.4) |
+
+Trước khi mời cả hội, **bắt buộc** chạy hết **`docs/manual-test-checklist.md`** trên một server Discord thử — phần Discord/đăng nhập thật chưa từng được chạy trước đó.
