@@ -150,169 +150,33 @@
 }
 
 /*
- * Hoạt ảnh nhóm vịt (DuckSquad) và logo (DuckMark). Chỉ chạy khi máy không bật giảm
- * chuyển động; khi bật thì vịt đứng yên. `--duck-delay` / `--duck-blink` do từng con
- * đặt để cả nhóm lệch nhịp. `transform-box: fill-box` để xoay/co quanh chính hình đó.
+ * Chữ "nổi" kiểu game (spec §3.2) cho tiêu đề lớn và tên app: viền `night-950` quanh nét
+ * chữ, vẽ dưới phần tô (`paint-order`) nên không ăn vào chữ, cộng một lớp đổ khối xuống
+ * dưới. Tính theo `em` để dùng được ở mọi cỡ, nhưng chỉ dùng cho chữ từ 18px trở lên.
  */
-.duck {
+@utility text-raised {
+  -webkit-text-stroke: 0.14em var(--color-night-950);
+  paint-order: stroke fill;
+  text-shadow: 0 0.08em 0 var(--color-night-950);
+}
+
+/*
+ * Hoạt ảnh nhân vật (Character, LobbySquad, DuckMark): cả hình nhún nhẹ 2px
+ * (`goose-idle`), mắt chớp thưa (`goose-eyes`), con ngỗng được chạm/rê chuột nhảy lên một
+ * cái (`goose[data-hopping]`, bỏ thuộc tính khi hết hoạt ảnh để nhảy tiếp được). Chỉ chạy
+ * khi máy không bật giảm chuyển động (spec §3.5); `--goose-delay` do từng nhân vật đặt để
+ * các con cùng màn hình không nhún đều một nhịp. `transform-box: fill-box` để co mắt
+ * quanh chính nhóm mắt.
+ */
+.goose {
   cursor: pointer;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .duck[data-hopping] {
-    animation: duck-hop 0.6s ease-out;
+  .goose[data-hopping] {
+    animation: goose-hop 0.6s ease-out;
   }
 
-  .duck-sway {
-    transform-box: fill-box;
-    transform-origin: 50% 100%;
-    animation: duck-sway 3.4s ease-in-out infinite;
-    animation-delay: var(--duck-delay, 0s);
-  }
-
-  .duck-eyes,
-  .duck-mark-eyes {
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: duck-blink var(--duck-blink, 5s) infinite;
-    animation-delay: var(--duck-delay, 0s);
-  }
-
-  .duck-mark-eyes {
-    --duck-blink: 6.5s;
-  }
-
-  .duck-glance .duck-pupil {
-    animation: duck-glance 7s ease-in-out infinite;
-    animation-delay: var(--duck-delay, 0s);
-  }
-
-  .duck-tea {
-    transform-box: fill-box;
-    transform-origin: 0% 100%;
-    animation: duck-sip 6s ease-in-out infinite;
-  }
-
-  .duck-steam {
-    animation: duck-steam 2.4s ease-in-out infinite;
-  }
-
-  .duck-glint {
-    animation: duck-glint 3.8s ease-in-out infinite;
-    animation-delay: var(--duck-delay, 0s);
-  }
-
-  .duck-flutter {
-    transform-box: fill-box;
-    transform-origin: 100% 50%;
-    animation: duck-flutter 1.3s ease-in-out infinite;
-  }
-}
-
-@keyframes duck-hop {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  35%,
-  55% {
-    transform: translateY(-18px);
-  }
-  80% {
-    transform: translateY(2px);
-  }
-}
-
-@keyframes duck-sway {
-  0%,
-  100% {
-    transform: rotate(-1.5deg);
-  }
-  50% {
-    transform: rotate(1.5deg);
-  }
-}
-
-@keyframes duck-blink {
-  0%,
-  93%,
-  100% {
-    transform: scaleY(1);
-  }
-  96% {
-    transform: scaleY(0.1);
-  }
-}
-
-@keyframes duck-glance {
-  0%,
-  35%,
-  100% {
-    transform: translateX(0);
-  }
-  42%,
-  60% {
-    transform: translateX(-4px);
-  }
-  68%,
-  88% {
-    transform: translateX(3px);
-  }
-}
-
-@keyframes duck-sip {
-  0%,
-  55%,
-  100% {
-    transform: translate(0, 0) rotate(0);
-  }
-  65%,
-  82% {
-    transform: translate(-7px, -9px) rotate(-16deg);
-  }
-}
-
-@keyframes duck-steam {
-  0% {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  50% {
-    opacity: 0.9;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-5px);
-  }
-}
-
-@keyframes duck-glint {
-  0%,
-  80%,
-  100% {
-    opacity: 0;
-  }
-  88% {
-    opacity: 1;
-  }
-}
-
-@keyframes duck-flutter {
-  0%,
-  100% {
-    transform: rotate(0);
-  }
-  50% {
-    transform: rotate(-9deg);
-  }
-}
-
-/*
- * Hoạt ảnh nhân vật hoá thân (Character): cả hình nhún nhẹ 2px (`goose-idle`), mắt chớp
- * thưa (`goose-eyes`). Chỉ chạy khi máy không bật giảm chuyển động (spec §3.5);
- * `--goose-delay` do từng nhân vật đặt để lưới Đại sảnh không nhún đều một nhịp.
- */
-@media (prefers-reduced-motion: no-preference) {
   .goose-idle {
     animation: goose-idle 3s ease-in-out infinite;
     animation-delay: var(--goose-delay, 0s);
@@ -323,6 +187,20 @@
     transform-origin: center;
     animation: goose-blink 5.2s infinite;
     animation-delay: var(--goose-delay, 0s);
+  }
+}
+
+@keyframes goose-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35%,
+  55% {
+    transform: translateY(-18px);
+  }
+  80% {
+    transform: translateY(2px);
   }
 }
 
