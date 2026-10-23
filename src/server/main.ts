@@ -16,7 +16,9 @@ import { loadConfig } from './config.js';
 import type { Config } from './config.js';
 import type { Ctx } from './ctx.js';
 import { db } from './db.js';
+import { createBrevoMailer } from './mail/brevo-mailer.js';
 import { createSmtpMailer } from './mail/smtp-mailer.js';
+import type { Mailer } from './ports.js';
 import { createDiscordOAuthClient } from './modules/auth/oauth.js';
 import { startScheduler } from './scheduler/scheduler.js';
 import type { Scheduler } from './scheduler/scheduler.js';
@@ -31,7 +33,7 @@ async function main(): Promise<void> {
   const bot = createBot(() => ctx, config);
   const ctx: Ctx = {
     db,
-    mailer: createSmtpMailer(config.smtp),
+    mailer: createMailer(config.mail),
     notifier: bot.notifier,
     directory: bot.directory,
     now: () => new Date(),
@@ -69,6 +71,16 @@ function readConfig(): Config {
     console.error(messageOf(err));
     process.exit(1);
   }
+}
+
+/** Brevo (API HTTPS) khi có `BREVO_API_KEY`, không thì SMTP. Ghi log để biết đang gửi qua đâu. */
+function createMailer(mail: Config['mail']): Mailer {
+  if (mail.provider === 'brevo') {
+    console.log(`Gửi email qua Brevo, người gửi ${mail.sender.email}`);
+    return createBrevoMailer(mail);
+  }
+  console.log(`Gửi email qua SMTP ${mail.host}:${mail.port}`);
+  return createSmtpMailer(mail);
 }
 
 /**

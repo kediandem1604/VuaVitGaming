@@ -13,7 +13,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 1. [Yêu cầu](#1-yêu-cầu)
 2. [Tạo ứng dụng Discord và mời bot](#2-tạo-ứng-dụng-discord-và-mời-bot)
 3. [Lấy ID server, kênh và role](#3-lấy-id-server-kênh-và-role)
-4. [Email: mật khẩu ứng dụng Gmail](#4-email-mật-khẩu-ứng-dụng-gmail)
+4. [Email nhắc giờ: Brevo](#4-email-nhắc-giờ-brevo)
 5. [Database: PostgreSQL trên Railway](#5-database-postgresql-trên-railway)
 6. [Deploy lên Railway](#6-deploy-lên-railway)
 7. [Chạy ở máy (dành cho người sửa code)](#7-chạy-ở-máy-dành-cho-người-sửa-code)
@@ -30,7 +30,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 | Cần gì | Để làm gì |
 |---|---|
 | Tài khoản **Discord** có quyền quản trị server của hội | Tạo bot, lấy ID kênh/role |
-| Tài khoản **Gmail** (nên tạo riêng cho hội, vd `ggdhub.hoi@gmail.com`) | Gửi email nhắc giờ |
+| Một địa chỉ email của hội (nên tạo Gmail riêng, vd `ggdhub.hoi@gmail.com`) và tài khoản **Brevo** (brevo.com, gói Free) | Gửi email nhắc giờ — Railway gói Hobby chặn SMTP nên email đi qua API HTTPS của Brevo (mục 4) |
 | Tài khoản **Railway** (railway.app, gói Hobby) | Chạy ứng dụng 24/7 **và** database PostgreSQL, cùng một project — tổng cộng khoảng **5–10 USD/tháng** (gói Hobby 5 USD/tháng đã gồm 5 USD tài nguyên; phần dùng vượt mới tính thêm) |
 | Tài khoản **GitHub** chứa bản sao repo này | Railway kéo code từ GitHub để build |
 
@@ -103,9 +103,29 @@ Discord ẩn ID; bật chế độ nhà phát triển để thấy nút chép ID
 
 ---
 
-## 4. Email: mật khẩu ứng dụng Gmail
+## 4. Email nhắc giờ: Brevo
 
-Gmail không cho ứng dụng dùng mật khẩu đăng nhập thường; phải tạo **mật khẩu ứng dụng** (16 ký tự), và chỉ tạo được khi tài khoản đã bật xác minh 2 bước.
+Railway gói Free và Hobby **chặn gửi email qua SMTP** (chỉ gói Pro trở lên mới có), nên trên Railway ứng dụng gửi email qua **API HTTPS của Brevo**. Gói Free của Brevo gửi được **300 email/ngày**, không cần thẻ, không cần tên miền riêng. Có `BREVO_API_KEY` thì ứng dụng dùng Brevo; không có thì dùng SMTP (mục 4.2). Log lúc khởi động ghi rõ đang dùng cái nào: `Gửi email qua Brevo, người gửi …` hoặc `Gửi email qua SMTP …`.
+
+### 4.1 Brevo (dùng trên Railway)
+
+1. Đăng ký ở <https://www.brevo.com> (gói **Free**) bằng email của hội (vd `ggdhub.hoi@gmail.com`). Brevo có thể hỏi thêm vài thông tin (tên tổ chức, mục đích gửi) trước khi cho gửi email.
+2. **Senders, Domains & Dedicated IPs → Senders → Add a sender**: tên `GGD Hub`, email của hội → Brevo gửi mã xác minh tới hộp thư đó → nhập mã. Chỉ địa chỉ **đã xác minh** mới làm người gửi được.
+3. **SMTP & API → API Keys → Generate a new API key** → đặt tên `GGD Hub` → chép khoá (dạng `xkeysib-…`, chỉ hiện một lần) → `BREVO_API_KEY`.
+4. Điền:
+
+   ```
+   BREVO_API_KEY=xkeysib-...
+   MAIL_FROM=GGD Hub <ggdhub.hoi@gmail.com>
+   ```
+
+   `MAIL_FROM` là tên + địa chỉ hiện ở ô "Từ" của email; địa chỉ phải **đúng** địa chỉ đã xác minh ở bước 2. Đã có `BREVO_API_KEY` thì các biến `SMTP_*` không cần (đặt cũng bị bỏ qua).
+
+Ghi chú: email gửi qua Brevo mà người gửi là một địa chỉ Gmail đôi khi bị lọc vào **Thư rác** (Gmail không xác thực được thư đi từ máy chủ khác). Lần đầu nhắc thành viên bấm "Không phải thư rác". Nếu hội có tên miền riêng, xác minh tên miền trong Brevo (**Domains**) và dùng địa chỉ thuộc tên miền đó cho `MAIL_FROM` thì thư vào hộp thư chính ổn định hơn.
+
+### 4.2 Gmail qua SMTP (chạy ở máy, hoặc Railway gói Pro)
+
+Không đặt `BREVO_API_KEY` thì ứng dụng gửi qua SMTP. Gmail không cho ứng dụng dùng mật khẩu đăng nhập thường; phải tạo **mật khẩu ứng dụng** (16 ký tự), và chỉ tạo được khi tài khoản đã bật xác minh 2 bước.
 
 1. Đăng nhập Gmail của hội → <https://myaccount.google.com/security> → **2-Step Verification** → **Get started** → làm theo hướng dẫn (số điện thoại).
 2. Vào <https://myaccount.google.com/apppasswords> (hoặc ở trang Security, gõ `App passwords` vào ô tìm kiếm) → đặt tên `GGD Hub` → **Create** → Google hiện 16 chữ cái dạng `abcd efgh ijkl mnop`. Chép lại **bỏ hết dấu cách** → `SMTP_PASS`. Mật khẩu này cũng chỉ hiện một lần.
@@ -200,13 +220,11 @@ DISCORD_ANNOUNCE_CHANNEL_ID=...
 DISCORD_ADMIN_ROLE_IDS=...
 DISCORD_MOD_ROLE_IDS=...
 
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=465
-SMTP_USER=...
-SMTP_PASS=...
+BREVO_API_KEY=...
 MAIL_FROM=GGD Hub <...@gmail.com>
 ```
 
+- `BREVO_API_KEY` và `MAIL_FROM`: mục 4.1. **Không** dùng SMTP (Gmail) trên Railway gói Hobby: Railway chặn SMTP ra ngoài, mọi email nhắc giờ sẽ lỗi (hết giờ chờ kết nối).
 - `SESSION_SECRET` là khoá ký cookie đăng nhập: chuỗi ngẫu nhiên bất kỳ, **ít nhất 32 ký tự**, không ai cần nhớ. Tạo nhanh nếu máy có Node.js: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Đổi khoá này sẽ đăng xuất mọi người.
 - `DATABASE_URL=${{Postgres.DATABASE_URL}}`: gõ **nguyên văn** như vậy (tham chiếu tới dịch vụ `Postgres` ở mục 5.1). Dùng Neon (mục 5.2) thì thay bằng chuỗi direct `…?sslmode=require` của Neon.
 - `TRUST_PROXY_HOPS=1`: trước ứng dụng có đúng một lớp proxy (của Railway). Nếu sau này đặt thêm Cloudflare hay CDN khác phía trước, tăng lên `2`. Để sai số này, giới hạn tốc độ sẽ đếm nhầm (mọi người chung một IP → ai cũng bị "Bạn thao tác quá nhanh", hoặc ngược lại ai cũng né được). Sau lần deploy đầu, **kiểm tra** số này bằng log (mục 1 của `docs/manual-test-checklist.md`).
@@ -310,11 +328,12 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 | `DISCORD_ANNOUNCE_CHANNEL_ID` | Kênh bot đăng kết quả, 👑, tổng kết mùa | |
 | `DISCORD_ADMIN_ROLE_IDS` | ID các role được coi là admin, ngăn bằng dấu phẩy | có thể để trống (không ai là admin) |
 | `DISCORD_MOD_ROLE_IDS` | ID các role được coi là mod, ngăn bằng dấu phẩy | có thể để trống |
-| `SMTP_HOST` | Máy chủ SMTP | `smtp.gmail.com` |
-| `SMTP_PORT` | Cổng SMTP | `465` |
-| `SMTP_USER` | Tài khoản SMTP (địa chỉ Gmail) | |
-| `SMTP_PASS` | Mật khẩu ứng dụng Gmail (16 chữ, bỏ dấu cách) | |
-| `MAIL_FROM` | Người gửi hiện trên email | `GGD Hub <ggdhub.hoi@gmail.com>` |
+| `BREVO_API_KEY` | Khoá API Brevo (mục 4.1). Có thì gửi email qua Brevo và không cần các biến `SMTP_*` | `xkeysib-…`; bắt buộc trên Railway gói Free/Hobby |
+| `SMTP_HOST` | Máy chủ SMTP — *chỉ khi không đặt `BREVO_API_KEY`* | `smtp.gmail.com` |
+| `SMTP_PORT` | Cổng SMTP — *chỉ khi không đặt `BREVO_API_KEY`* | `465` |
+| `SMTP_USER` | Tài khoản SMTP (địa chỉ Gmail) — *chỉ khi không đặt `BREVO_API_KEY`* | |
+| `SMTP_PASS` | Mật khẩu ứng dụng Gmail (16 chữ, bỏ dấu cách) — *chỉ khi không đặt `BREVO_API_KEY`* | |
+| `MAIL_FROM` | Người gửi hiện trên email, dạng `Tên <email>`; dùng Brevo thì phải là địa chỉ đã xác minh | `GGD Hub <ggdhub.hoi@gmail.com>` |
 
 ---
 
@@ -363,7 +382,7 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 - **Một server Discord** mỗi bản cài. Hội thứ hai cần một bản cài khác (ứng dụng Discord, database, dịch vụ Railway riêng).
 - **Chỉ chạy một bản** (Railway Replicas = 1, mục 6.4): hai bản cùng lúc gửi trùng DM chào mừng và có thể đăng trùng tin Discord.
 - **Neon gói miễn phí không dùng được**: bộ hẹn giờ truy vấn mỗi phút khiến compute không bao giờ ngủ, hạn mức giờ miễn phí hết giữa tháng (mục 5.2). Mặc định dùng PostgreSQL của Railway.
-- **Gmail** giới hạn số email mỗi ngày (≈ 500 với tài khoản cá nhân).
+- **Giới hạn email mỗi ngày**: Brevo gói Free 300 email/ngày; Gmail qua SMTP ≈ 500/ngày. Mỗi người tham gia thường nhận 2 email mỗi buổi (còn 15 phút, vào game).
 - **Ảnh role** lưu trong database (ổ đĩa Railway bị xoá mỗi lần deploy), nên giới hạn 1 MB mỗi ảnh. Ảnh gốc của game thuộc bản quyền Gaggle Studios; hệ thống dùng nhân vật tự vẽ, admin tự chịu trách nhiệm nếu tải ảnh game lên.
 - Vote chỉ làm trong Discord (không vote trên web); chưa có biểu đồ thống kê; chưa có app điện thoại (web ưu tiên màn hình điện thoại).
 
@@ -381,7 +400,10 @@ Luôn bắt đầu từ **Railway → Deployments → View Logs**. Mọi thông 
 | `Không kết nối được Discord: An invalid token was provided` | Token sai / đã reset | Reset Token rồi cập nhật `DISCORD_TOKEN` |
 | `prisma migrate deploy` báo `P1001: Can't reach database server` | Railway: `DATABASE_URL` không đúng `${{Postgres.DATABASE_URL}}`, tên dịch vụ database khác `Postgres`, ứng dụng và database không cùng project, hoặc dịch vụ `Postgres` đang dừng. Neon: chuỗi sai, thiếu `?sslmode=require`, hoặc project bị tạm dừng (hết giờ compute) | Railway: sửa tham chiếu trong **Variables**, xem dịch vụ `Postgres` còn chạy; Neon: kiểm tra chuỗi direct và mục **Usage** |
 | Mỗi lần bấm Tham gia / vote mất cả giây | Ứng dụng và database khác vùng | Đặt cả hai dịch vụ cùng **Southeast Asia (Singapore)** (mục 6.1) |
-| Email không đi, **Gửi lỗi** ghi `535 … Username and Password not accepted` | Mật khẩu ứng dụng sai hoặc chưa bật xác minh 2 bước | Tạo lại mật khẩu ứng dụng (mục 4) |
+| Email không đi, **Gửi lỗi** ghi `Brevo từ chối email (HTTP 401): unauthorized…` | `BREVO_API_KEY` sai hoặc đã bị xoá | Tạo khoá mới (mục 4.1, bước 3) rồi cập nhật **Variables** |
+| Email không đi, **Gửi lỗi** ghi `Brevo từ chối email (HTTP 400)…` nhắc tới sender | `MAIL_FROM` chưa được xác minh trong Brevo, hoặc tài khoản Brevo chưa được kích hoạt gửi | Xác minh đúng địa chỉ đó (mục 4.1, bước 2); xem thông báo trong trang Brevo |
+| Email không đi trên Railway, **Gửi lỗi** ghi `Connection timeout` / `ETIMEDOUT` | Đang gửi qua SMTP mà Railway (gói Free/Hobby) chặn SMTP | Chuyển sang Brevo (mục 4.1): đặt `BREVO_API_KEY` |
+| Email không đi, **Gửi lỗi** ghi `535 … Username and Password not accepted` | (SMTP) Mật khẩu ứng dụng Gmail sai hoặc chưa bật xác minh 2 bước | Tạo lại mật khẩu ứng dụng (mục 4.2) |
 | Đăng nhập web quay về trang đăng nhập với lỗi | `not_member`: người đó không ở trong server hoặc bot chưa đồng bộ hồ sơ (bot đang tắt); `state`/`oauth`: Redirect URL trong Discord không khớp `PUBLIC_URL/auth/callback` hoặc `DISCORD_CLIENT_SECRET` sai | Bật bot / mời người đó vào server; kiểm tra Redirects và secret |
 | Healthcheck thất bại, deploy không bao giờ "Active" | Ứng dụng chưa mở cổng 3000 (xem log), hoặc Healthcheck Path không phải `/healthz` | Sửa theo mục 6.4; tăng Healthcheck Timeout |
 | `/healthz` trả `"discord":"down"` lâu | Bot mất kết nối | Xem log dòng `[bot]`; Discord thường tự nối lại; không thì **Redeploy** |

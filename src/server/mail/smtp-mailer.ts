@@ -1,5 +1,6 @@
 /**
- * Mailer thật qua SMTP (nodemailer). Mọi email đi từ `MAIL_FROM`.
+ * Mailer thật qua SMTP (nodemailer). Mọi email đi từ `MAIL_FROM`. Host chặn SMTP ra ngoài
+ * (Railway gói Free / Hobby) thì dùng `brevo-mailer.ts` thay thế.
  *
  * `createSmtpMailer` nhận một transport tuỳ chọn để test cắm bản giả (hoặc
  * `jsonTransport` của nodemailer) mà không cần mạng; không truyền thì tạo
@@ -8,7 +9,7 @@
 
 import { createTransport } from 'nodemailer';
 import type { SMTPSentMessageInfo, SMTPTransportOptions, Transporter } from 'nodemailer';
-import type { Config } from '../config.js';
+import type { SmtpMailConfig } from '../config.js';
 import type { Mailer } from '../ports.js';
 
 /** Phần của transporter nodemailer mà mailer dùng — một transporter thật luôn khớp. */
@@ -26,7 +27,7 @@ export const SMTP_TIMEOUT_MS = 15_000;
  * Transport SMTP từ cấu hình: TLS ngầm (`secure`) chỉ với cổng 465; cổng khác bắt
  * buộc STARTTLS (`requireTLS`) để mật khẩu không bao giờ đi qua kênh thường.
  */
-export function createSmtpTransport(smtp: Config['smtp']): Transporter<SMTPSentMessageInfo, SMTPTransportOptions> {
+export function createSmtpTransport(smtp: SmtpMailConfig): Transporter<SMTPSentMessageInfo, SMTPTransportOptions> {
   return createTransport({
     host: smtp.host,
     port: smtp.port,
@@ -39,7 +40,7 @@ export function createSmtpTransport(smtp: Config['smtp']): Transporter<SMTPSentM
   });
 }
 
-export function createSmtpMailer(smtp: Config['smtp'], transport: MailTransport = createSmtpTransport(smtp)): Mailer {
+export function createSmtpMailer(smtp: SmtpMailConfig, transport: MailTransport = createSmtpTransport(smtp)): Mailer {
   return {
     async send(to, subject, text) {
       await transport.sendMail({ from: smtp.from, to, subject, text });
