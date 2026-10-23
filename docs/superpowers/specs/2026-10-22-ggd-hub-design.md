@@ -158,7 +158,7 @@ Discord server ◄─► Bot (discord.js)      Web API (Fastify)  ◄─► Web 
 
 ### 4.8 Nhân vật
 
-- Trong game mọi người chơi đều có cùng một dáng nhân vật, nên nhân vật hoá thân = một dáng nhân vật SVG tự vẽ dùng chung, tô màu theo phe (xanh ngỗng, đỏ vịt, tím phe thứ 3), kèm biểu tượng role.
+- Trong game mọi người chơi đều có cùng một dáng nhân vật, nên nhân vật hoá thân = một dáng nhân vật SVG tự vẽ dùng chung, tô màu theo phe (xanh ngỗng, đỏ vịt, tím phe thứ 3), kèm biểu tượng role. *(Đã thay bởi `2026-10-23-ggd-ui-sanh-dem-design.md` §4: thân trắng như ngỗng trong game, đội đồ theo role, phe hiện ở vòng sáng dưới chân và khung thẻ.)*
 - Bảng tên trên đầu: chữ trắng viền tối như trong game, tự co chữ khi tên dài.
 - Admin tải ảnh khác cho từng role: chỉ nhận PNG/JPG/WebP, tối đa 1 MB, kiểm tra định dạng thật theo nội dung file; lưu trong PostgreSQL (vì ổ đĩa Railway không giữ file khi deploy lại).
 
