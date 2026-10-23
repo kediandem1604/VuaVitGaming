@@ -118,18 +118,20 @@ test('defaults to the first role and newest season; rank 1 wears the crown', asy
   expect(within(second).getByTitle('Số lần vote trúng Vịt')).toHaveTextContent('4');
   expect(second).toHaveTextContent('3 trận');
 
-  // Bục vinh danh: min(3, số hàng) mục theo thứ tự hạng; hạng 1 là nhân vật đủ màu, hạng 2 là avatar
-  // mang tên; mỗi mục ghi tên và `{điểm} {chỉ số}`.
+  // Bục vinh danh: min(3, số hàng) mục theo thứ tự hạng; hạng 1 là nhân vật đủ màu (tên chỉ ở bảng
+  // tên trên đầu, không ghi lại bên dưới), hạng 2 là avatar trang trí kèm tên; mọi mục ghi `{điểm} {chỉ số}`.
   const podium = podiumItems();
   expect(podium).toHaveLength(2);
   const [gold, silver] = podium as [HTMLElement, HTMLElement];
   expect(within(gold).getByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
-  expect(gold).toHaveTextContent('Ngỗng Một');
+  expect(within(gold).queryByText('Ngỗng Một', { selector: 'p' })).toBeNull();
   expect(gold).toHaveTextContent('7 Số lần vote trúng Vịt');
-  expect(within(silver).getByRole('img', { name: 'Ngỗng Ba' })).toBeInTheDocument();
-  expect(within(silver).queryByRole('img', { name: /Ngỗng:/ })).toBeNull();
-  expect(silver).toHaveTextContent('Ngỗng Ba');
+  // R13: avatar hạng 2 không mang nhãn (không có `img` nào), tên hiện bằng chữ bên dưới.
+  expect(within(silver).queryByRole('img')).toBeNull();
+  expect(within(silver).getByText('Ngỗng Ba', { selector: 'p' })).toBeInTheDocument();
   expect(silver).toHaveTextContent('4 Số lần vote trúng Vịt');
+  // R14: chưa đủ ba hàng → thứ tự tự nhiên trên màn hình, hạng 1 bên trái hạng 2.
+  expect(podium.map((item) => item.className.split(' ').find((name) => name.startsWith('order-')))).toEqual(['order-1', 'order-2']);
   // Chỉ một nhân vật trên cả trang: của hạng 1.
   expect(screen.getAllByRole('img', { name: /^Ngỗng: / })).toHaveLength(1);
   expect(screen.getByRole('heading', { level: 2, name: /Ngỗng/ })).toBeInTheDocument();
@@ -208,10 +210,12 @@ test('a single row gives a one-step podium', async () => {
   expect(podium).toHaveLength(1);
   const [only] = podium as [HTMLElement];
   expect(within(only).getByRole('img', { name: 'Người Canada: Ngỗng Năm' })).toBeInTheDocument();
-  expect(only).toHaveTextContent('Ngỗng Năm');
+  // Tên chỉ ở bảng tên của nhân vật, không ghi lại bên dưới.
+  expect(within(only).queryByText('Ngỗng Năm', { selector: 'p' })).toBeNull();
   expect(only).toHaveTextContent(`3 ${LONG_METRIC}`);
-  // Không có avatar hạng 2/3: nhân vật là `img` duy nhất trên bục.
+  // Không có avatar hạng 2/3: nhân vật là `img` duy nhất trên bục; một hàng đứng ở vị trí đầu.
   expect(within(screen.getByRole('list', { name: 'Bục vinh danh' })).getAllByRole('img')).toHaveLength(1);
+  expect(only.className.split(' ')).toContain('order-1');
   expect(boardItems()).toHaveLength(1);
 });
 
@@ -227,13 +231,16 @@ test('the podium stands 2-1-3 on screen while the DOM keeps rank order, and take
     expect.stringContaining('Ngỗng Chín'),
   ]);
   expect(podium.map((item) => item.textContent)).not.toEqual(expect.arrayContaining([expect.stringContaining('Vịt Mười')]));
-  // Vị trí hiển thị bằng `order-*`: hạng 2 bên trái, hạng 1 giữa, hạng 3 bên phải.
+  // Đủ ba hàng → vị trí hiển thị bằng `order-*`: hạng 2 bên trái, hạng 1 giữa, hạng 3 bên phải.
   const orders = podium.map((item) => item.className.split(' ').find((name) => name.startsWith('order-')));
   expect(orders).toEqual(['order-2', 'order-1', 'order-3']);
-  // Hạng 1 có nhân vật; hạng 2 và 3 là avatar mang tên.
+  // Hạng 1 có nhân vật (tên ở bảng tên); hạng 2 và 3 là avatar trang trí kèm tên bằng chữ (R13).
   expect(within(podium[0] as HTMLElement).getByRole('img', { name: 'Chim đa đa: Ngỗng Bảy' })).toBeInTheDocument();
-  expect(within(podium[1] as HTMLElement).getByRole('img', { name: 'Vịt Tám' })).toBeInTheDocument();
-  expect(within(podium[2] as HTMLElement).getByRole('img', { name: 'Ngỗng Chín' })).toBeInTheDocument();
+  expect(within(podium[0] as HTMLElement).queryByText('Ngỗng Bảy', { selector: 'p' })).toBeNull();
+  expect(within(podium[1] as HTMLElement).queryByRole('img')).toBeNull();
+  expect(within(podium[1] as HTMLElement).getByText('Vịt Tám', { selector: 'p' })).toBeInTheDocument();
+  expect(within(podium[2] as HTMLElement).queryByRole('img')).toBeNull();
+  expect(within(podium[2] as HTMLElement).getByText('Ngỗng Chín', { selector: 'p' })).toBeInTheDocument();
   expect(podium[2]).toHaveTextContent('2 Số trận thắng (bị vote ra)');
 
   // Bảng đầy đủ bên dưới vẫn có cả bốn hạng.
