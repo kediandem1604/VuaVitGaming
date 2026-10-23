@@ -38,7 +38,8 @@ Chỉ khi muốn **chạy ở máy** (mục 7) hoặc **chạy test** (mục 8) 
 
 - **Node.js 24 (LTS)** — tải ở <https://nodejs.org>. Kiểm tra: mở terminal, gõ `node --version` → `v24.x.x`.
 - **Git**.
-- **Không cần Docker.** Database để chạy máy và chạy test là PostgreSQL 16 thật nhưng chạy *nhúng*: gói `embedded-postgres` tự tải về khi `npm install` (khoảng 50 MB). Dữ liệu nằm ngoài thư mục dự án, ở `%LOCALAPPDATA%\ggd-hub\` (Windows) hoặc `~/ggd-hub/` (macOS/Linux).
+- **Docker Desktop** (<https://www.docker.com/products/docker-desktop/>) — database để chạy máy và chạy test là PostgreSQL 16 trong container, khai báo ở `docker-compose.yml` (một container cho dev, một cho test). Kiểm tra: `docker compose version`. Windows bản Insider gặp lỗi Docker tắt ngay sau khi mở → xem mục 12.
+- **Phương án dự phòng không có Docker:** PostgreSQL 16 *nhúng* — gói `embedded-postgres` tự tải về khi `npm install` (khoảng 50 MB), dữ liệu nằm ngoài thư mục dự án ở `%LOCALAPPDATA%\ggd-hub\` (Windows) hoặc `~/ggd-hub/` (macOS/Linux). Dùng `npm run db:start:embedded` (mục 7) và `GGD_TEST_DB=embedded` (mục 8).
 
 ---
 
@@ -249,29 +250,35 @@ Mỗi lần bạn (hoặc người sửa code) đẩy commit mới lên nhánh m
 ```bash
 git clone <repo> ggd-hub
 cd ggd-hub
-npm install                 # tải cả PostgreSQL nhúng (lần đầu hơi lâu)
+npm install                 # tải cả PostgreSQL nhúng dự phòng (lần đầu hơi lâu)
 cp .env.example .env        # Windows: copy .env.example .env
 ```
 
 Mở `.env`, điền các biến (xem mục 9). Chưa có bot/Gmail thật mà chỉ muốn xem web thì điền giá trị bất kỳ (vd `x`) cho các biến Discord và SMTP: lúc chạy, bot sẽ báo *Không kết nối được Discord* nhưng web vẫn lên.
 
-Cần **ba cửa sổ terminal**:
+Mở Docker Desktop, rồi cần **hai cửa sổ terminal**:
 
 | Cửa sổ | Lệnh | Việc |
 |---|---|---|
-| 1 | `npm run db:start` | Bật PostgreSQL nhúng ở `postgresql://ggd:ggd@localhost:54329/ggd_dev`. **Để cửa sổ này mở**; `Ctrl+C` để dừng. Lần đầu tạo cụm mất vài giây. |
-| 2 (một lần) | `npm run db:migrate` rồi `npm run db:seed` | Tạo bảng, nạp dữ liệu tham chiếu. Chạy lại không sinh trùng. |
-| 2 | `npm run dev:server` | API + bot + bộ hẹn giờ ở cổng 3000, tự nạp lại khi sửa code server. |
-| 3 | `npm run dev:web` | Giao diện React (Vite) ở <http://localhost:5173>, có hot reload; `/api` và `/auth` được chuyển tiếp sang cổng 3000. |
+| 1 (một lần) | `npm run db:start` | Bật PostgreSQL dev trong Docker ở `postgresql://ggd:ggd@localhost:54329/ggd_dev` (container `db`, dữ liệu giữ trong volume `ggd-pgdata`). Lệnh trả về ngay khi database sẵn sàng; container chạy nền tới khi `npm run db:stop` hoặc tắt Docker Desktop. Lần đầu tải ảnh `postgres:16-alpine` (~100 MB). |
+| 1 (một lần) | `npm run db:migrate` rồi `npm run db:seed` | Tạo bảng, nạp dữ liệu tham chiếu. Chạy lại không sinh trùng. |
+| 1 (tuỳ chọn) | `npm run db:demo` | Nạp **dữ liệu mẫu** để xem giao diện: 12 thành viên `demo-*` (`demo-admin` là admin), buổi chơi hôm nay, một đợt vote đã đóng có kết quả, điểm role đã duyệt cho đủ ba phe. Chạy lại bao nhiêu lần cũng được (dữ liệu mẫu được dọn rồi tạo lại cho đúng ngày hôm nay); từ chối chạy nếu `DATABASE_URL` không trỏ vào `localhost`. |
+| 1 | `npm run dev:server` | API + bot + bộ hẹn giờ ở cổng 3000, tự nạp lại khi sửa code server. |
+| 2 | `npm run dev:web` | Giao diện React (Vite) ở <http://localhost:5173>, có hot reload; `/api` và `/auth` được chuyển tiếp sang cổng 3000. |
+
+Không có Docker: thay `npm run db:start` bằng `npm run db:start:embedded` (PostgreSQL nhúng, cùng chuỗi kết nối) — lệnh này chiếm cửa sổ terminal, `Ctrl+C` để dừng.
 
 Đăng nhập khi chạy ở máy — chọn một trong hai:
 
-- **Đăng nhập nhanh không qua Discord** (`DEV_LOGIN`): trong `.env` đặt `DEV_LOGIN=1` và `PUBLIC_URL=http://localhost:3000`, rồi mở `http://localhost:5173/auth/dev-login?discordId=<Discord ID của một thành viên đã có trong database>`. Chỉ hoạt động khi `PUBLIC_URL` bắt đầu bằng `http://localhost`, và chỉ với thành viên **đã có hồ sơ** `active`: hoặc để bot thật đồng bộ từ server thử, hoặc tự thêm một dòng vào bảng `members` bằng `npx prisma studio` (điền `discordId`, `displayName`, `memberCode` dạng `GGD-0001`, `status = active`, `accessLevel = admin`).
+- **Đăng nhập nhanh không qua Discord** (`DEV_LOGIN`): trong `.env` đặt `DEV_LOGIN=1` và `PUBLIC_URL=http://localhost:3000`, rồi mở `http://localhost:5173/auth/dev-login?discordId=<Discord ID của một thành viên đã có trong database>`. Đã chạy `npm run db:demo` thì dùng `http://localhost:5173/auth/dev-login?discordId=demo-admin` (admin) hoặc `discordId=demo-mod` (mod). Chỉ hoạt động khi `PUBLIC_URL` bắt đầu bằng `http://localhost`, và chỉ với thành viên **đã có hồ sơ** `active`: dữ liệu mẫu, bot thật đồng bộ từ server thử, hoặc tự thêm một dòng vào bảng `members` bằng `npx prisma studio` (điền `discordId`, `displayName`, `memberCode` dạng `GGD-0001`, `status = active`, `accessLevel = admin`).
 - **Đăng nhập Discord thật qua Vite**: đặt `PUBLIC_URL=http://localhost:5173` và thêm `http://localhost:5173/auth/callback` vào Redirects của ứng dụng Discord (mục 2.1). Bot phải đang chạy với token thật để hồ sơ của bạn tồn tại.
 
-Chạy giống production ở máy (không Vite): `npm run build` rồi `npm start` → mọi thứ ở <http://localhost:3000> (`npm start` cũng tự chạy migration và nạp dữ liệu như trên Railway).
+Chạy giống production ở máy — hai cách:
 
-Các lệnh khác: `npm run typecheck` (kiểm tra kiểu TypeScript cho cả server và web), `npx prisma studio` (xem/sửa dữ liệu trong trình duyệt).
+- `npm run build` rồi `npm start` → mọi thứ ở <http://localhost:3000> (`npm start` cũng tự chạy migration và nạp dữ liệu như trên Railway).
+- `npm run app:docker` → build ảnh từ `Dockerfile` (đúng ảnh Railway sẽ chạy) và chạy container `app` ở <http://localhost:3000>, đọc biến từ `.env` nhưng tự trỏ `DATABASE_URL` vào container `db`. Dùng file env khác: `GGD_ENV_FILE=duong/dan/.env.khac npm run app:docker` (PowerShell: `$env:GGD_ENV_FILE='…'; npm run app:docker`). `Ctrl+C` để dừng; `docker compose --profile app down` để gỡ container (lệnh này gỡ cả `db` / `db-test`, dữ liệu dev vẫn còn trong volume — `npm run db:start` bật lại).
+
+Các lệnh khác: `npm run db:stop` (dừng hai container database), `npm run typecheck` (kiểm tra kiểu TypeScript cho cả server và web), `npx prisma studio` (xem/sửa dữ liệu trong trình duyệt).
 
 ---
 
@@ -281,11 +288,12 @@ Các lệnh khác: `npm run typecheck` (kiểm tra kiểu TypeScript cho cả se
 npm test
 ```
 
-- Vitest tự bật một PostgreSQL nhúng **riêng** ở cổng `54330` (thư mục dữ liệu `pgdata-test`), áp dụng migration, chạy xong thì tắt. **Không cần Docker, không cần `npm run db:start`** (chạy song song với DB dev cũng được vì khác cổng).
+- Vitest tự chạy `docker compose up -d --wait db-test`: một PostgreSQL **riêng** cho test ở cổng `54330`, dữ liệu trong RAM (mất khi container dừng — đúng ý), rồi áp dụng migration. Container để chạy tiếp sau khi test xong cho lượt sau nhanh hơn; `npm run db:stop` để dừng. **Không cần `npm run db:start`** (chạy song song với DB dev cũng được vì khác cổng). Docker Desktop chưa mở thì test dừng ngay với hướng dẫn.
+- Không có Docker: `GGD_TEST_DB=embedded npm test` (PowerShell: `$env:GGD_TEST_DB='embedded'; npm test`) dùng PostgreSQL nhúng ở cùng cổng `54330` (thư mục dữ liệu `pgdata-test`), chạy xong thì tắt. Hai cách không chạy cùng lúc được (chung cổng): đang có container `db-test` thì `npm run db:stop` trước.
 - Test server chạy tuần tự trên một database (mỗi test xoá sạch và nạp lại dữ liệu mẫu), nên toàn bộ mất vài phút. Test web (React) chạy trong jsdom.
 - Chạy một file: `npx vitest run tests/server/web/health.test.ts --project server`.
 - `npm run typecheck` để kiểm tra kiểu.
-- **CI trên GitHub**: `.github/workflows/ci.yml` chạy `npm ci`, `npm run typecheck`, `npm test` và `docker build .` (Ubuntu, Node 24) cho mỗi lần push và pull request — bắt đầu chạy khi repo đã nằm trên GitHub (xem tab **Actions**). Workflow này chưa chạy được ở máy phát triển (Docker hỏng), nên lần chạy đầu trên GitHub cũng là lần kiểm tra đầu tiên của `Dockerfile` trước Railway.
+- **CI trên GitHub**: `.github/workflows/ci.yml` chạy `npm ci`, `npm run typecheck`, `npm test` (máy Ubuntu của GitHub có sẵn Docker nên `db-test` tự bật như ở máy) và `docker build .` (Node 24) cho mỗi lần push và pull request — bắt đầu chạy khi repo đã nằm trên GitHub (xem tab **Actions**).
 
 ---
 
@@ -375,7 +383,7 @@ Luôn bắt đầu từ **Railway → Deployments → View Logs**. Mọi thông 
 
 | Thấy gì | Nguyên nhân thường gặp | Làm gì |
 |---|---|---|
-| Build trên Railway thất bại ở `npm ci` / `npm run build` | Lỗi Dockerfile hoặc code không biên dịch được | Xem dòng lỗi trong log build; chạy `npm run build` ở máy để tái hiện. Dockerfile chưa được build thử ở máy phát triển (Docker hỏng), nên lần build đầu trên Railway là lần kiểm tra thật đầu tiên. |
+| Build trên Railway thất bại ở `npm ci` / `npm run build` | Lỗi Dockerfile hoặc code không biên dịch được | Xem dòng lỗi trong log build; chạy `docker build .` (hoặc `npm run app:docker`) ở máy để tái hiện đúng ảnh Railway sẽ build |
 | `Cấu hình môi trường không hợp lệ — DISCORD_TOKEN: thiếu biến` | Thiếu hoặc gõ sai tên biến | Sửa trong **Variables** (ứng dụng tự deploy lại) |
 | `Không kết nối được Discord: Used disallowed intents` | Chưa bật Server Members Intent | Mục 2.1, bước 4 |
 | `Không kết nối được Discord: An invalid token was provided` | Token sai / đã reset | Reset Token rồi cập nhật `DISCORD_TOKEN` |
@@ -391,5 +399,13 @@ Luôn bắt đầu từ **Railway → Deployments → View Logs**. Mọi thông 
 | Bot không đăng được vào kênh | Bot không có quyền xem/gửi ở kênh đó | Thêm role bot vào quyền kênh (View Channels, Send Messages, Embed Links, Read Message History) |
 
 | Ai đó nhận DM chào mừng hai lần, tin Discord bị đăng đôi | Đang chạy hơn một bản | **Settings → Deploy → Replicas** về `1` (mục 6.4) |
+
+Sự cố ở **máy phát triển** (mục 7–8):
+
+| Thấy gì | Nguyên nhân thường gặp | Làm gì |
+|---|---|---|
+| Docker Desktop (Windows bản Insider) tắt ngay sau khi mở; log Docker có lỗi về file socket `dockerInference` | Tính năng **Docker Model Runner** tạo file socket trong `%LOCALAPPDATA%\Docker\run` và bản Windows này không chấp nhận | **Settings → AI → tắt Docker Model Runner** (dự án không dùng). Vẫn crash thì thoát hẳn Docker Desktop, đổi tên thư mục `%LOCALAPPDATA%\Docker\run` (vd thành `run.cu`) rồi mở lại — Docker tạo lại thư mục sạch |
+| `npm test` dừng với `Không bật được PostgreSQL test bằng Docker` | Docker Desktop chưa mở, hoặc cổng `54330` đang bị một `postgres.exe` nhúng cũ chiếm | Mở Docker Desktop rồi chạy lại; hoặc tắt `postgres.exe` cũ (Task Manager); hoặc dùng bản nhúng: `GGD_TEST_DB=embedded npm test` (mục 8). Lỗi gốc của Docker nằm cuối thông báo |
+| `npm run db:start` báo cổng `54329` đã bị dùng | PostgreSQL nhúng (`db:start:embedded`) của lần trước còn chạy | Đóng cửa sổ terminal đang chạy nó (hoặc tắt `postgres.exe`) rồi chạy lại |
 
 Trước khi mời cả hội, **bắt buộc** chạy hết **`docs/manual-test-checklist.md`** trên một server Discord thử — phần Discord/đăng nhập thật chưa từng được chạy trước đó.

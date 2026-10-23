@@ -10,9 +10,13 @@
     "start": "prisma migrate deploy && node dist/server/seed/run.js && node dist/server/main.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "db:start": "tsx scripts/dev-db.ts",
+    "db:start": "docker compose up -d --wait db",
+    "db:stop": "docker compose stop db db-test",
+    "db:start:embedded": "tsx scripts/dev-db.ts",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx src/server/seed/run.ts"
+    "db:seed": "tsx src/server/seed/run.ts",
+    "db:demo": "tsx scripts/demo-data.ts",
+    "app:docker": "docker compose --profile app up --build app"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
