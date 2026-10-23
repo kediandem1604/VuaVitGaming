@@ -134,10 +134,11 @@ function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
     <div className="flex flex-col gap-4">
       <div className="card flex items-center gap-4">
         <Character role={role} holderName={top.displayName} variant="current" size={96} className="shrink-0" />
-        <div className="flex min-w-0 flex-col gap-0.5">
+        {/* `min-w-0 flex-1`: khối chữ chiếm phần còn lại và nằm sát nhân vật; chỉ số dài thì xuống dòng. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <p className="text-sm text-slate-500 dark:text-slate-400">Đang hoá thân</p>
           <p className="truncate text-lg font-bold">{top.displayName}</p>
-          <p className="text-sm text-slate-600 dark:text-slate-400">
+          <p className="text-sm break-words text-slate-600 dark:text-slate-400">
             <span className="font-semibold text-slate-900 tabular-nums dark:text-slate-100">{top.score}</span> {role.metricLabel} ·{' '}
             <span className="tabular-nums">{top.games}</span> trận
           </p>
@@ -152,9 +153,10 @@ function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
             </span>
             <Avatar name={row.displayName} url={row.avatarUrl} className="size-9 text-sm" />
             <span className="min-w-0 flex-1 truncate font-medium">{row.displayName}</span>
-            <span className="flex shrink-0 flex-col items-end text-sm leading-tight">
-              <span className="text-slate-700 dark:text-slate-300">
-                <span className="font-semibold text-slate-900 tabular-nums dark:text-slate-100">{row.score}</span> {role.metricLabel}
+            {/* Chỉ số đã ghi một lần trên đầu danh sách ("Chỉ số: …"); dòng chỉ ghi số để không tràn ở 320px với nhãn dài. */}
+            <span className="flex shrink-0 flex-col items-end leading-tight">
+              <span className="font-semibold tabular-nums" title={role.metricLabel}>
+                {row.score}
               </span>
               <span className="text-xs text-slate-500 tabular-nums dark:text-slate-400">{row.games} trận</span>
             </span>

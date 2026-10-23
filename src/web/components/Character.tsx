@@ -50,7 +50,9 @@ export function Character({ role, holderName, variant, size = 120, className }: 
   const label = `${role.nameVi}: ${empty ? EMPTY_TEXT : holderName}${dimmed && !empty ? ' (mùa trước)' : ''}`;
 
   return (
-    <div role="img" aria-label={label} className={cx('relative mx-auto aspect-[3/4] w-full', className)} style={{ maxWidth: size }}>
+    // Không tự căn giữa (mx-auto): trong hàng flex, lề tự động sẽ nuốt hết chỗ trống và đẩy
+    // phần tử bên cạnh ra mép; nơi cần căn giữa (ô Đại sảnh) dùng items-center của ô chứa.
+    <div role="img" aria-label={label} className={cx('relative aspect-[3/4] w-full', className)} style={{ maxWidth: size }}>
       {role.hasImage && (
         <img
           src={`/api/roles/${role.id}/image`}

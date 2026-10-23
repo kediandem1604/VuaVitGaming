@@ -18,8 +18,12 @@ const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'icon' |
 });
 
 // Thứ tự như API trả về: Ngỗng → Vịt → Phe thứ 3 (role chế độ đặc biệt xếp theo phe của nó).
+const LONG_METRIC = 'Số lần tự báo xác khiến hung thủ bị vote';
+
 const roles: RoleDto[] = [
   role({ id: 1, key: 'goose', faction: 'goose', nameVi: 'Ngỗng', icon: '🪿', metricLabel: 'Số lần vote trúng Vịt', description: 'Làm nhiệm vụ và vote loại Vịt khỏi phòng.' }),
+  // Nhãn chỉ số dài nhất trong dữ liệu mẫu (40 ký tự).
+  role({ id: 6, key: 'canadian', faction: 'goose', nameVi: 'Người Canada', icon: '🍁', metricLabel: LONG_METRIC }),
   role({ id: 80, key: 'inquisitor', faction: 'goose', nameVi: 'Thanh tra', icon: '🪿', metricLabel: 'Điểm', modeKey: 'corruption' }),
   role({ id: 61, key: 'swordsman', faction: 'duck', nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém' }),
   role({ id: 70, key: 'dodo', faction: 'neutral', nameVi: 'Chim đa đa', icon: '🦤', metricLabel: 'Số trận thắng (bị vote ra)' }),
@@ -42,9 +46,13 @@ const row = (rank: number, memberId: number, displayName: string, score: number,
 
 const boards: Record<string, LeaderboardRowDto[]> = {
   '1@2026-10': [row(1, 1, 'Ngỗng Một', 7, 2), row(2, 3, 'Ngỗng Ba', 4, 3)],
+  '6@2026-10': [row(1, 5, 'Ngỗng Năm', 3, 4)],
   '61@2026-09': [row(1, 2, 'Vịt Hai', 12, 5)],
   '61@2026-10': [],
 };
+
+/** Khối chữ cạnh nhân vật trong thẻ hạng 1. */
+const topCard = () => screen.getByText('Đang hoá thân').parentElement;
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -93,19 +101,25 @@ test('defaults to the first role and newest season; rank 1 wears the crown', asy
   expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard?roleId=1&season=2026-10&limit=50', expect.anything());
 
   expect(items).toHaveLength(2);
-  expect(items[0]).toHaveTextContent('👑');
-  expect(items[0]).toHaveTextContent('Ngỗng Một');
-  expect(items[0]).toHaveTextContent('7 Số lần vote trúng Vịt');
-  expect(items[0]).toHaveTextContent('2 trận');
-  expect(items[1]).not.toHaveTextContent('👑');
-  expect(items[1]).toHaveTextContent('2');
-  expect(items[1]).toHaveTextContent('Ngỗng Ba');
-  expect(items[1]).toHaveTextContent('4 Số lần vote trúng Vịt');
-  expect(items[1]).toHaveTextContent('3 trận');
+  const [first, second] = items as [HTMLElement, HTMLElement];
+  expect(within(first).getByTitle('Hạng 1')).toHaveTextContent('👑');
+  expect(first).toHaveTextContent('Ngỗng Một');
+  expect(within(first).getByTitle('Số lần vote trúng Vịt')).toHaveTextContent('7');
+  expect(first).toHaveTextContent('2 trận');
+  expect(within(second).getByTitle('Hạng 2')).toHaveTextContent('2');
+  expect(second).not.toHaveTextContent('👑');
+  expect(second).toHaveTextContent('Ngỗng Ba');
+  expect(within(second).getByTitle('Số lần vote trúng Vịt')).toHaveTextContent('4');
+  expect(second).toHaveTextContent('3 trận');
 
-  // Nhân vật của người đứng đầu, đủ màu.
-  expect(screen.getByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
+  // Thẻ hạng 1: nhân vật đủ màu, khối chữ chiếm phần còn lại của hàng (min-w-0 flex-1) và ghi điểm + chỉ số.
+  const character = screen.getByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+  expect(character).not.toHaveClass('mx-auto');
+  expect(topCard()).toHaveClass('min-w-0', 'flex-1');
+  expect(topCard()).toHaveTextContent('Ngỗng Một');
+  expect(topCard()).toHaveTextContent('7 Số lần vote trúng Vịt · 2 trận');
   expect(screen.getByRole('heading', { level: 2, name: /Ngỗng/ })).toBeInTheDocument();
+  expect(screen.getByText('Chỉ số: Số lần vote trúng Vịt')).toBeInTheDocument();
 
   const roleSelect = screen.getByRole('combobox', { name: 'Role' });
   expect(roleSelect).toHaveValue('1');
@@ -134,12 +148,29 @@ test('?role= and ?mua= select a role and a closed season', async () => {
   expect(items).toHaveLength(1);
   expect(items[0]).toHaveTextContent('👑');
   expect(items[0]).toHaveTextContent('Vịt Hai');
-  expect(items[0]).toHaveTextContent('12 Số mạng chém');
+  expect(within(items[0] as HTMLElement).getByTitle('Số mạng chém')).toHaveTextContent('12');
   expect(items[0]).toHaveTextContent('5 trận');
+  expect(topCard()).toHaveTextContent('12 Số mạng chém · 5 trận');
   expect(screen.getByRole('img', { name: 'Kiếm sĩ: Vịt Hai' })).toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: 'Role' })).toHaveValue('61');
   expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveValue('2026-09');
   expect(screen.getByText('Mùa đã chốt')).toBeInTheDocument();
+});
+
+test('rows carry only the number; a 40-char metric label appears above the list and in the #1 card, not per row', async () => {
+  stubFetch();
+  renderAt('/bang-xep-hang?role=6');
+
+  const items = await screen.findAllByRole('listitem');
+  expect(items).toHaveLength(1);
+  const first = items[0] as HTMLElement;
+  expect(screen.getByText(`Chỉ số: ${LONG_METRIC}`)).toBeInTheDocument();
+  expect(topCard()).toHaveTextContent(`3 ${LONG_METRIC} · 4 trận`);
+  // Trong dòng: số điểm (title = tên chỉ số cho người dùng rê chuột/đọc màn hình), số trận, không lặp nhãn.
+  expect(first).not.toHaveTextContent(LONG_METRIC);
+  expect(within(first).getByTitle(LONG_METRIC)).toHaveTextContent('3');
+  expect(first).toHaveTextContent('4 trận');
+  expect(first).toHaveTextContent('Ngỗng Năm');
 });
 
 test('an empty board shows the empty copy and no character', async () => {

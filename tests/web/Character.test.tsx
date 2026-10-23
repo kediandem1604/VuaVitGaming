@@ -112,5 +112,8 @@ test('medium-length names use the middle size and are not squeezed', () => {
 test('badge carries the role icon and size caps the width', () => {
   render(<Character role={swordsman} holderName="Kẹ" variant="current" size={96} />);
   expect(screen.getByText('⚔️')).toBeInTheDocument();
-  expect(screen.getByRole('img', { name: 'Kiếm sĩ: Kẹ' })).toHaveStyle({ maxWidth: '96px' });
+  const root = screen.getByRole('img', { name: 'Kiếm sĩ: Kẹ' });
+  expect(root).toHaveStyle({ maxWidth: '96px' });
+  // Không tự căn giữa: trong hàng flex, mx-auto sẽ đẩy phần tử bên cạnh ra mép (lỗi bảng xếp hạng ở 1024px).
+  expect(root).not.toHaveClass('mx-auto');
 });
