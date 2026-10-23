@@ -31,17 +31,19 @@
 | `night-900` | `#1B1F4A` | Nền trang |
 | `night-800` | `#2A3070` | Ô nội dung (panel) |
 | `night-700` | `#3A4180` | Panel nổi, hover, ô nhập liệu |
-| `night-600` | `#4A5299` | Viền phụ, nét đứt, hình bóng nhân vật trống |
+| `night-600` | `#7680D4` | Viền phụ, nét đứt, viền ô nhập liệu, hình bóng nhân vật trống (≥ 3:1 trên `night-800` và `night-900`) |
 | `night-300` | `#AEB6FF` | Chữ phụ, nhãn |
 | `night-200` | `#D6DAFF` | Chữ thường trên panel |
 | `gold` | `#FFD23F` | Nút chính, mục đang chọn, điểm nhấn |
 | `gold-ink` | `#3A2600` | Chữ trên nền vàng |
 | `goose` / `duck` / `third` | `#2F80ED` / `#E5484D` / `#8E4EC6` | Màu phe (giữ nguyên Global Constraints) |
 | `goose-strong` / `duck-strong` | `#1F6FD6` / `#C9353A` | Nền có chữ trắng (băng phe, nút nguy hiểm) |
-| `ok` | `#7CF29A` | Trạng thái tốt (đếm ngược, đã duyệt) |
+| `goose-soft` / `duck-soft` / `third-soft` | `#7CB8FF` / `#FF8A8F` / `#C9A2F2` | Chữ màu phe hoặc chữ báo lỗi (`duck-soft`) trên nền tối |
+| `ok` | `#7CF29A` | Trạng thái tốt (đếm ngược, đã duyệt, "Đã lưu") |
 
 - Nền trang: `night-900` có lớp chấm sao mờ (CSS `radial-gradient` lặp lại, không dùng ảnh).
 - Chữ trắng không đặt trực tiếp lên `goose` hay `duck` (độ tương phản chỉ khoảng 3.9:1). Những chỗ đó dùng bản `-strong`. `third` để chữ trắng được (5:1).
+- Chữ màu phe hoặc chữ đỏ báo lỗi trên nền tối dùng bản `-soft` (`goose`, `duck`, `third` gốc chỉ đạt khoảng 2–3:1 trên nền tối).
 - Mọi cặp chữ/nền phải đạt tối thiểu 4.5:1 với chữ thường, 3:1 với chữ lớn và icon.
 
 ### 3.2 Chữ
@@ -54,7 +56,7 @@
 
 ### 3.3 Hình khối chung (utility trong `styles.css`)
 
-- `panel`: nền `night-800`, viền 3px `night-950`, bo 16px. Thay cho `card` hiện tại.
+- `panel`: nền `night-800`, viền 3px `night-950`, bo 16px. Thay cho `card` hiện tại (đổi tên ở mọi chỗ dùng; `card` bị xoá khi xong).
 - `panel-inset`: nền `night-900`, viền 2px `night-950`, bo 12px (dòng trong panel, ví dụ hàng tri ân).
 - `btn-primary`: nền `gold`, chữ `gold-ink` 700, viền 3px `night-950`, **viền đáy 6px** tạo khối. Khi nhấn: viền đáy còn 3px và nút dịch xuống 3px (cảm giác lún). Khi `disabled`: nền `night-700`, chữ `night-300`, không lún.
 - `btn-secondary`: nền `night-700`, chữ trắng, cùng kiểu khối.
@@ -153,8 +155,8 @@ Mỗi role được gán một **bộ đồ** (kit) vẽ chồng lên dáng chun
 
 - Dùng ở Đại sảnh và Hồ sơ.
 - Panel có **băng phe** trên cùng (nền `goose-strong` / `duck-strong` / `third`, chữ trắng 12px 800 viết hoa: "PHE NGỖNG", "PHE VỊT", "PHE THỨ 3"), dưới là `Character`, tên role 800, điểm + tên chỉ số màu `gold`.
-- Role trống: viền nét đứt `night-600`, băng phe nhạt, dòng "Khai điểm để giành" là link tới `/khai-diem` (trang Khai điểm không nhận tham số role, không thêm).
-- Các link hiện có trên ô Đại sảnh (ví dụ tới Bảng xếp hạng của role và mùa) giữ nguyên.
+- Role trống: viền nét đứt `night-600`, băng phe nhạt, dòng chữ "Khai điểm để giành" (chỉ là chữ: cả ô Đại sảnh đã là link tới Bảng xếp hạng của role, không lồng link trong link).
+- `RoleCard` không tự là link; trang dùng nó quyết định bọc link hay không. Ô Đại sảnh giữ link tới Bảng xếp hạng của role và mùa như hiện tại.
 
 ### 5.4 Các thành phần khác
 
@@ -174,8 +176,8 @@ Mọi trang giữ nguyên dữ liệu, hành vi, đường dẫn, nhãn truy c�
   - Nút "Tham gia" / "Huỷ tham gia" kiểu `btn-primary` / `btn-secondary` to hết chiều ngang; dòng nhỏ "Nhắc qua email và DM trước 15 phút".
   - Buổi đã huỷ / đã kết thúc: panel mờ + chip trạng thái.
   - **Sảnh tri ân hôm nay**: panel tiêu đề vàng, mỗi hạng mục một dòng `panel-inset` có icon cúp, tên người thắng, số phiếu.
-- **Đại sảnh** (`HallPage`): tiêu đề chữ nổi, chọn mùa, lọc phe bằng chip màu (Tất cả / Ngỗng / Vịt / Phe 3), lưới `RoleCard` (2 cột ở 320px, 3 ở 768px, 4–5 ở 1280px).
-- **Xếp hạng** (`LeaderboardPage`): chọn role và mùa như hiện tại; **bục 1-2-3** cho top 3 (bục giữa cao nhất, người hạng 1 có nhân vật hoá thân đứng trên bục), dưới là bảng các hạng còn lại với hàng kẻ `night-700`.
+- **Đại sảnh** (`HallPage`): tiêu đề chữ nổi, chọn mùa, giữ các tab phe hiện có (Phe Ngỗng / Phe Vịt / Phe thứ 3, thêm "Chế độ đặc biệt" khi có role riêng của chế độ) nhưng vẽ thành chip màu phe, lưới `RoleCard` (2 cột ở 320px, 3 ở 768px, 4–5 ở 1280px).
+- **Xếp hạng** (`LeaderboardPage`): chọn role và mùa như hiện tại; **bục 1-2-3** thay cho thẻ hạng 1 hiện tại (bục giữa cao nhất, người hạng 1 có nhân vật hoá thân đứng trên bục, hạng 2 và 3 là avatar). Bên dưới vẫn là bảng đầy đủ mọi hạng (kể cả top 3) với hàng kẻ `night-700`.
 - **Tri ân** (`MvpPage`): vote vẫn diễn ra trên Discord, trang này chỉ xem kết quả. Dãy ngày chọn được hiện thành chip (ngày đang xem nền `gold`); kết quả theo ngày dùng cùng giao diện Sảnh tri ân như trang Hôm nay (`DailyHall`): mỗi hạng mục một dòng có icon cúp, người thắng (avatar + tên) và số phiếu, người thắng hạng nhất hạng mục có chữ vàng.
 - **Khai điểm** (`ReportPage`): giữ ô "Role" gõ để tìm (combobox) như hiện tại. Mỗi gợi ý hiện nhân vật thu nhỏ + tên role + chip phe; role đã chọn hiện thành thẻ nhỏ có nhân vật. Phần nhập điểm trong panel; danh sách đã khai dùng chip trạng thái (chờ duyệt vàng, đã duyệt xanh `ok`, bị từ chối đỏ).
 - **Hồ sơ** (`ProfilePage`): thẻ "hộ chiếu": avatar, tên, mã `GGD-xxxx` trong chip vàng; các role đang hoá thân hiện bằng `RoleCard`; hai lựa chọn nhắc giờ (email, DM) vẫn là checkbox nhưng vẽ thành công tắc gạt (giữ `type="checkbox"` và nhãn để trình đọc màn hình và test không đổi).
