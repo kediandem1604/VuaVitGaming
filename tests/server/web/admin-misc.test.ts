@@ -221,6 +221,31 @@ test('failures newest first', async () => {
   expect((await get('/api/admin/notification-failures')).statusCode).toBe(401);
 });
 
+test('mods see failure errors with recipient emails masked; admins see them', async () => {
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod' });
+  const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
+  const a = await createMember(testDb, { displayName: 'Ngỗng A', email: 'user@example.com' });
+  const session = await createSession(testDb);
+  await testDb.notificationLog.create({
+    data: {
+      sessionId: session.id,
+      memberId: a.id,
+      kind: 'pre15',
+      channel: 'email',
+      sentAt: new Date('2026-10-22T13:45:00Z'),
+      error: '550 5.1.1 <user@example.com> Recipient address rejected: User unknown',
+    },
+  });
+
+  const asMod = (await get('/api/admin/notification-failures', modSid)).json<NotificationFailureDto[]>();
+  expect(asMod).toHaveLength(1);
+  expect(asMod[0]?.error).toBe('550 5.1.1 <[email ẩn]> Recipient address rejected: User unknown');
+  expect(JSON.stringify(asMod)).not.toContain('user@example.com');
+
+  const asAdmin = (await get('/api/admin/notification-failures', adminSid)).json<NotificationFailureDto[]>();
+  expect(asAdmin[0]?.error).toBe('550 5.1.1 <user@example.com> Recipient address rejected: User unknown');
+});
+
 test('failures are capped at the newest 100', async () => {
   const { sid: modSid } = await memberWithSid({ accessLevel: 'mod' });
   const session = await createSession(testDb);

@@ -1,8 +1,8 @@
 /**
  * Các route quản trị nhỏ còn lại: danh sách thành viên (email chỉ admin thấy — spec
- * §9), nhắc giờ gửi lỗi (spec §9: admin xem danh sách gửi lỗi), đợt vote đang mở
- * (để đóng sớm — ruling R34a) và cài đặt chạy (chỉ admin). Chỉ kiểm tra DẠNG ở đây;
- * khoảng giá trị của cài đặt do service báo.
+ * §9), nhắc giờ gửi lỗi (spec §9: admin xem danh sách gửi lỗi; mod xem với email trong
+ * chữ lỗi đã che — ruling R35), đợt vote đang mở (để đóng sớm — ruling R34a) và cài đặt
+ * chạy (chỉ admin). Chỉ kiểm tra DẠNG ở đây; khoảng giá trị của cài đặt do service báo.
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -13,6 +13,7 @@ import type {
   OpenVoteRoundDto,
   SettingsDto,
 } from '../../../shared/api-types.js';
+import { maskEmails } from '../../lib/mask.js';
 import { listMembers } from '../../modules/members/service.js';
 import { sessionLabel } from '../../modules/mvp/votes.js';
 import { getSettings, updateSettings } from '../../modules/settings/service.js';
@@ -54,7 +55,9 @@ export async function adminMiscRoutes(app: FastifyInstance): Promise<void> {
     }));
   });
 
-  app.get('/api/admin/notification-failures', { preHandler: requireMod }, async (): Promise<NotificationFailureDto[]> => {
+  app.get('/api/admin/notification-failures', { preHandler: requireMod }, async (request): Promise<NotificationFailureDto[]> => {
+    // Lỗi SMTP/Discord lưu nguyên văn thường chứa địa chỉ người nhận: chỉ admin thấy.
+    const isAdmin = currentMember(request).accessLevel === 'admin';
     const rows = await app.ctx.db.notificationLog.findMany({
       where: { error: { not: null } },
       orderBy: [{ sentAt: 'desc' }, { sessionId: 'desc' }, { memberId: 'desc' }],
@@ -78,7 +81,7 @@ export async function adminMiscRoutes(app: FastifyInstance): Promise<void> {
       kind: r.kind,
       channel: r.channel,
       sentAt: r.sentAt.toISOString(),
-      error: r.error ?? '',
+      error: isAdmin ? (r.error ?? '') : maskEmails(r.error ?? ''),
     }));
   });
 
