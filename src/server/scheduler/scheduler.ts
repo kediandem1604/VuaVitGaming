@@ -17,7 +17,7 @@ import { runReminders } from '../modules/reminders/service.js';
 import { runSeasonJobs } from '../modules/seasons/service.js';
 import { autoEndSessions } from '../modules/sessions/end.js';
 import { syncSessionMessage } from '../modules/sessions/service.js';
-import { releaseLease, tryAcquireLease } from './lease.js';
+import { releaseLease as releaseLeaseRow, tryAcquireLease } from './lease.js';
 
 export interface Job {
   name: string;
@@ -101,17 +101,25 @@ export interface SchedulerOptions {
 
 export interface Scheduler {
   /**
-   * Ngừng hẹn lượt mới, chờ lượt đang dở chạy xong, rồi trả khoá thuê (nếu đang giữ) để
-   * bản deploy mới chạy được ngay. Không bao giờ reject; gọi lại vô hại.
+   * Ngừng hẹn lượt mới và chờ lượt đang dở chạy xong. VẪN GIỮ khoá thuê: lúc tắt máy, web
+   * và bot còn đang đóng (có thể còn đang sửa tin Discord); trả khoá sớm thì bộ hẹn giờ
+   * của bản deploy mới đăng/sửa bù song song với chúng. Không bao giờ reject; gọi lại vô hại.
    */
   stop(): Promise<void>;
+  /**
+   * Dừng (như `stop`) rồi trả khoá thuê nếu đang giữ, để bản deploy mới chạy bộ hẹn giờ
+   * ngay thay vì chờ khoá hết hạn (90 giây). Gọi khi tiến trình đã đóng web và ngắt
+   * Discord. Lỗi chỉ ghi log; không bao giờ reject; gọi lại vô hại.
+   */
+  releaseLease(): Promise<void>;
 }
 
 /**
  * Chạy một lượt ngay rồi mỗi `intervalMs`. Lượt trước chưa xong thì bỏ qua lượt
  * này (không chạy chồng). Không giữ được khoá → không chạy việc nào; lỗi khi lấy
  * khoá chỉ ghi log. Timer được `unref` nên không tự giữ tiến trình sống. Tắt tiến
- * trình thì `await stop()` trước khi ngắt database (xem `Scheduler.stop`).
+ * trình: `await stop()` trước, `await releaseLease()` sau khi đóng web và ngắt Discord,
+ * cả hai trước khi ngắt database.
  */
 export function startScheduler(ctx: Ctx, opts: SchedulerOptions = {}): Scheduler {
   const intervalMs = opts.intervalMs ?? SCHEDULER_INTERVAL_MS;
@@ -122,6 +130,7 @@ export function startScheduler(ctx: Ctx, opts: SchedulerOptions = {}): Scheduler
   /** Lượt đang chạy (để `stop()` chờ nó). */
   let inFlight: Promise<void> = Promise.resolve();
   let stopping: Promise<void> | null = null;
+  let releasing: Promise<void> | null = null;
 
   const acquire = async (): Promise<boolean> => {
     try {
@@ -153,21 +162,29 @@ export function startScheduler(ctx: Ctx, opts: SchedulerOptions = {}): Scheduler
   timer.unref();
   startTick();
 
-  const stopNow = async (): Promise<void> => {
-    stopped = true;
-    clearInterval(timer);
-    await inFlight; // tick không bao giờ reject
+  const stop = (): Promise<void> => {
+    stopping ??= (async () => {
+      stopped = true;
+      clearInterval(timer);
+      await inFlight; // tick không bao giờ reject
+    })();
+    return stopping;
+  };
+
+  const release = async (): Promise<void> => {
+    await stop();
     try {
-      await releaseLease(ctx, holderId);
+      await releaseLeaseRow(ctx, holderId);
     } catch (err) {
       console.error('[scheduler] Không trả được khoá thuê (khoá tự hết hạn sau 90 giây):', err);
     }
   };
 
   return {
-    stop(): Promise<void> {
-      stopping ??= stopNow();
-      return stopping;
+    stop,
+    releaseLease(): Promise<void> {
+      releasing ??= release();
+      return releasing;
     },
   };
 }

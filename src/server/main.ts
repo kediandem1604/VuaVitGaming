@@ -45,7 +45,7 @@ async function main(): Promise<void> {
     discordStatus: bot.status,
   });
   let scheduler: Scheduler | undefined;
-  installShutdown(app, bot, () => scheduler?.stop() ?? Promise.resolve());
+  installShutdown(app, bot, () => scheduler);
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
   console.log(`Đang chạy tại cổng ${config.port}`);
@@ -83,20 +83,23 @@ function webDistDir(): string | undefined {
 }
 
 /**
- * SIGINT/SIGTERM: dừng bộ hẹn giờ, đóng web, ngắt Discord, ngắt database rồi thoát 0
- * — mỗi bước lỗi chỉ ghi log. Bộ hẹn giờ dừng trước (chờ lượt đang dở chạy xong rồi
- * trả khoá thuê) để không có việc nào bị cắt ngang khi database đã ngắt, và bản deploy
- * mới chạy bộ hẹn giờ được ngay.
+ * SIGINT/SIGTERM: dừng bộ hẹn giờ, đóng web, ngắt Discord, trả khoá thuê, ngắt database
+ * rồi thoát 0 — mỗi bước lỗi chỉ ghi log. Bộ hẹn giờ dừng trước (chờ lượt đang dở chạy
+ * xong) để không có việc nào bị cắt ngang khi database đã ngắt. Khoá thuê chỉ được trả SAU
+ * khi web đã đóng (request đang dở đã xong) và Discord đã ngắt: trước đó tiến trình này còn
+ * có thể đang sửa tin của một buổi còn bẩn, và bộ hẹn giờ của bản deploy mới không được
+ * đăng/sửa bù cùng lúc. Trả xong thì bản mới chạy bộ hẹn giờ được ngay.
  */
-function installShutdown(app: FastifyInstance, bot: Bot, stopScheduler: () => Promise<void>): void {
+function installShutdown(app: FastifyInstance, bot: Bot, scheduler: () => Scheduler | undefined): void {
   let stopping = false;
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     if (stopping) return;
     stopping = true;
     console.log(`Nhận ${signal}, đang dừng…`);
-    await attempt('dừng bộ hẹn giờ', stopScheduler);
+    await attempt('dừng bộ hẹn giờ', async () => scheduler()?.stop());
     await attempt('đóng web', () => app.close());
     await attempt('ngắt Discord', () => bot.client.destroy());
+    await attempt('trả khoá thuê bộ hẹn giờ', async () => scheduler()?.releaseLease());
     await attempt('ngắt database', () => db.$disconnect());
     process.exit(0);
   };
