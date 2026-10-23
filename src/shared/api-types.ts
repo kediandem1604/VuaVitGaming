@@ -200,6 +200,58 @@ export interface SeasonDto {
   closed: boolean;
 }
 
+export type MemberStatus = 'active' | 'left';
+
+/**
+ * Một thành viên trong trang quản trị (`GET /api/admin/members`, mod/admin). `email`
+ * chỉ có giá trị khi NGƯỜI XEM là admin — mod luôn nhận `null`. `joinedAt` ISO 8601 (UTC).
+ */
+export interface AdminMemberDto {
+  id: number;
+  memberCode: string;
+  displayName: string;
+  accessLevel: AccessLevel;
+  status: MemberStatus;
+  email: string | null;
+  joinedAt: string;
+}
+
+export type ReminderKind = 'pre15' | 'start';
+export type NotifyChannel = 'email' | 'dm';
+
+/**
+ * Một lần gửi nhắc giờ thất bại (`GET /api/admin/notification-failures`, mới nhất trước).
+ * `sessionLabel` = `{chế độ} {HH:mm} {dd/MM}` giờ VN; `sentAt` ISO 8601 (UTC).
+ */
+export interface NotificationFailureDto {
+  sessionId: number;
+  sessionLabel: string;
+  memberId: number;
+  displayName: string;
+  kind: ReminderKind;
+  channel: NotifyChannel;
+  sentAt: string;
+  error: string;
+}
+
+/** Một đợt vote đang mở (`GET /api/admin/vote-rounds?status=open`, theo giờ đóng tăng dần); `closesAt` ISO 8601 (UTC). */
+export interface OpenVoteRoundDto {
+  id: number;
+  sessionId: number;
+  sessionLabel: string;
+  closesAt: string;
+}
+
+/** Cài đặt chạy của ứng dụng (`GET`/`PATCH /api/admin/settings`, chỉ admin). */
+export interface SettingsDto {
+  /** Vote MVP mở trong bao nhiêu giờ sau khi buổi kết thúc (1–72). */
+  voteDurationHours: number;
+  /** Buổi chơi tự kết thúc sau bao nhiêu giờ kể từ giờ bắt đầu (1–24). */
+  autoEndHours: number;
+  /** Nhắc người tham gia trước giờ bắt đầu bao nhiêu phút (5–120). */
+  reminderLeadMinutes: number;
+}
+
 /** Thân phản hồi của mọi lỗi API. */
 export interface ApiErrorBody {
   error: { code: string; message: string };

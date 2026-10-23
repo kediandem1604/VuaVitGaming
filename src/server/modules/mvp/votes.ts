@@ -185,8 +185,8 @@ async function isRoundOpen(ctx: Ctx, roundId: number): Promise<boolean> {
   return round?.status === 'open' && round.closesAt.getTime() > ctx.now().getTime();
 }
 
-/** `{chế độ} {HH:mm} {dd/MM}` giờ VN — nhãn buổi trên tin vote và thông báo kết quả. */
-function sessionLabel(s: { modeName: string; startsAt: Date }): string {
+/** `{chế độ} {HH:mm} {dd/MM}` giờ VN — nhãn buổi trên tin vote, thông báo kết quả và trang quản trị. */
+export function sessionLabel(s: { modeName: string; startsAt: Date }): string {
   return `${s.modeName} ${formatVnTime(s.startsAt)} ${formatVnDay(s.startsAt)}`;
 }
 
