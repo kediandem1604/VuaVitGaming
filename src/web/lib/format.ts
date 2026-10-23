@@ -104,6 +104,33 @@ export function vnTodayIso(now: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+const MINUTE_MS = 60_000;
+const MINUTES_PER_HOUR = 60;
+const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR;
+
+/**
+ * Chip đếm ngược của thẻ buổi chơi: "còn 2 giờ 15 phút", "còn 40 phút", "còn dưới 1 phút",
+ * "còn 1 ngày 3 giờ", "còn 2 ngày"; từ giờ bắt đầu trở đi là "Đang chơi". Chỉ là hiệu hai
+ * mốc thời gian (phút làm tròn xuống), không dính múi giờ — nên không cần `Intl`. Ở mức
+ * ngày thì bỏ phút, ở mức giờ thì bỏ giây, và phần bằng 0 không in ("còn 2 giờ").
+ */
+export function formatCountdown(startsAt: string, now: Date): string {
+  const remainingMs = new Date(startsAt).getTime() - now.getTime();
+  if (remainingMs <= 0) return 'Đang chơi';
+  const totalMinutes = Math.floor(remainingMs / MINUTE_MS);
+  if (totalMinutes < 1) return 'còn dưới 1 phút';
+
+  const days = Math.floor(totalMinutes / MINUTES_PER_DAY);
+  const hours = Math.floor((totalMinutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR);
+  const minutes = totalMinutes % MINUTES_PER_HOUR;
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days} ngày`);
+  if (hours > 0) parts.push(`${hours} giờ`);
+  if (days === 0 && minutes > 0) parts.push(`${minutes} phút`);
+  return `còn ${parts.join(' ')}`;
+}
+
 /**
  * Cộng `n` ngày (âm để lùi) vào một ngày `YYYY-MM-DD`. Thuần số học lịch (qua
  * `Date.UTC`, không dính múi giờ): `addDaysIso('2026-11-01', -3) === '2026-10-29'`.

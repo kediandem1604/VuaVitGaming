@@ -93,7 +93,9 @@ test('an empty day says there are no sessions yet', async () => {
     'GET /api/mvp/dates': () => json(200, []),
   });
   renderPage();
-  expect(await screen.findByText('Hôm nay chưa có buổi chơi nào')).toBeInTheDocument();
+  const empty = await screen.findByText('Hôm nay chưa có buổi chơi nào');
+  // Câu "chưa có" nằm trong ô EmptyState dùng chung (panel-inset + ngỗng trang trí).
+  expect(empty.closest('.panel-inset')).not.toBeNull();
   expect(screen.getByText('0 người tham gia hôm nay')).toBeInTheDocument();
 });
 
@@ -115,12 +117,16 @@ test('joining replaces that card with the returned session and updates the total
   const firstCard = joinButtons[0]?.closest('article');
   expect(firstCard).not.toBeNull();
   expect(within(firstCard as HTMLElement).getByText('19:00')).toBeInTheDocument();
-  expect(within(firstCard as HTMLElement).getByText('2/16')).toBeInTheDocument();
+  expect(within(firstCard as HTMLElement).getByText('2/16 ghế đã có người')).toBeInTheDocument();
 
   fireEvent.click(joinButtons[0] as HTMLElement);
 
   expect(await within(firstCard as HTMLElement).findByRole('button', { name: 'Huỷ tham gia' })).toBeInTheDocument();
-  expect(within(firstCard as HTMLElement).getByText('3/16')).toBeInTheDocument();
+  expect(within(firstCard as HTMLElement).getByText('3/16 ghế đã có người')).toBeInTheDocument();
+  // Ghế mới có người: "Tôi" ngồi vào ô thứ ba, còn 13 ghế trống.
+  const seats = within(firstCard as HTMLElement).getByRole('list', { name: 'Hàng ghế' });
+  expect(within(seats).getByRole('img', { name: 'Tôi' })).toBeInTheDocument();
+  expect(within(seats).getAllByLabelText('Ghế trống')).toHaveLength(13);
   expect(screen.getByText('4 người tham gia hôm nay')).toBeInTheDocument();
 
   // Không tải lại danh sách sau khi thành công: dùng ngay DTO trả về.

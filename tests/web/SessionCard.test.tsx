@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { SessionAttendeeDto, SessionDto } from '../../src/shared/api-types';
 import { SessionCard } from '../../src/web/components/SessionCard';
@@ -19,7 +19,20 @@ const s: SessionDto = {
   myStatus: null,
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+/** `n` người tham gia tên `Người 1..n`, người lẻ không có ảnh. */
+const people = (n: number): SessionAttendeeDto[] =>
+  Array.from({ length: n }, (_, i) => ({
+    memberId: i + 1,
+    displayName: `Người ${i + 1}`,
+    avatarUrl: i % 2 === 0 ? `https://cdn.example/${i + 1}.png` : null,
+  }));
+
+const seatRow = () => screen.getByRole('list', { name: 'Hàng ghế' });
 
 test('full session disables join with label', () => {
   render(<SessionCard session={{ ...s, capacity: 2, attendees: [a, b], myStatus: null }} onToggle={vi.fn()} pending={false} />);
@@ -58,11 +71,11 @@ test('room code shown when present', () => {
   expect(screen.queryByText(/Mã phòng/)).not.toBeInTheDocument();
 });
 
-test('shows Vietnam time, mode, count and note', () => {
+test('shows Vietnam time, mode, seat count and note', () => {
   render(<SessionCard session={{ ...s, attendees: [a, b], note: 'Map mới' }} onToggle={vi.fn()} pending={false} />);
   expect(screen.getByText('21:00')).toBeInTheDocument();
   expect(screen.getByText('Cổ điển')).toBeInTheDocument();
-  expect(screen.getByText('2/16')).toBeInTheDocument();
+  expect(screen.getByText('2/16 ghế đã có người')).toBeInTheDocument();
   expect(screen.getByText('Map mới')).toBeInTheDocument();
 });
 
@@ -89,20 +102,90 @@ test('cancelled and ended sessions show a badge and no button', () => {
   expect(screen.queryByText('Đã kết thúc')).not.toBeInTheDocument();
 });
 
-test('attendee avatars carry the display name and overflow past 8 collapses to +X', () => {
-  const many: SessionAttendeeDto[] = Array.from({ length: 11 }, (_, i) => ({
-    memberId: i + 1,
-    displayName: `Người ${i + 1}`,
-    avatarUrl: i % 2 === 0 ? `https://cdn.example/${i + 1}.png` : null,
-  }));
-  render(<SessionCard session={{ ...s, capacity: 16, attendees: many }} onToggle={vi.fn()} pending={false} />);
+test('one seat per place, filled seats show who is coming', () => {
+  render(<SessionCard session={{ ...s, capacity: 12, attendees: people(8) }} onToggle={vi.fn()} pending={false} />);
 
-  const list = screen.getByRole('list', { name: 'Người tham gia' });
-  expect(within(list).getAllByRole('img')).toHaveLength(8);
-  expect(within(list).getByRole('img', { name: 'Người 1' })).toBeInTheDocument();
-  expect(within(list).getByRole('img', { name: 'Người 2' })).toBeInTheDocument();
-  expect(within(list).queryByRole('img', { name: 'Người 9' })).not.toBeInTheDocument();
-  expect(within(list).getByText('+3')).toBeInTheDocument();
+  const seats = within(seatRow()).getAllByRole('listitem');
+  expect(seats).toHaveLength(12);
+  expect(screen.getAllByLabelText('Ghế trống')).toHaveLength(4);
+  // Mỗi ô có người là một avatar mang tên người đó (ảnh có alt, chữ cái đầu có aria-label).
+  expect(within(seatRow()).getAllByRole('img')).toHaveLength(8);
+  expect(within(seatRow()).getByRole('img', { name: 'Người 1' })).toBeInTheDocument();
+  expect(within(seatRow()).getByRole('img', { name: 'Người 8' })).toBeInTheDocument();
+  // Ghế có người đứng trước ghế trống.
+  expect(within(seats[0] as HTMLElement).getByRole('img', { name: 'Người 1' })).toBeInTheDocument();
+  expect(seats[11]).toHaveAttribute('aria-label', 'Ghế trống');
+  expect(screen.getByText('8/12 ghế đã có người')).toBeInTheDocument();
+});
+
+test('more attendees than seats still shows everyone', () => {
+  render(<SessionCard session={{ ...s, capacity: 3, attendees: people(5) }} onToggle={vi.fn()} pending={false} />);
+  expect(within(seatRow()).getAllByRole('listitem')).toHaveLength(5);
+  expect(screen.queryAllByLabelText('Ghế trống')).toHaveLength(0);
+  expect(within(seatRow()).getByRole('img', { name: 'Người 5' })).toBeInTheDocument();
+  expect(screen.getByText('5/3 ghế đã có người')).toBeInTheDocument();
+});
+
+test('an empty session still draws every seat', () => {
+  render(<SessionCard session={{ ...s, capacity: 4, attendees: [] }} onToggle={vi.fn()} pending={false} />);
+  expect(within(seatRow()).getAllByRole('listitem')).toHaveLength(4);
+  expect(screen.getAllByLabelText('Ghế trống')).toHaveLength(4);
+  expect(screen.getByText('0/4 ghế đã có người')).toBeInTheDocument();
+});
+
+test('scheduled sessions count down; cancelled and ended ones do not', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-23T10:45:00.000Z'));
+  const startsAt = '2026-10-23T13:00:00.000Z';
+
+  render(<SessionCard session={{ ...s, startsAt }} onToggle={vi.fn()} pending={false} />);
+  expect(screen.getByText('còn 2 giờ 15 phút')).toBeInTheDocument();
+  cleanup();
+
+  render(<SessionCard session={{ ...s, startsAt, status: 'cancelled' }} onToggle={vi.fn()} pending={false} />);
+  expect(screen.queryByText(/^còn /)).not.toBeInTheDocument();
+  expect(screen.queryByText('Đang chơi')).not.toBeInTheDocument();
+  cleanup();
+
+  render(<SessionCard session={{ ...s, startsAt, status: 'ended' }} onToggle={vi.fn()} pending={false} />);
+  expect(screen.queryByText(/^còn /)).not.toBeInTheDocument();
+  expect(screen.queryByText('Đang chơi')).not.toBeInTheDocument();
+});
+
+test('a scheduled session past its start time says it is being played', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-23T13:30:00.000Z'));
+  render(<SessionCard session={{ ...s, startsAt: '2026-10-23T13:00:00.000Z' }} onToggle={vi.fn()} pending={false} />);
+  expect(screen.getByText('Đang chơi')).toBeInTheDocument();
+  expect(screen.queryByText(/^còn /)).not.toBeInTheDocument();
+});
+
+test('the countdown ticks every minute and stops ticking once unmounted', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-23T10:45:00.000Z'));
+  const { unmount } = render(<SessionCard session={{ ...s, startsAt: '2026-10-23T13:00:00.000Z' }} onToggle={vi.fn()} pending={false} />);
+  expect(screen.getByText('còn 2 giờ 15 phút')).toBeInTheDocument();
+
+  act(() => {
+    vi.advanceTimersByTime(60_000);
+  });
+  expect(screen.getByText('còn 2 giờ 14 phút')).toBeInTheDocument();
+
+  act(() => {
+    vi.advanceTimersByTime(134 * 60_000);
+  });
+  expect(screen.getByText('Đang chơi')).toBeInTheDocument();
+
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test('shows the reminder line only where the join button is', () => {
+  render(<SessionCard session={s} onToggle={vi.fn()} pending={false} />);
+  expect(screen.getByText('Nhắc qua email và DM trước 15 phút')).toBeInTheDocument();
+  cleanup();
+  render(<SessionCard session={{ ...s, status: 'ended' }} onToggle={vi.fn()} pending={false} />);
+  expect(screen.queryByText('Nhắc qua email và DM trước 15 phút')).not.toBeInTheDocument();
 });
 
 test('shows the error message near the button', () => {

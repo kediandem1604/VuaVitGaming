@@ -1,8 +1,8 @@
 /**
- * Trang Hôm nay: nhãn ngày, số người tham gia (đếm người khác nhau trên các buổi
- * chưa huỷ), các buổi chơi theo giờ với nút Tham gia / Huỷ tham gia, rồi Sảnh tri
- * ân hôm nay (trống thì Sảnh tri ân gần nhất — xem `HallSection`). "Hôm nay" là của
- * server (ngày VN): hai API đều gọi không kèm `date`.
+ * Trang Hôm nay: nhãn ngày (chữ nổi), số người tham gia (đếm người khác nhau trên các buổi
+ * chưa huỷ), các buổi chơi theo giờ vẽ như phòng chờ (`SessionCard`, hai cột từ `lg`),
+ * rồi Sảnh tri ân hôm nay (trống thì Sảnh tri ân gần nhất — xem `HallSection`). "Hôm nay"
+ * là của server (ngày VN): hai API đều gọi không kèm `date`.
  *
  * Điểm danh: không cập nhật lạc quan — sức chứa do server quyết — mà thay đúng
  * buổi đó trong cache bằng DTO trả về; lỗi thì hiện thông báo ngay dưới thẻ và tải
@@ -10,9 +10,11 @@
  */
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { Users } from 'lucide-react';
 import type { HallOfDayDto, SessionDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { DailyHall } from '../components/DailyHall';
+import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
 import { SessionCard } from '../components/SessionCard';
 import { formatDayLabel, formatDayMonth } from '../lib/format';
@@ -32,21 +34,28 @@ export function TodayPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">{dayLabel}</h1>
+      <header className="flex flex-col gap-1.5">
+        {/* Tiêu đề 30px ≥ 18px nên dùng được chữ nổi `text-raised` (spec §3.2). */}
+        <h1 className="text-raised text-3xl leading-none font-extrabold text-white">{dayLabel}</h1>
         {attendeeCount !== null && (
-          <p className="text-slate-600 dark:text-slate-400">{attendeeCount} người tham gia hôm nay</p>
+          <p className="flex items-center gap-1.5 text-night-300">
+            <Users aria-hidden="true" className="size-4 shrink-0" />
+            {`${attendeeCount} người tham gia hôm nay`}
+          </p>
         )}
       </header>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Buổi chơi hôm nay</h2>
+        <h2 className="text-xl leading-tight font-extrabold text-white">Buổi chơi hôm nay</h2>
         <QueryState query={sessions}>
           {(list) =>
             list.length === 0 ? (
-              <p className="text-slate-600 dark:text-slate-400">Hôm nay chưa có buổi chơi nào</p>
+              <EmptyState>
+                <p>Hôm nay chưa có buổi chơi nào</p>
+              </EmptyState>
             ) : (
-              <div className="flex flex-col gap-3">
+              // Hai cột từ `lg`; `items-start` để thẻ ngắn (đã huỷ) không bị kéo cao bằng thẻ bên cạnh.
+              <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
                 {sortByStart(list).map((session) => (
                   <TodaySession key={session.id} session={session} />
                 ))}
@@ -80,7 +89,7 @@ function HallSection({ hall }: { hall: UseQueryResult<HallOfDayDto> }) {
   if (latest !== null && recent.data && recent.data.sessions.length > 0) {
     return (
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Sảnh tri ân gần nhất — {formatDayMonth(latest)}</h2>
+        <h2 className="text-xl leading-tight font-extrabold text-white">Sảnh tri ân gần nhất — {formatDayMonth(latest)}</h2>
         <DailyHall data={recent.data} />
       </section>
     );
@@ -89,9 +98,9 @@ function HallSection({ hall }: { hall: UseQueryResult<HallOfDayDto> }) {
   const lookingBack = todayEmpty && (dates.isPending || (latest !== null && recent.isPending));
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Sảnh tri ân hôm nay</h2>
+      <h2 className="text-xl leading-tight font-extrabold text-white">Sảnh tri ân hôm nay</h2>
       {lookingBack ? (
-        <p className="text-slate-500 dark:text-slate-400">Đang tải…</p>
+        <p className="text-night-300">Đang tải…</p>
       ) : (
         <QueryState query={hall}>{(data) => <DailyHall data={data} emptyMessage="Chưa có kết quả vote hôm nay" />}</QueryState>
       )}
