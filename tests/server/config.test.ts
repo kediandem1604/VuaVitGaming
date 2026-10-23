@@ -52,3 +52,15 @@ test('dev login only on localhost', () => {
   expect(loadConfig({ ...base, DEV_LOGIN: '1' }).devLogin).toBe(true);
   expect(loadConfig({ ...base, DEV_LOGIN: '1', PUBLIC_URL: 'https://ggd.example.com' }).devLogin).toBe(false);
 });
+
+test('PUBLIC_URL is normalised without trailing slashes', () => {
+  expect(loadConfig({ ...base, PUBLIC_URL: 'https://ggd.example.com/' }).publicUrl).toBe('https://ggd.example.com');
+  expect(loadConfig({ ...base, PUBLIC_URL: 'https://ggd.example.com///' }).publicUrl).toBe('https://ggd.example.com');
+  expect(loadConfig({ ...base, PUBLIC_URL: 'https://example.com/ggd/' }).publicUrl).toBe('https://example.com/ggd');
+  expect(loadConfig({ ...base, PUBLIC_URL: 'https://ggd.example.com' }).publicUrl).toBe('https://ggd.example.com');
+  // Dev login vẫn nhận ra localhost sau khi bỏ dấu `/`.
+  expect(loadConfig({ ...base, DEV_LOGIN: '1', PUBLIC_URL: 'http://localhost:3000/' })).toMatchObject({
+    publicUrl: 'http://localhost:3000',
+    devLogin: true,
+  });
+});

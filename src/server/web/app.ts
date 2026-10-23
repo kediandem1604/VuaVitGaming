@@ -1,7 +1,8 @@
 /**
- * Vỏ Fastify: cookie, giới hạn tốc độ, guard JSON cho thao tác ghi, ánh xạ lỗi
+ * Vỏ Fastify: cookie, giới hạn tốc độ (chỉ /api và /auth), guard JSON cho thao tác ghi, ánh xạ lỗi
  * sang `{ error: { code, message } }`, 404 JSON cho /api và /auth, file tĩnh +
- * index.html cho web. Mọi route sau này đăng ký vào đây.
+ * index.html cho web, header bảo mật cho mọi phản hồi, log không kèm query string.
+ * Mọi route sau này đăng ký vào đây.
  *
  * `buildApp` trả app CHƯA `ready()` và chưa lắng nghe, để test còn gắn thêm route.
  */
@@ -50,8 +51,9 @@ function trustProxyHops(hops: number): (address: string, hop: number) => boolean
 }
 
 export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: deps.logger ?? false, trustProxy: trustProxyHops(ctx.config.trustProxyHops) });
+  const app = Fastify({ logger: loggerOptions(deps.logger), trustProxy: trustProxyHops(ctx.config.trustProxyHops) });
   installAuth(app, ctx);
+  app.addHook('onSend', securityHeaders);
 
   app.setErrorHandler((err, request, reply) => sendError(err, request, reply));
   app.setNotFoundHandler((request, reply) => sendNotFound(request, reply, deps.webDistDir !== undefined));
@@ -60,6 +62,9 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(fastifyRateLimit, {
     max: RATE_LIMIT_PER_MINUTE,
     timeWindow: '1 minute',
+    // Chỉ API và đăng nhập: file tĩnh và trang SPA không tính, vì nhiều người sau một NAT
+    // (CGNAT di động) chung một IP — tải trang thôi cũng đủ làm cả nhóm bị chặn "Tham gia".
+    allowList: (request) => !isApiOrAuth(pathOf(request)),
     errorResponseBuilder: () => appError('RATE_LIMITED', 'Bạn thao tác quá nhanh, thử lại sau'),
   });
 
@@ -83,6 +88,44 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   }
 
   return app;
+}
+
+// ---------------------------------------------------------------------------
+// Log và header
+// ---------------------------------------------------------------------------
+
+/**
+ * Logger của Fastify với bộ chuyển `req` riêng: đường dẫn KHÔNG kèm query string, vì
+ * query có thể chứa bí mật (mã và state OAuth ở `/auth/callback`) hay dữ liệu người dùng
+ * (ô tìm kiếm). Giữ `remoteAddress` (IP đã qua `trustProxy`) để kiểm tra `TRUST_PROXY_HOPS`.
+ */
+function loggerOptions(logger: AppDeps['logger']): FastifyServerOptions['logger'] {
+  if (!logger) return false;
+  const base = logger === true ? {} : logger;
+  return { ...base, serializers: { ...base.serializers, req: serializeRequest as never } };
+}
+
+export function serializeRequest(request: FastifyRequest): Record<string, unknown> {
+  return {
+    method: request.method,
+    url: pathOf(request),
+    host: request.host,
+    remoteAddress: request.ip,
+    remotePort: request.socket?.remotePort,
+  };
+}
+
+const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'content-security-policy': "frame-ancestors 'none'",
+  'referrer-policy': 'same-origin',
+};
+
+/** Mọi phản hồi (API, lỗi, file tĩnh, SPA, chuyển hướng): không cho nhúng trong iframe, không đoán kiểu, không lộ URL ra ngoài. */
+async function securityHeaders(_request: FastifyRequest, reply: FastifyReply, payload: unknown): Promise<unknown> {
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) reply.header(name, value);
+  return payload;
 }
 
 // ---------------------------------------------------------------------------

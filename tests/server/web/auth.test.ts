@@ -3,7 +3,8 @@ import type { LightMyRequestResponse } from 'fastify';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { Writable } from 'node:stream';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../../src/server/ctx.js';
 import type { OAuthClient, OAuthProfile } from '../../../src/server/modules/auth/oauth.js';
 import {
@@ -19,6 +20,7 @@ import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
 import { createMember } from '../../helpers/factories.js';
 import type { FakeDirectory } from '../../helpers/fakes.js';
+import { patchDelegate } from '../../helpers/prisma.js';
 
 /** OAuth giả: `profiles` ánh xạ mã → hồ sơ; mã lạ thì ném lỗi như Discord từ chối. */
 class FakeOAuth implements OAuthClient {
@@ -52,7 +54,21 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.close();
+  vi.restoreAllMocks();
 });
+
+/** Thư mục build web giả (index.html + một file JS) cho `fn`; xoá khi xong. */
+async function withWebBuild(fn: (dir: string) => Promise<void>): Promise<void> {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ggd-web-'));
+  try {
+    writeFileSync(path.join(dir, 'index.html'), '<!doctype html><title>GGD Hub</title>');
+    mkdirSync(path.join(dir, 'assets'));
+    writeFileSync(path.join(dir, 'assets', 'app.js'), 'console.log(1)');
+    await fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 const guildInfo = (discordId: string, roleIds: string[] = []): GuildMemberInfo => ({
   discordId,
@@ -189,6 +205,50 @@ test('oauth exchange failure redirects to /login?error=oauth', async () => {
   expect(oauth.exchanged).toEqual(['unknown']);
 });
 
+test('a failure after the code exchange (e.g. creating the web session) redirects to /login?error=oauth', async () => {
+  await app.ready();
+  oauth.profiles.set('code-ok', { discordId: '42', email: null, emailVerified: false });
+  directory.members.set('42', guildInfo('42'));
+  const restore = patchDelegate(testDb.webSession, 'create', () => (() => Promise.reject(new Error('db hiccup'))) as never);
+  let res: LightMyRequestResponse;
+  try {
+    res = await app.inject({ url: '/auth/callback?code=code-ok&state=s', cookies: { ggd_oauth_state: app.signCookie('s') } });
+  } finally {
+    restore();
+  }
+  expect(res.statusCode).toBe(302);
+  expect(res.headers.location).toBe('/login?error=oauth');
+  expect(cookieNamed(res, 'ggd_sid')).toBeUndefined();
+  expect(await testDb.webSession.count()).toBe(0);
+});
+
+test('request logs never contain the OAuth code or state (query strings are dropped), but keep the client IP', async () => {
+  const lines: string[] = [];
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      lines.push(chunk.toString('utf8'));
+      done();
+    },
+  });
+  const logged = await buildApp(ctx, { oauth, logger: { level: 'info', stream } });
+  try {
+    await logged.ready();
+    await logged.inject({
+      url: '/auth/callback?code=SECRET-CODE-123&state=SECRET-STATE-456',
+      remoteAddress: '203.0.113.9',
+      cookies: { ggd_oauth_state: logged.signCookie('other') },
+    });
+    await logged.inject({ url: '/api/admin/members?q=ten-rieng-tu' });
+  } finally {
+    await logged.close();
+  }
+  const text = lines.join('');
+  expect(text).toContain('"url":"/auth/callback"');
+  expect(text).toContain('"url":"/api/admin/members"');
+  expect(text).toContain('"remoteAddress":"203.0.113.9"');
+  for (const secret of ['SECRET-CODE-123', 'SECRET-STATE-456', 'ten-rieng-tu']) expect(text).not.toContain(secret);
+});
+
 test('not in guild', async () => {
   await app.ready();
   // Người từng là thành viên nhưng nay không còn trong server: bị đánh dấu rời hội.
@@ -278,11 +338,14 @@ test('unverified oauth email is not stored', async () => {
   expect((await getMe(sid)).json()).toMatchObject({ email: null });
 });
 
-test('directory down falls back to active DB member', async () => {
+test('directory down falls back to active DB member, with a warning naming the error', async () => {
   await createMember(testDb, { discordId: '1', displayName: 'Đã có', accessLevel: 'admin' });
   directory.down = true;
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
   const sid = await loginAs('1');
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(String(warn.mock.calls[0]?.[0])).toContain('FakeDirectory: Discord đang sập');
   expect((await getMe(sid)).json()).toMatchObject({
     memberCode: 'GGD-0001',
     displayName: 'Đã có',
@@ -612,6 +675,51 @@ test('rate limit keys on the IP the trusted proxy appended, not one the client s
 
   // Người dùng thật khác (proxy nối IP khác) là xô khác.
   expect((await viaProxy('/api/me', '1.2.3.4', '203.0.113.8')).statusCode).toBe(401);
+});
+
+test('static files and the SPA fallback do not use up the API rate limit (shared IPs, CGNAT)', async () => {
+  await withWebBuild(async (dir) => {
+    const web = await buildApp(ctx, { oauth, webDistDir: dir });
+    try {
+      for (let i = 0; i < 130; i += 1) expect((await web.inject({ url: '/' })).statusCode).toBe(200);
+      for (const url of ['/assets/app.js', '/hom-nay', '/tri-an?ngay=2026-10-22']) {
+        for (let i = 0; i < 5; i += 1) expect((await web.inject({ url })).statusCode, url).toBe(200);
+      }
+      expect((await web.inject({ url: '/api/me' })).statusCode).toBe(401);
+      // /auth vẫn tính vào giới hạn (đã dùng 1 lượt cho /api/me ở trên).
+      for (let i = 0; i < 119; i += 1) await web.inject({ url: '/auth/login' });
+      expect((await web.inject({ url: '/auth/login' })).statusCode).toBe(429);
+    } finally {
+      await web.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Header bảo mật
+// ---------------------------------------------------------------------------
+
+test('every response carries the security headers', async () => {
+  await withWebBuild(async (dir) => {
+    const web = await buildApp(ctx, { oauth, webDistDir: dir });
+    try {
+      const urls = ['/', '/assets/app.js', '/hom-nay', '/api/me', '/api/nope', '/auth/login', '/healthz'];
+      const responses = [];
+      for (const url of urls) responses.push(await web.inject({ url }));
+      responses.push(await web.inject({ method: 'POST', url: '/api/me', payload: 'x', headers: { 'content-type': 'text/plain' } }));
+      expect(responses.map((r) => r.statusCode)).toEqual([200, 200, 200, 401, 404, 302, 200, 415]);
+      for (const [i, res] of responses.entries()) {
+        expect(res.headers, urls[i] ?? 'POST /api/me').toMatchObject({
+          'x-content-type-options': 'nosniff',
+          'x-frame-options': 'DENY',
+          'content-security-policy': "frame-ancestors 'none'",
+          'referrer-policy': 'same-origin',
+        });
+      }
+    } finally {
+      await web.close();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

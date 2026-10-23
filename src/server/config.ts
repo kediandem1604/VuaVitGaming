@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export type Config = {
   port: number;
+  /** Không bao giờ có `/` cuối (đã bỏ khi đọc cấu hình). */
   publicUrl: string;
   sessionSecret: string;
   devLogin: boolean;
@@ -94,11 +95,13 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
   }
 
   const e = parsed.data;
+  // Không có `/` cuối: link trong DM/email (`${publicUrl}/ho-so`) và callback OAuth không bị `//`.
+  const publicUrl = e.PUBLIC_URL.replace(/\/+$/, '');
   return {
     port: e.PORT,
-    publicUrl: e.PUBLIC_URL,
+    publicUrl,
     sessionSecret: e.SESSION_SECRET,
-    devLogin: e.DEV_LOGIN === '1' && e.PUBLIC_URL.startsWith('http://localhost'),
+    devLogin: e.DEV_LOGIN === '1' && publicUrl.startsWith('http://localhost'),
     trustProxyHops: e.TRUST_PROXY_HOPS,
     databaseUrl: e.DATABASE_URL,
     discord: {

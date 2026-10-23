@@ -60,11 +60,18 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRoutesOptions):
       return fail('oauth');
     }
 
-    const member = await loginFromDiscord(ctx, profile);
-    if (!member) return fail('not_member');
-
-    const session = await createWebSession(ctx, member.id);
-    setSessionCookie(reply, session.id);
+    // Sau khi đổi mã, lỗi bất kỳ (DB trục trặc khi đồng bộ hồ sơ hay tạo phiên…) cũng chỉ
+    // là "đăng nhập thất bại, thử lại" — ghi log ở server, không bao giờ là trang lỗi 500.
+    let sessionId: string;
+    try {
+      const member = await loginFromDiscord(ctx, profile);
+      if (!member) return fail('not_member');
+      sessionId = (await createWebSession(ctx, member.id)).id;
+    } catch (err) {
+      request.log.error({ err }, 'Đăng nhập Discord lỗi sau khi đổi mã');
+      return fail('oauth');
+    }
+    setSessionCookie(reply, sessionId);
     return reply.redirect('/');
   });
 

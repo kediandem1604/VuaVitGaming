@@ -32,7 +32,10 @@ async function memberFromGuild(ctx: Ctx, discordId: string): Promise<Member | nu
   let info: GuildMemberInfo | null;
   try {
     info = await ctx.directory.getMember(discordId);
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[auth] Không hỏi được danh bạ Discord cho ${discordId} — dùng hồ sơ trong database: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return findActiveMember(ctx, discordId);
   }
   if (!info) {
