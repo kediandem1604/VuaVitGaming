@@ -157,6 +157,52 @@ test('the end dialog pre-ticks always/mode categories and posts the ticked ids',
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 });
 
+test('the end dialog takes focus on open, traps Tab, and hands focus back to Kết thúc on Escape', async () => {
+  stubFetch(baseRoutes);
+  renderTab();
+
+  const scheduled = await screen.findByRole('article', { name: '21:00 Cổ điển (Classic)' });
+  const trigger = within(scheduled).getByRole('button', { name: 'Kết thúc' });
+  trigger.focus();
+  fireEvent.click(trigger);
+
+  const dialog = await screen.findByRole('dialog', { name: 'Kết thúc buổi 21:00 Cổ điển (Classic)' });
+  // Tiêu điểm vào trong hộp ngay khi mở (nội dung còn đang tải → chính hộp nhận).
+  expect(dialog.contains(document.activeElement)).toBe(true);
+
+  // Khi hạng mục tới: Tab từ phần tử cuối quay về phần tử đầu, Shift+Tab ngược lại.
+  const first = await within(dialog).findByRole('checkbox', { name: /Giết nhiều nhất/ });
+  const last = within(dialog).getByRole('button', { name: 'Đóng' });
+  last.focus();
+  fireEvent.keyDown(last, { key: 'Tab' });
+  expect(first).toHaveFocus();
+  fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+  expect(last).toHaveFocus();
+
+  fireEvent.keyDown(last, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(trigger).toHaveFocus();
+});
+
+test('closing the end dialog with Đóng also restores focus to the trigger', async () => {
+  stubFetch(baseRoutes);
+  renderTab();
+
+  const scheduled = await screen.findByRole('article', { name: '21:00 Cổ điển (Classic)' });
+  const trigger = within(scheduled).getByRole('button', { name: 'Kết thúc' });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const dialog = await screen.findByRole('dialog', { name: 'Kết thúc buổi 21:00 Cổ điển (Classic)' });
+  // Như một cú bấm chuột thật: nút Đóng nhận tiêu điểm rồi mới bấm.
+  const close = await within(dialog).findByRole('button', { name: 'Đóng' });
+  close.focus();
+  expect(close).toHaveFocus();
+  fireEvent.click(close);
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(trigger).toHaveFocus();
+});
+
 test('Huỷ buổi and Đóng vote sớm ask for confirmation before posting', async () => {
   const fetchMock = stubFetch({
     ...baseRoutes,

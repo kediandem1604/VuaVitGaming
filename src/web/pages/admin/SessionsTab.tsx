@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import type { EndOptionDto, ModeDto, OpenVoteRoundDto, SessionDto } from '../../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../../api';
+import { Modal } from '../../components/Modal';
 import { QueryState } from '../../components/QueryState';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatDayLabel, formatTime, vnTodayIso } from '../../lib/format';
@@ -292,7 +293,10 @@ interface EndDialogProps {
   onClose: () => void;
 }
 
-/** Hộp chọn hạng mục mở vote; tick sẵn theo `preselected`, admin tick thêm hạng mục tuỳ chọn. */
+/**
+ * Hộp chọn hạng mục mở vote; tick sẵn theo `preselected`, admin tick thêm hạng mục tuỳ
+ * chọn. Tiêu điểm (vào hộp khi mở, bẫy Tab, trả về nút "Kết thúc" khi đóng) do `Modal` lo.
+ */
 function EndDialog({ session, label, onClose }: EndDialogProps) {
   const queryClient = useQueryClient();
   const titleId = useId();
@@ -314,14 +318,6 @@ function EndDialog({ session, label, onClose }: EndDialogProps) {
     },
   });
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const toggle = (optionId: number) => {
     const next = new Set(ticked);
     if (next.has(optionId)) next.delete(optionId);
@@ -336,54 +332,46 @@ function EndDialog({ session, label, onClose }: EndDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-slate-900/50 p-4 sm:items-center" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="card flex w-full max-w-md flex-col gap-3"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h3 id={titleId} className="text-lg font-semibold">
-          Kết thúc buổi {label}
-        </h3>
-        <p className="text-sm text-slate-600 dark:text-slate-400">Chọn hạng mục mở vote. Không tick gì thì buổi kết thúc mà không mở vote.</p>
-        <QueryState query={options}>
-          {(list) => (
-            <form noValidate onSubmit={onSubmit} className="flex flex-col gap-3">
-              {list.length === 0 ? (
-                <p className="text-sm text-slate-600 dark:text-slate-400">Không có hạng mục nào đang bật</p>
-              ) : (
-                <ul className="flex flex-col gap-1">
-                  {list.map((option) => (
-                    <li key={option.id}>
-                      <label className="flex items-center gap-2 py-1">
-                        <input type="checkbox" className="size-4 accent-goose" checked={ticked.has(option.id)} onChange={() => toggle(option.id)} />
-                        <span className="min-w-0 flex-1">{option.name}</span>
-                        <span className="text-xs text-slate-500 dark:text-slate-400">{SCOPE_NOTE[option.scope]}</span>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <button type="submit" className="btn-primary" disabled={end.isPending}>
-                  {end.isPending ? 'Đang kết thúc…' : 'Kết thúc buổi'}
-                </button>
-                <button type="button" className="btn-secondary" disabled={end.isPending} onClick={onClose}>
-                  Đóng
-                </button>
-              </div>
-              {end.isError && (
-                <p role="alert" className="text-sm text-duck">
-                  {errorMessage(end.error)}
-                </p>
-              )}
-            </form>
-          )}
-        </QueryState>
-      </div>
-    </div>
+    <Modal titleId={titleId} onClose={onClose}>
+      <h3 id={titleId} className="text-lg font-semibold">
+        Kết thúc buổi {label}
+      </h3>
+      <p className="text-sm text-slate-600 dark:text-slate-400">Chọn hạng mục mở vote. Không tick gì thì buổi kết thúc mà không mở vote.</p>
+      <QueryState query={options}>
+        {(list) => (
+          <form noValidate onSubmit={onSubmit} className="flex flex-col gap-3">
+            {list.length === 0 ? (
+              <p className="text-sm text-slate-600 dark:text-slate-400">Không có hạng mục nào đang bật</p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {list.map((option) => (
+                  <li key={option.id}>
+                    <label className="flex items-center gap-2 py-1">
+                      <input type="checkbox" className="size-4 accent-goose" checked={ticked.has(option.id)} onChange={() => toggle(option.id)} />
+                      <span className="min-w-0 flex-1">{option.name}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{SCOPE_NOTE[option.scope]}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button type="submit" className="btn-primary" disabled={end.isPending}>
+                {end.isPending ? 'Đang kết thúc…' : 'Kết thúc buổi'}
+              </button>
+              <button type="button" className="btn-secondary" disabled={end.isPending} onClick={onClose}>
+                Đóng
+              </button>
+            </div>
+            {end.isError && (
+              <p role="alert" className="text-sm text-duck">
+                {errorMessage(end.error)}
+              </p>
+            )}
+          </form>
+        )}
+      </QueryState>
+    </Modal>
   );
 }
 
