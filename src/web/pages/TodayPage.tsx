@@ -8,11 +8,11 @@
  * lại danh sách để thẻ phản ánh trạng thái thật (đã đủ người, đã huỷ…).
  */
 
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { HallOfDayDto, SessionDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { DailyHall } from '../components/DailyHall';
+import { QueryState } from '../components/QueryState';
 import { SessionCard } from '../components/SessionCard';
 import { formatDayLabel } from '../lib/format';
 
@@ -82,29 +82,6 @@ function TodaySession({ session }: { session: SessionDto }) {
       onToggle={(going) => attendance.mutate(going)}
     />
   );
-}
-
-interface QueryStateProps<T> {
-  query: UseQueryResult<T>;
-  children: (data: T) => ReactNode;
-}
-
-/** Đang tải / lỗi (kèm Thử lại) / có dữ liệu. Có dữ liệu cũ thì vẫn hiện dữ liệu khi tải lại lỗi. */
-function QueryState<T>({ query, children }: QueryStateProps<T>) {
-  if (query.data !== undefined) return <>{children(query.data)}</>;
-  if (query.isError) {
-    return (
-      <div className="flex flex-col items-start gap-2">
-        <p role="alert" className="text-duck">
-          {errorMessage(query.error)}
-        </p>
-        <button type="button" className="btn-secondary" onClick={() => void query.refetch()}>
-          Thử lại
-        </button>
-      </div>
-    );
-  }
-  return <p className="text-slate-500 dark:text-slate-400">Đang tải…</p>;
 }
 
 function sortByStart(list: SessionDto[]): SessionDto[] {

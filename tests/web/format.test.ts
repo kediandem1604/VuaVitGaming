@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { formatDateLabel, formatDayLabel, formatTime } from '../../src/web/lib/format';
+import { formatDateLabel, formatDayLabel, formatSeasonLabel, formatTime } from '../../src/web/lib/format';
 
 test('formatTime renders the Vietnam wall clock as HH:mm', () => {
   expect(formatTime('2026-10-22T14:00:00.000Z')).toBe('21:00');
@@ -24,4 +24,9 @@ test('formatDayLabel of a Date uses the Vietnam day, not UTC', () => {
 test('formatDateLabel renders YYYY-MM-DD as dd/MM/yyyy', () => {
   expect(formatDateLabel('2026-10-22')).toBe('22/10/2026');
   expect(formatDateLabel('2026-01-03')).toBe('03/01/2026');
+});
+
+test('formatSeasonLabel renders a YYYY-MM season as Tháng M/yyyy', () => {
+  expect(formatSeasonLabel('2026-10')).toBe('Tháng 10/2026');
+  expect(formatSeasonLabel('2026-01')).toBe('Tháng 1/2026');
 });

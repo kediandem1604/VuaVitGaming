@@ -70,3 +70,9 @@ export function formatDateLabel(date: string): string {
   const { day, month, year } = parts(dateFormat, vnDateToInstant(date));
   return `${day}/${month}/${year}`;
 }
+
+/** Mã mùa `YYYY-MM` → `Tháng 10/2026` (tháng không đệm số 0). */
+export function formatSeasonLabel(seasonId: string): string {
+  const [year = '', month = ''] = seasonId.split('-');
+  return `Tháng ${Number(month)}/${year}`;
+}

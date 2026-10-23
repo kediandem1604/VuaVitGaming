@@ -9,6 +9,8 @@ import { BrowserRouter, Outlet, Route, Routes } from 'react-router';
 import { ApiError, errorMessage } from './api';
 import { Layout } from './components/Layout';
 import { useCurrentMember, useMe } from './hooks/useMe';
+import { HallPage } from './pages/HallPage';
+import { LeaderboardPage } from './pages/LeaderboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { MvpPage } from './pages/MvpPage';
 import { ForbiddenPage, NotFoundPage, PlaceholderPage } from './pages/PlaceholderPage';
@@ -22,8 +24,8 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<Shell />}>
           <Route index element={<TodayPage />} />
-          <Route path="dai-sanh" element={<PlaceholderPage title="Đại sảnh hoá thân" />} />
-          <Route path="bang-xep-hang" element={<PlaceholderPage title="Bảng xếp hạng" />} />
+          <Route path="dai-sanh" element={<HallPage />} />
+          <Route path="bang-xep-hang" element={<LeaderboardPage />} />
           <Route path="tri-an" element={<MvpPage />} />
           <Route path="khai-diem" element={<PlaceholderPage title="Khai điểm" />} />
           <Route path="ho-so" element={<ProfilePage />} />
