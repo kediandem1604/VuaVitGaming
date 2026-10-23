@@ -66,14 +66,15 @@ export function Modal({ titleId, onClose, children }: ModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-slate-900/50 p-4 sm:items-center" onClick={onClose}>
+    // Lớp phủ `night-950` mờ 70%; hộp là `panel` (viền đậm) — spec §5.4.
+    <div className="fixed inset-0 z-20 flex items-end justify-center bg-night-950/70 p-4 sm:items-center" onClick={onClose}>
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="card flex max-h-full w-full max-w-md flex-col gap-3 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-goose/50"
+        className="panel flex max-h-full w-full max-w-md flex-col gap-3 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={onKeyDown}
       >
