@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { HallOfDayDto } from '../../src/shared/api-types';
+import { vnTodayIso } from '../../src/web/lib/format';
 import { MvpPage } from '../../src/web/pages/MvpPage';
 
 const halls: Record<string, HallOfDayDto> = {
@@ -23,6 +24,17 @@ const halls: Record<string, HallOfDayDto> = {
         sessionId: 5,
         label: 'Săn ngỗng 20:00',
         awards: [{ categoryName: 'Ngỗng chạy giỏi nhất', winners: [{ memberId: 2, displayName: 'Vịt Hai', avatarUrl: null, voteCount: 4 }] }],
+      },
+    ],
+  },
+  // Quá 30 ngày gần nhất: không có nút ngày, chỉ tới được bằng ô chọn ngày.
+  '2026-08-15': {
+    date: '2026-08-15',
+    sessions: [
+      {
+        sessionId: 2,
+        label: 'Đua nhiệm vụ 22:00',
+        awards: [{ categoryName: 'Giết nhiều nhất', winners: [{ memberId: 3, displayName: 'Ngỗng Ba', avatarUrl: null, voteCount: 1 }] }],
       },
     ],
   },
@@ -102,4 +114,38 @@ test('no results at all shows the empty copy', async () => {
   renderAt('/tri-an');
   expect(await screen.findByText('Chưa có kết quả tri ân nào')).toBeInTheDocument();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});
+
+test('a date picker reaches any past day (up to today) and keeps it in ?ngay=', async () => {
+  stubFetch(['2026-10-22', '2026-10-20']);
+  renderAt('/tri-an');
+  await screen.findByRole('heading', { level: 3, name: 'Cổ điển 21:00' });
+
+  const picker = screen.getByLabelText('Chọn ngày khác');
+  expect(picker).toHaveAttribute('type', 'date');
+  expect(picker).toHaveAttribute('max', vnTodayIso());
+  expect(picker).toHaveValue('2026-10-22');
+
+  fireEvent.change(picker, { target: { value: '2026-08-15' } });
+  expect(await screen.findByRole('heading', { level: 3, name: 'Đua nhiệm vụ 22:00' })).toBeInTheDocument();
+  expect(screen.getByTestId('location')).toHaveTextContent('/tri-an?ngay=2026-08-15');
+  expect(screen.getByRole('heading', { level: 2, name: 'Thứ Bảy, 15/08' })).toBeInTheDocument();
+  expect(picker).toHaveValue('2026-08-15');
+  // Không nút ngày nào đang chọn (ngày đó không nằm trong danh sách gần đây).
+  for (const chip of screen.getAllByRole('button')) expect(chip).toHaveAttribute('aria-pressed', 'false');
+
+  // Xoá ô chọn ngày thì giữ nguyên ngày đang xem.
+  fireEvent.change(picker, { target: { value: '' } });
+  expect(screen.getByTestId('location')).toHaveTextContent('/tri-an?ngay=2026-08-15');
+});
+
+test('an impossible ?ngay= (2026-13-45, 2026-02-30) counts as no selection and never reaches the API', async () => {
+  for (const bad of ['2026-13-45', '2026-02-30']) {
+    const fetchMock = stubFetch(['2026-10-22']);
+    renderAt(`/tri-an?ngay=${bad}`);
+    expect(await screen.findByRole('heading', { level: 3, name: 'Cổ điển 21:00' })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining(bad), expect.anything());
+    cleanup();
+    vi.unstubAllGlobals();
+  }
 });

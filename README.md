@@ -324,7 +324,7 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 
 - Vào server Discord → bot gửi **DM chào mừng** kèm **mã thành viên** (`GGD-0001`, `GGD-0002`… cấp một lần, không dùng lại) và link web. Rời server thì hồ sơ chuyển "đã rời" nhưng giữ lịch sử; quay lại giữ mã cũ.
 - Web: **Đăng nhập bằng Discord** (chỉ người đang ở trong server). Lần đầu, email Discord đã xác minh được lưu vào hồ sơ; vào **Hồ sơ** để sửa email hoặc tắt/bật nhắc qua **email** / **DM**.
-- Các trang: **Hôm nay** (buổi chơi, nút tham gia, Sảnh tri ân hôm nay), **Đại sảnh hoá thân**, **Bảng xếp hạng**, **Tri ân** (lịch sử theo ngày), **Khai điểm**, **Hồ sơ**. Mod/admin có thêm **Quản trị**.
+- Các trang: **Hôm nay** (buổi chơi, nút tham gia, Sảnh tri ân hôm nay — sáng sớm chưa có kết quả thì hiện sảnh gần nhất), **Đại sảnh hoá thân**, **Bảng xếp hạng**, **Tri ân** (lịch sử theo ngày: 30 ngày gần nhất có kết quả, ngày cũ hơn thì dùng ô **Chọn ngày khác**), **Khai điểm**, **Hồ sơ**. Mod/admin có thêm **Quản trị**.
 - Lệnh slash trong server: `/baocao` khai điểm (gõ vài chữ tên role là có gợi ý, không cần dấu), `/bxh <role>` top 10 role tháng này, `/hoso` mã thành viên + role đang giữ + link web.
 
 ### Một buổi chơi, từ đầu đến cuối (admin/mod)

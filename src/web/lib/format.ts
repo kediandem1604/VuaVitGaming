@@ -74,6 +74,24 @@ export function formatDateLabel(date: string | Date): string {
   return `${day}/${month}/${year}`;
 }
 
+/** `22/10` của một ngày VN `YYYY-MM-DD`. */
+export function formatDayMonth(date: string): string {
+  const { day, month } = parts(dateFormat, vnDateToInstant(date));
+  return `${day}/${month}`;
+}
+
+/**
+ * Chuỗi `YYYY-MM-DD` là một ngày có thật trên lịch (`2026-02-30`, `2026-13-45` thì không).
+ * Thuần số học lịch, không dính múi giờ.
+ */
+export function isIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 /** Mã mùa `YYYY-MM` → `Tháng 10/2026` (tháng không đệm số 0). */
 export function formatSeasonLabel(seasonId: string): string {
   const [year = '', month = ''] = seasonId.split('-');

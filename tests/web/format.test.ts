@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { addDaysIso, formatDateLabel, formatDayLabel, formatSeasonLabel, formatTime, vnTodayIso } from '../../src/web/lib/format';
+import { addDaysIso, formatDateLabel, formatDayLabel, formatDayMonth, formatSeasonLabel, formatTime, isIsoDate, vnTodayIso } from '../../src/web/lib/format';
 
 test('formatTime renders the Vietnam wall clock as HH:mm', () => {
   expect(formatTime('2026-10-22T14:00:00.000Z')).toBe('21:00');
@@ -50,4 +50,15 @@ test('addDaysIso shifts a YYYY-MM-DD across month and year boundaries', () => {
   expect(addDaysIso('2026-12-31', 1)).toBe('2027-01-01');
   expect(addDaysIso('2026-03-01', -1)).toBe('2026-02-28');
   expect(addDaysIso('2026-10-22', 0)).toBe('2026-10-22');
+});
+
+test('formatDayMonth renders YYYY-MM-DD as dd/MM', () => {
+  expect(formatDayMonth('2026-10-21')).toBe('21/10');
+  expect(formatDayMonth('2026-01-05')).toBe('05/01');
+});
+
+test('isIsoDate accepts only real calendar days in YYYY-MM-DD form', () => {
+  for (const ok of ['2026-10-22', '2024-02-29', '2026-12-31', '2026-01-01']) expect(isIsoDate(ok), ok).toBe(true);
+  for (const bad of ['2026-13-45', '2026-02-30', '2025-02-29', '2026-00-10', '2026-10-32', '2026-1-5', 'hom-qua', '', '2026-10-22T00:00'])
+    expect(isIsoDate(bad), bad).toBe(false);
 });

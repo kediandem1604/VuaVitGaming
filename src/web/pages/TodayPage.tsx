@@ -1,23 +1,26 @@
 /**
  * Trang Hôm nay: nhãn ngày, số người tham gia (đếm người khác nhau trên các buổi
  * chưa huỷ), các buổi chơi theo giờ với nút Tham gia / Huỷ tham gia, rồi Sảnh tri
- * ân hôm nay. "Hôm nay" là của server (ngày VN): hai API đều gọi không kèm `date`.
+ * ân hôm nay (trống thì Sảnh tri ân gần nhất — xem `HallSection`). "Hôm nay" là của
+ * server (ngày VN): hai API đều gọi không kèm `date`.
  *
  * Điểm danh: không cập nhật lạc quan — sức chứa do server quyết — mà thay đúng
  * buổi đó trong cache bằng DTO trả về; lỗi thì hiện thông báo ngay dưới thẻ và tải
  * lại danh sách để thẻ phản ánh trạng thái thật (đã đủ người, đã huỷ…).
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { HallOfDayDto, SessionDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { DailyHall } from '../components/DailyHall';
 import { QueryState } from '../components/QueryState';
 import { SessionCard } from '../components/SessionCard';
-import { formatDayLabel } from '../lib/format';
+import { formatDayLabel, formatDayMonth } from '../lib/format';
 
 export const SESSIONS_TODAY_KEY = ['sessions', 'today'] as const;
 export const HALL_TODAY_KEY = ['mvp', 'day', 'today'] as const;
+/** Cùng khoá với trang Tri ân: dùng chung cache. */
+const MVP_DATES_KEY = ['mvp', 'dates'] as const;
 
 export function TodayPage() {
   const sessions = useQuery({ queryKey: SESSIONS_TODAY_KEY, queryFn: () => apiGet<SessionDto[]>('/api/sessions') });
@@ -53,11 +56,46 @@ export function TodayPage() {
         </QueryState>
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Sảnh tri ân hôm nay</h2>
-        <QueryState query={hall}>{(data) => <DailyHall data={data} emptyMessage="Chưa có kết quả vote hôm nay" />}</QueryState>
-      </section>
+      <HallSection hall={hall} />
     </div>
+  );
+}
+
+/**
+ * Sảnh tri ân hôm nay; hôm nay chưa có kết quả thì hiện ngày gần nhất có kết quả
+ * (`/api/mvp/dates`[0]) dưới tiêu đề "Sảnh tri ân gần nhất — dd/MM": vote buổi tối đóng
+ * sáng hôm sau và được xếp vào ngày của buổi chơi, nên buổi sáng "hôm nay" thường trống.
+ * Lịch sử chỉ được hỏi khi hôm nay trống; lỗi khi hỏi thì vẫn hiện sảnh hôm nay (trống).
+ */
+function HallSection({ hall }: { hall: UseQueryResult<HallOfDayDto> }) {
+  const todayEmpty = hall.data !== undefined && hall.data.sessions.length === 0;
+  const dates = useQuery({ queryKey: MVP_DATES_KEY, queryFn: () => apiGet<string[]>('/api/mvp/dates'), enabled: todayEmpty });
+  const latest = todayEmpty ? (dates.data?.find((date) => date !== hall.data?.date) ?? null) : null;
+  const recent = useQuery({
+    queryKey: ['mvp', 'day', latest],
+    queryFn: () => apiGet<HallOfDayDto>(`/api/mvp/day?date=${latest}`),
+    enabled: latest !== null,
+  });
+
+  if (latest !== null && recent.data && recent.data.sessions.length > 0) {
+    return (
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">Sảnh tri ân gần nhất — {formatDayMonth(latest)}</h2>
+        <DailyHall data={recent.data} />
+      </section>
+    );
+  }
+
+  const lookingBack = todayEmpty && (dates.isPending || (latest !== null && recent.isPending));
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-lg font-semibold">Sảnh tri ân hôm nay</h2>
+      {lookingBack ? (
+        <p className="text-slate-500 dark:text-slate-400">Đang tải…</p>
+      ) : (
+        <QueryState query={hall}>{(data) => <DailyHall data={data} emptyMessage="Chưa có kết quả vote hôm nay" />}</QueryState>
+      )}
+    </section>
   );
 }
 

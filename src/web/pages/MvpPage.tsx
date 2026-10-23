@@ -1,26 +1,30 @@
 /**
- * Trang Tri ân: lịch sử MVP theo ngày. Hàng nút ngày (`/api/mvp/dates`, mới nhất
- * trước) và Sảnh tri ân của ngày đang chọn. Ngày chọn nằm trong `?ngay=YYYY-MM-DD`
- * để chia sẻ được; không có (hoặc sai dạng) thì lấy ngày mới nhất.
+ * Trang Tri ân: lịch sử MVP theo ngày. Hàng nút ngày (`/api/mvp/dates`: 30 ngày gần
+ * nhất có kết quả, mới nhất trước), ô chọn ngày bất kỳ trong quá khứ (tới hôm nay) cho
+ * những ngày cũ hơn, và Sảnh tri ân của ngày đang chọn. Ngày chọn nằm trong
+ * `?ngay=YYYY-MM-DD` để chia sẻ được; không có, sai dạng hay không có thật trên lịch
+ * (`2026-13-45`) thì coi như chưa chọn — lấy ngày mới nhất, không gọi API với ngày sai.
  */
 
 import { useQuery } from '@tanstack/react-query';
+import { useId } from 'react';
 import { useSearchParams } from 'react-router';
 import type { HallOfDayDto } from '../../shared/api-types';
 import { apiGet, errorMessage } from '../api';
 import { DailyHall } from '../components/DailyHall';
 import { cx } from '../lib/cx';
-import { formatDateLabel, formatDayLabel } from '../lib/format';
+import { formatDateLabel, formatDayLabel, isIsoDate, vnTodayIso } from '../lib/format';
 
 const DATE_PARAM = 'ngay';
-const VN_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function MvpPage() {
   const [params, setParams] = useSearchParams();
   const dates = useQuery({ queryKey: ['mvp', 'dates'], queryFn: () => apiGet<string[]>('/api/mvp/dates') });
 
   const requested = params.get(DATE_PARAM);
-  const selected = requested !== null && VN_DATE.test(requested) ? requested : (dates.data?.[0] ?? null);
+  const selected = requested !== null && isIsoDate(requested) ? requested : (dates.data?.[0] ?? null);
+  const today = vnTodayIso();
+  const pickerId = useId();
 
   const hall = useQuery({
     queryKey: ['mvp', 'day', selected],
@@ -78,6 +82,24 @@ export function MvpPage() {
           })}
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={pickerId} className="text-sm font-medium">
+          Chọn ngày khác
+        </label>
+        <input
+          id={pickerId}
+          type="date"
+          max={today}
+          className="field max-w-48 tabular-nums"
+          value={selected ?? ''}
+          onChange={(event) => {
+            const date = event.target.value;
+            // Ô bị xoá, ngày chưa nhập xong hay ngày tương lai: giữ nguyên ngày đang xem.
+            if (isIsoDate(date) && date <= today) select(date);
+          }}
+        />
+      </div>
 
       {selected !== null && (
         <section className="flex flex-col gap-3">

@@ -33,7 +33,7 @@ const emptyHall: HallOfDayDto = { date: '2026-10-22', sessions: [] };
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-type Handler = (init: RequestInit | undefined) => Response | Promise<Response>;
+type Handler = (init: RequestInit | undefined, url: string) => Response | Promise<Response>;
 
 /** fetch giả định tuyến theo `METHOD path` (bỏ query string). */
 function stubFetch(routes: Record<string, Handler>) {
@@ -43,7 +43,7 @@ function stubFetch(routes: Record<string, Handler>) {
     const key = `${init?.method ?? 'GET'} ${path}`;
     const handler = routes[key];
     if (!handler) throw new Error(`Không có tuyến giả cho ${key}`);
-    return Promise.resolve(handler(init));
+    return Promise.resolve(handler(init, url));
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -70,6 +70,7 @@ test('shows the day label, distinct attendee count, ordered sessions and empty h
   stubFetch({
     'GET /api/sessions': () => json(200, sessions),
     'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
   });
   renderPage();
 
@@ -89,6 +90,7 @@ test('an empty day says there are no sessions yet', async () => {
   stubFetch({
     'GET /api/sessions': () => json(200, []),
     'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
   });
   renderPage();
   expect(await screen.findByText('Hôm nay chưa có buổi chơi nào')).toBeInTheDocument();
@@ -100,6 +102,7 @@ test('joining replaces that card with the returned session and updates the total
   const fetchMock = stubFetch({
     'GET /api/sessions': () => json(200, sessions),
     'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
     'POST /api/sessions/1/attendance': (init) => {
       expect(JSON.parse(String(init?.body))).toEqual({ going: true });
       return json(200, joined);
@@ -134,6 +137,7 @@ test('SESSION_FULL shows the API message by that card and refetches the list', a
       return json(200, listCalls === 1 ? sessions : [sessions[1] as SessionDto, nowFull, sessions[2] as SessionDto]);
     },
     'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
     'POST /api/sessions/2/attendance': () => json(409, { error: { code: 'SESSION_FULL', message: 'Đã đủ người' } }),
   });
   renderPage();
@@ -164,10 +168,58 @@ test('a failed sessions load shows the message and a retry button', async () => 
         : json(200, []);
     },
     'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
   });
   renderPage();
 
   expect(await screen.findByText('Có lỗi xảy ra, thử lại sau')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Thử lại' }));
   expect(await screen.findByText('Hôm nay chưa có buổi chơi nào')).toBeInTheDocument();
+});
+
+const hallOf = (date: string, label: string, winner: string): HallOfDayDto => ({
+  date,
+  sessions: [{ sessionId: 5, label, awards: [{ categoryName: 'Giết nhiều nhất', winners: [{ memberId: 1, displayName: winner, avatarUrl: null, voteCount: 3 }] }] }],
+});
+
+test('while today has no results yet, the most recent day with results is shown instead', async () => {
+  // Vote buổi tối đóng sáng hôm sau, kết quả nằm ở ngày của buổi chơi (hôm qua).
+  const fetchMock = stubFetch({
+    'GET /api/sessions': () => json(200, []),
+    'GET /api/mvp/day': (_init, url) =>
+      json(200, url === '/api/mvp/day?date=2026-10-21' ? hallOf('2026-10-21', 'Cổ điển 21:00', 'Ngỗng Một') : emptyHall),
+    'GET /api/mvp/dates': () => json(200, ['2026-10-21', '2026-10-18']),
+  });
+  renderPage();
+
+  expect(await screen.findByRole('heading', { level: 2, name: 'Sảnh tri ân gần nhất — 21/10' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 3, name: 'Cổ điển 21:00' })).toBeInTheDocument();
+  expect(screen.getByText('Ngỗng Một')).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { level: 2, name: 'Sảnh tri ân hôm nay' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Chưa có kết quả vote hôm nay')).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith('/api/mvp/day?date=2026-10-21', expect.anything());
+});
+
+test("today's hall wins when it has results; the history is not even asked for", async () => {
+  const fetchMock = stubFetch({
+    'GET /api/sessions': () => json(200, []),
+    'GET /api/mvp/day': () => json(200, hallOf('2026-10-22', 'Săn ngỗng 19:00', 'Vịt Hai')),
+    'GET /api/mvp/dates': () => json(200, ['2026-10-22', '2026-10-21']),
+  });
+  renderPage();
+
+  expect(await screen.findByRole('heading', { level: 3, name: 'Săn ngỗng 19:00' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 2, name: 'Sảnh tri ân hôm nay' })).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/mvp/dates')).toBe(false);
+});
+
+test('with no results anywhere, the today hall keeps its empty copy', async () => {
+  stubFetch({
+    'GET /api/sessions': () => json(200, []),
+    'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
+  });
+  renderPage();
+  expect(await screen.findByText('Chưa có kết quả vote hôm nay')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 2, name: 'Sảnh tri ân hôm nay' })).toBeInTheDocument();
 });
