@@ -5,8 +5,8 @@
  *
  * Không bao giờ gửi trùng: trước khi gửi, ghi một dòng `notification_log` với khoá
  * chính `(buổi, người, loại, kênh)`; dòng đã có (`ON CONFLICT DO NOTHING` không chèn gì)
- * nghĩa là lần chạy khác đã lo rồi → bỏ qua. Gửi lỗi thì ghi `error` vào dòng đó và KHÔNG thử lại ở lần sau
- * (một DM lỗi không thành mười DM lỗi); người khác vẫn nhận bình thường.
+ * nghĩa là lần chạy khác đã lo rồi → bỏ qua. Gửi lỗi thì ghi `error` vào dòng đó và KHÔNG
+ * thử lại ở lần sau (một DM lỗi không thành mười DM lỗi); người khác vẫn nhận bình thường.
  *
  * Cửa sổ nửa mở (`./windows.ts`): `pre15` khi `startsAt − lead ≤ now < startsAt`, `start`
  * khi `startsAt ≤ now < startsAt + 10 phút`. Khởi động lại sau cửa sổ thì nhắc đó mất
