@@ -8,6 +8,7 @@ coverage
 .git
 .gitignore
 .gitattributes
+.github
 .superpowers
 docs
 README.md
