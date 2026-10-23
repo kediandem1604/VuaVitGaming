@@ -93,6 +93,7 @@ test('submit stores a pending report with the clock time and ensures the season'
       endsAt: new Date('2026-10-31T17:00:00Z'),
       closedAt: null,
       reviewNudgedAt: null,
+      summaryPending: false,
     },
   ]);
 

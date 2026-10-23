@@ -3,6 +3,7 @@ import {
   addDaysVn,
   dateOnlyToDb,
   dbToDateOnly,
+  formatSeasonLabel,
   formatVnDay,
   formatVnTime,
   previousSeasonId,
@@ -46,6 +47,9 @@ test('season helpers', () => {
   expect(seasonCloseAt('2026-10').toISOString()).toBe('2026-11-03T17:05:00.000Z');
   expect(seasonCloseAt('2026-12').toISOString()).toBe('2027-01-03T17:05:00.000Z');
   expect(seasonNudgeAt('2026-12').toISOString()).toBe('2027-01-03T02:00:00.000Z');
+  expect(formatSeasonLabel('2026-10')).toBe('10/2026');
+  expect(formatSeasonLabel('2027-01')).toBe('01/2027');
+  expect(() => formatSeasonLabel('2026-13')).toThrow();
 });
 
 test('formatting', () => {

@@ -319,6 +319,8 @@ model Season {
   endsAt         DateTime  @map("ends_at") @db.Timestamptz(3)
   closedAt       DateTime? @map("closed_at") @db.Timestamptz(3)
   reviewNudgedAt DateTime? @map("review_nudged_at") @db.Timestamptz(3)
+  /// Đã chốt nhưng chưa đăng được bảng tổng kết vào kênh thông báo — bộ hẹn giờ đăng bù.
+  summaryPending Boolean   @default(false) @map("summary_pending")
 
   roleTitles RoleTitle[]
 

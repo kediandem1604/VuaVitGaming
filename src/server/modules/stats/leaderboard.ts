@@ -14,14 +14,20 @@
  *
  * Mọi hàm nhận `seasonId` dạng `YYYY-MM`; sai dạng → `VALIDATION`. `reports.ts` dùng
  * `getRoleLeader` + `announceHolderChange` khi duyệt; file này không import ngược lại.
+ * `seasons/service.ts` dùng `computeSeasonLeaders` với client giao dịch khi chốt mùa (vòng
+ * import hai chiều với file đó chỉ gồm lời gọi hàm lúc chạy, không dùng gì ở cấp module).
  */
 
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type { HallDto, HallHolderDto, HallPreviousDto, RoleDto } from '../../../shared/api-types.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dateOnlyToDb, seasonDateRange } from '../../lib/time.js';
 import { listRoles } from '../roles/service.js';
-import { isSeasonClosed } from '../seasons/service.js';
+import { checkSeasonId, isSeasonClosed } from '../seasons/service.js';
+
+/** Client thường hoặc client trong giao dịch — phần gộp điểm chạy được với cả hai. */
+type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export interface LeaderboardRow {
   rank: number;
@@ -37,12 +43,7 @@ export interface LeaderboardRow {
 const DEFAULT_LIMIT = 10;
 /** Giới hạn trên của `limit`; lớn hơn bị cắt (như `listMyReports`). */
 const MAX_LIMIT = 100;
-const SEASON_ID = /^\d{4}-(0[1-9]|1[0-2])$/;
 const INT32_MAX = 2_147_483_647;
-
-function checkSeasonId(seasonId: string): void {
-  if (typeof seasonId !== 'string' || !SEASON_ID.test(seasonId)) throw appError('VALIDATION', 'Mùa không hợp lệ');
-}
 
 /** Id hợp lệ để tra DB; id lạ (lẻ, âm, quá int32) coi như không có. */
 function isId(n: number): boolean {
@@ -71,9 +72,9 @@ function compareAgg(x: Agg, y: Agg): number {
  * Gộp các lần khai đã duyệt có ngày chơi trong mùa theo (role, người) bằng MỘT truy vấn
  * GROUP BY; `roleId` để thu hẹp về một role. Bỏ ô 0 điểm; trả về đã sắp theo thứ tự xếp hạng.
  */
-async function aggregateSeason(ctx: Ctx, seasonId: string, roleId?: number): Promise<Agg[]> {
+async function aggregateSeason(db: DbClient, seasonId: string, roleId?: number): Promise<Agg[]> {
   const { first, last } = seasonDateRange(seasonId);
-  const groups = await ctx.db.statReport.groupBy({
+  const groups = await db.statReport.groupBy({
     by: ['roleId', 'memberId'],
     where: {
       status: 'approved',
@@ -100,9 +101,9 @@ async function aggregateSeason(ctx: Ctx, seasonId: string, roleId?: number): Pro
 type MemberInfo = { displayName: string; avatarUrl: string | null };
 
 /** Tên và ảnh của các thành viên — một truy vấn cho cả bảng, không tra từng người. */
-async function membersById(ctx: Ctx, ids: number[]): Promise<Map<number, MemberInfo>> {
+async function membersById(db: DbClient, ids: number[]): Promise<Map<number, MemberInfo>> {
   if (ids.length === 0) return new Map();
-  const rows = await ctx.db.member.findMany({
+  const rows = await db.member.findMany({
     where: { id: { in: ids } },
     select: { id: true, displayName: true, avatarUrl: true },
   });
@@ -138,28 +139,36 @@ export async function getRoleLeaderboard(ctx: Ctx, roleId: number, seasonId: str
   const role = isId(roleId) ? await ctx.db.role.findUnique({ where: { id: roleId }, select: { id: true } }) : null;
   if (!role) throw appError('NOT_FOUND');
 
-  const aggs = (await aggregateSeason(ctx, seasonId, roleId)).slice(0, Math.min(limit, MAX_LIMIT));
-  const members = await membersById(ctx, aggs.map((x) => x.memberId));
+  const aggs = (await aggregateSeason(ctx.db, seasonId, roleId)).slice(0, Math.min(limit, MAX_LIMIT));
+  const members = await membersById(ctx.db, aggs.map((x) => x.memberId));
   return aggs.map((x, i) => toRow(x, i + 1, members));
 }
 
 /** Người đang hoá thân (top 1, điểm > 0) của một role trong một mùa; chưa ai → `null`. */
 export async function getRoleLeader(ctx: Ctx, roleId: number, seasonId: string): Promise<LeaderboardRow | null> {
   checkSeasonId(seasonId);
-  const [top] = await aggregateSeason(ctx, seasonId, roleId);
+  const [top] = await aggregateSeason(ctx.db, seasonId, roleId);
   if (!top) return null;
-  return toRow(top, 1, await membersById(ctx, [top.memberId]));
+  return toRow(top, 1, await membersById(ctx.db, [top.memberId]));
 }
 
 /** Top 1 của mọi role có người trong mùa, từ một truy vấn gộp: roleId → dòng hạng 1. */
 export async function getSeasonLeaders(ctx: Ctx, seasonId: string): Promise<Map<number, LeaderboardRow>> {
   checkSeasonId(seasonId);
+  return computeSeasonLeaders(ctx.db, seasonId);
+}
+
+/**
+ * Phần tính của `getSeasonLeaders`, nhận thẳng client DB để chốt mùa gọi được trong cùng
+ * giao dịch với việc ghi `role_titles`. Không kiểm tra `seasonId` (người gọi đã kiểm tra).
+ */
+export async function computeSeasonLeaders(db: DbClient, seasonId: string): Promise<Map<number, LeaderboardRow>> {
   // Đã sắp theo thứ tự xếp hạng chung, nên ô đầu tiên gặp của mỗi role là top 1 của role đó.
   const tops = new Map<number, Agg>();
-  for (const agg of await aggregateSeason(ctx, seasonId)) {
+  for (const agg of await aggregateSeason(db, seasonId)) {
     if (!tops.has(agg.roleId)) tops.set(agg.roleId, agg);
   }
-  const members = await membersById(ctx, [...tops.values()].map((x) => x.memberId));
+  const members = await membersById(db, [...tops.values()].map((x) => x.memberId));
   return new Map([...tops].map(([roleId, agg]) => [roleId, toRow(agg, 1, members)]));
 }
 

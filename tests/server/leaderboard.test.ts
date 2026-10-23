@@ -10,6 +10,7 @@ import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
 import { createMember, roleByKey } from '../helpers/factories.js';
 import type { FakeNotifier } from '../helpers/fakes.js';
+import { patchDelegate } from '../helpers/prisma.js';
 
 /** 12:00 ngày 10/10/2026 giờ VN: khai được các trận từ 07/10 đến 10/10. */
 const NOW = '2026-10-10T05:00:00Z';
@@ -74,20 +75,6 @@ function hallRole(hall: HallDto, key: string): HallDto['roles'][number] {
 }
 
 const reportRow = (id: number) => testDb.statReport.findUniqueOrThrow({ where: { id } });
-
-/**
- * Thay tạm một hàm của delegate Prisma; trả về hàm khôi phục (gọi trong `finally`).
- * Không dùng `vi.spyOn`: proxy của Prisma trả descriptor không có `value`, nên
- * `restoreAllMocks` sẽ định nghĩa lại thuộc tính thành `undefined` và làm hỏng delegate
- * cho mọi test sau. Gán thẳng đi qua bẫy `set` của proxy, khôi phục cũng vậy.
- */
-function patchDelegate<T extends object, K extends keyof T>(obj: T, key: K, wrap: (original: T[K]) => T[K]): () => void {
-  const original = obj[key];
-  obj[key] = wrap(original);
-  return () => {
-    obj[key] = original;
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Xếp hạng

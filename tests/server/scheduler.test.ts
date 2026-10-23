@@ -210,10 +210,10 @@ test('retry while Discord is still down keeps sessions dirty and never throws', 
 // defaultJobs
 // ---------------------------------------------------------------------------
 
-/** Thứ tự chạy trong một lượt: nhắc giờ, tự kết thúc, đóng vote, tin buổi, tin vote, dọn phiên web. */
-const DEFAULT_JOB_NAMES = ['reminders', 'auto-end', 'close-votes', 'session-sync', 'vote-sync', 'web-session-cleanup'];
+/** Thứ tự chạy trong một lượt: nhắc giờ, tự kết thúc, đóng vote, tin buổi, tin vote, mùa giải, dọn phiên web. */
+const DEFAULT_JOB_NAMES = ['reminders', 'auto-end', 'close-votes', 'session-sync', 'vote-sync', 'season', 'web-session-cleanup'];
 
-test('default jobs run reminders, auto-end, close-votes, session-sync, vote-sync, web-session-cleanup in that order', () => {
+test('default jobs run reminders, auto-end, close-votes, session-sync, vote-sync, season, web-session-cleanup in that order', () => {
   expect(defaultJobs().map((j) => j.name)).toEqual(DEFAULT_JOB_NAMES);
 });
 

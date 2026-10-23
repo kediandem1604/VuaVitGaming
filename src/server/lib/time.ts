@@ -165,6 +165,12 @@ export function formatVnDay(d: Date | string): string {
   return `${pad2(day)}/${pad2(m)}`;
 }
 
+/** `MM/YYYY` của một mã mùa — tên mùa hiện cho người dùng (vd `2026-10` → `10/2026`). */
+export function formatSeasonLabel(seasonId: string): string {
+  const { y, m } = parseSeasonId(seasonId);
+  return `${pad2(m)}/${String(y).padStart(4, '0')}`;
+}
+
 // ---------------------------------------------------------------------------
 // Cột ngày-không-giờ (`@db.Date`)
 // ---------------------------------------------------------------------------

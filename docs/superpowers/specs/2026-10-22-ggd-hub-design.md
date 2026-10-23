@@ -192,7 +192,7 @@ Một vòng lặp chạy mỗi 60 giây (giữ khoá thuê trong `scheduler_leas
 | `awards` | round_id, category_id, member_id, vote_count | duy nhất (round_id, category_id, member_id) |
 | `roles` | id, key, faction (`goose`/`duck`/`neutral`), name_en, name_vi, description, metric_label, max_per_game, map_note (null, vd "Chỉ có ở Ancient Sands"), mode_id (null = role chế độ thường; có giá trị = role riêng của chế độ đặc biệt), icon (emoji), image (bytea, null), image_mime (null), active, sort_order | key duy nhất; max_per_game ≥ 1 |
 | `stat_reports` | id, member_id, role_id, session_id (null), played_on, value, note, status (`pending`/`approved`/`rejected`), reviewed_by, reviewed_at, reject_reason, created_at | value ≥ 0 |
-| `seasons` | id (`YYYY-MM`), starts_at, ends_at, closed_at, review_nudged_at (đã nhắc mod ngày 3 chưa) | |
+| `seasons` | id (`YYYY-MM`), starts_at, ends_at, closed_at, review_nudged_at (đã nhắc mod ngày 3 chưa), summary_pending | `summary_pending` = đã chốt nhưng chưa đăng được bảng tổng kết vào kênh thông báo (bộ hẹn giờ đăng bù) |
 | `scheduler_lease` | id (luôn = 1), holder, expires_at | Một dòng duy nhất |
 | `role_titles` | season_id, role_id, member_id, score | duy nhất (season_id, role_id) |
 | `app_settings` | key, value | key duy nhất. Giá trị mặc định: thời gian mở vote 12 tiếng, tự kết thúc buổi sau 4 tiếng, nhắc trước 15 phút |
