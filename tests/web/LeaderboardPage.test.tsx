@@ -49,10 +49,15 @@ const boards: Record<string, LeaderboardRowDto[]> = {
   '6@2026-10': [row(1, 5, 'Ngỗng Năm', 3, 4)],
   '61@2026-09': [row(1, 2, 'Vịt Hai', 12, 5)],
   '61@2026-10': [],
+  // Bốn hàng: bục chỉ lấy ba, bảng đầy đủ bên dưới có cả bốn.
+  '70@2026-10': [row(1, 7, 'Ngỗng Bảy', 9, 3), row(2, 8, 'Vịt Tám', 6, 2), row(3, 9, 'Ngỗng Chín', 2, 1), row(4, 10, 'Vịt Mười', 1, 1)],
 };
 
-/** Khối chữ cạnh nhân vật trong thẻ hạng 1. */
-const topCard = () => screen.getByText('Đang hoá thân').parentElement;
+/** Các mục trên bục vinh danh (tối đa 3, thứ tự DOM theo hạng). */
+const podiumItems = () => within(screen.getByRole('list', { name: 'Bục vinh danh' })).getAllByRole('listitem');
+/** Các hàng của bảng đầy đủ bên dưới bục (mọi hạng, kể cả top 3). */
+const boardItems = () => within(screen.getByRole('list', { name: 'Mọi hạng' })).getAllByRole('listitem');
+const findBoard = () => screen.findByRole('list', { name: 'Mọi hạng' });
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -97,9 +102,10 @@ test('defaults to the first role and newest season; rank 1 wears the crown', asy
   renderAt('/bang-xep-hang');
 
   expect(screen.getByRole('heading', { level: 1, name: 'Bảng xếp hạng' })).toBeInTheDocument();
-  const items = await screen.findAllByRole('listitem');
+  await findBoard();
   expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard?roleId=1&season=2026-10&limit=50', expect.anything());
 
+  const items = boardItems();
   expect(items).toHaveLength(2);
   const [first, second] = items as [HTMLElement, HTMLElement];
   expect(within(first).getByTitle('Hạng 1')).toHaveTextContent('👑');
@@ -112,12 +118,20 @@ test('defaults to the first role and newest season; rank 1 wears the crown', asy
   expect(within(second).getByTitle('Số lần vote trúng Vịt')).toHaveTextContent('4');
   expect(second).toHaveTextContent('3 trận');
 
-  // Thẻ hạng 1: nhân vật đủ màu, khối chữ chiếm phần còn lại của hàng (min-w-0 flex-1) và ghi điểm + chỉ số.
-  const character = screen.getByRole('img', { name: 'Ngỗng: Ngỗng Một' });
-  expect(character).not.toHaveClass('mx-auto');
-  expect(topCard()).toHaveClass('min-w-0', 'flex-1');
-  expect(topCard()).toHaveTextContent('Ngỗng Một');
-  expect(topCard()).toHaveTextContent('7 Số lần vote trúng Vịt · 2 trận');
+  // Bục vinh danh: min(3, số hàng) mục theo thứ tự hạng; hạng 1 là nhân vật đủ màu, hạng 2 là avatar
+  // mang tên; mỗi mục ghi tên và `{điểm} {chỉ số}`.
+  const podium = podiumItems();
+  expect(podium).toHaveLength(2);
+  const [gold, silver] = podium as [HTMLElement, HTMLElement];
+  expect(within(gold).getByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
+  expect(gold).toHaveTextContent('Ngỗng Một');
+  expect(gold).toHaveTextContent('7 Số lần vote trúng Vịt');
+  expect(within(silver).getByRole('img', { name: 'Ngỗng Ba' })).toBeInTheDocument();
+  expect(within(silver).queryByRole('img', { name: /Ngỗng:/ })).toBeNull();
+  expect(silver).toHaveTextContent('Ngỗng Ba');
+  expect(silver).toHaveTextContent('4 Số lần vote trúng Vịt');
+  // Chỉ một nhân vật trên cả trang: của hạng 1.
+  expect(screen.getAllByRole('img', { name: /^Ngỗng: / })).toHaveLength(1);
   expect(screen.getByRole('heading', { level: 2, name: /Ngỗng/ })).toBeInTheDocument();
   expect(screen.getByText('Chỉ số: Số lần vote trúng Vịt')).toBeInTheDocument();
 
@@ -143,29 +157,32 @@ test('?role= and ?mua= select a role and a closed season', async () => {
   const fetchMock = stubFetch();
   renderAt('/bang-xep-hang?role=61&mua=2026-09');
 
-  const items = await screen.findAllByRole('listitem');
+  await findBoard();
   expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard?roleId=61&season=2026-09&limit=50', expect.anything());
+  const items = boardItems();
   expect(items).toHaveLength(1);
   expect(items[0]).toHaveTextContent('👑');
   expect(items[0]).toHaveTextContent('Vịt Hai');
   expect(within(items[0] as HTMLElement).getByTitle('Số mạng chém')).toHaveTextContent('12');
   expect(items[0]).toHaveTextContent('5 trận');
-  expect(topCard()).toHaveTextContent('12 Số mạng chém · 5 trận');
+  expect(podiumItems()).toHaveLength(1);
+  expect(podiumItems()[0]).toHaveTextContent('12 Số mạng chém');
   expect(screen.getByRole('img', { name: 'Kiếm sĩ: Vịt Hai' })).toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: 'Role' })).toHaveValue('61');
   expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveValue('2026-09');
   expect(screen.getByText('Mùa đã chốt')).toBeInTheDocument();
 });
 
-test('rows carry only the number; a 40-char metric label appears above the list and in the #1 card, not per row', async () => {
+test('rows carry only the number; a 40-char metric label appears above the list and on the podium, not per row', async () => {
   stubFetch();
   renderAt('/bang-xep-hang?role=6');
 
-  const items = await screen.findAllByRole('listitem');
+  await findBoard();
+  const items = boardItems();
   expect(items).toHaveLength(1);
   const first = items[0] as HTMLElement;
   expect(screen.getByText(`Chỉ số: ${LONG_METRIC}`)).toBeInTheDocument();
-  expect(topCard()).toHaveTextContent(`3 ${LONG_METRIC} · 4 trận`);
+  expect(podiumItems()[0]).toHaveTextContent(`3 ${LONG_METRIC}`);
   // Trong dòng: số điểm (title = tên chỉ số cho người dùng rê chuột/đọc màn hình), số trận, không lặp nhãn.
   expect(first).not.toHaveTextContent(LONG_METRIC);
   expect(within(first).getByTitle(LONG_METRIC)).toHaveTextContent('3');
@@ -177,8 +194,54 @@ test('an empty board shows the empty copy and no character', async () => {
   stubFetch();
   renderAt('/bang-xep-hang?role=61');
   expect(await screen.findByText('Chưa có ai khai điểm mùa này')).toBeInTheDocument();
+  expect(screen.queryByRole('list', { name: 'Bục vinh danh' })).toBeNull();
   expect(screen.queryByRole('listitem')).toBeNull();
   expect(screen.queryByRole('img')).toBeNull();
+});
+
+test('a single row gives a one-step podium', async () => {
+  stubFetch();
+  renderAt('/bang-xep-hang?role=6');
+  await findBoard();
+
+  const podium = podiumItems();
+  expect(podium).toHaveLength(1);
+  const [only] = podium as [HTMLElement];
+  expect(within(only).getByRole('img', { name: 'Người Canada: Ngỗng Năm' })).toBeInTheDocument();
+  expect(only).toHaveTextContent('Ngỗng Năm');
+  expect(only).toHaveTextContent(`3 ${LONG_METRIC}`);
+  // Không có avatar hạng 2/3: nhân vật là `img` duy nhất trên bục.
+  expect(within(screen.getByRole('list', { name: 'Bục vinh danh' })).getAllByRole('img')).toHaveLength(1);
+  expect(boardItems()).toHaveLength(1);
+});
+
+test('the podium stands 2-1-3 on screen while the DOM keeps rank order, and takes at most three', async () => {
+  stubFetch();
+  renderAt('/bang-xep-hang?role=70');
+  await findBoard();
+
+  const podium = podiumItems();
+  expect(podium.map((item) => item.textContent)).toEqual([
+    expect.stringContaining('Ngỗng Bảy'),
+    expect.stringContaining('Vịt Tám'),
+    expect.stringContaining('Ngỗng Chín'),
+  ]);
+  expect(podium.map((item) => item.textContent)).not.toEqual(expect.arrayContaining([expect.stringContaining('Vịt Mười')]));
+  // Vị trí hiển thị bằng `order-*`: hạng 2 bên trái, hạng 1 giữa, hạng 3 bên phải.
+  const orders = podium.map((item) => item.className.split(' ').find((name) => name.startsWith('order-')));
+  expect(orders).toEqual(['order-2', 'order-1', 'order-3']);
+  // Hạng 1 có nhân vật; hạng 2 và 3 là avatar mang tên.
+  expect(within(podium[0] as HTMLElement).getByRole('img', { name: 'Chim đa đa: Ngỗng Bảy' })).toBeInTheDocument();
+  expect(within(podium[1] as HTMLElement).getByRole('img', { name: 'Vịt Tám' })).toBeInTheDocument();
+  expect(within(podium[2] as HTMLElement).getByRole('img', { name: 'Ngỗng Chín' })).toBeInTheDocument();
+  expect(podium[2]).toHaveTextContent('2 Số trận thắng (bị vote ra)');
+
+  // Bảng đầy đủ bên dưới vẫn có cả bốn hạng.
+  const rows = boardItems();
+  expect(rows).toHaveLength(4);
+  expect(within(rows[0] as HTMLElement).getByTitle('Hạng 1')).toHaveTextContent('👑');
+  expect(within(rows[3] as HTMLElement).getByTitle('Hạng 4')).toHaveTextContent('4');
+  expect(rows[3]).toHaveTextContent('Vịt Mười');
 });
 
 test('invalid ?role= and ?mua= fall back to defaults and are never sent to the API', async () => {
@@ -227,5 +290,7 @@ test('a failed board load shows the message and Thử lại recovers', async () 
   expect(await screen.findByRole('alert')).toHaveTextContent('Có lỗi xảy ra, thử lại sau');
   fail = false;
   fireEvent.click(screen.getByRole('button', { name: 'Thử lại' }));
-  expect(await screen.findAllByRole('listitem')).toHaveLength(2);
+  await findBoard();
+  expect(boardItems()).toHaveLength(2);
+  expect(podiumItems()).toHaveLength(2);
 });

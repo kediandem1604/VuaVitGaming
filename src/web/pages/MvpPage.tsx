@@ -1,8 +1,9 @@
 /**
- * Trang Tri ân: lịch sử MVP theo ngày. Hàng nút ngày (`/api/mvp/dates`: 30 ngày gần
- * nhất có kết quả, mới nhất trước), ô chọn ngày bất kỳ trong quá khứ (tới hôm nay) cho
- * những ngày cũ hơn, và Sảnh tri ân của ngày đang chọn. Ngày chọn nằm trong
- * `?ngay=YYYY-MM-DD` để chia sẻ được; không có, sai dạng hay không có thật trên lịch
+ * Trang Tri ân (spec §6): lịch sử MVP theo ngày — vote vẫn ở Discord, đây chỉ xem kết quả.
+ * Dãy chip ngày (`/api/mvp/dates`: 30 ngày gần nhất có kết quả, mới nhất trước; ngày đang
+ * xem nền vàng), ô chọn ngày bất kỳ trong quá khứ (tới hôm nay) cho những ngày cũ hơn, và
+ * Sảnh tri ân của ngày đang chọn (`DailyHall`, cùng giao diện trang Hôm nay). Ngày chọn nằm
+ * trong `?ngay=YYYY-MM-DD` để chia sẻ được; không có, sai dạng hay không có thật trên lịch
  * (`2026-13-45`) thì coi như chưa chọn — lấy ngày mới nhất, không gọi API với ngày sai.
  */
 
@@ -12,6 +13,7 @@ import { useSearchParams } from 'react-router';
 import type { HallOfDayDto } from '../../shared/api-types';
 import { apiGet, errorMessage } from '../api';
 import { DailyHall } from '../components/DailyHall';
+import { EmptyState } from '../components/EmptyState';
 import { cx } from '../lib/cx';
 import { formatDateLabel, formatDayLabel, isIsoDate, vnTodayIso } from '../lib/format';
 
@@ -36,26 +38,20 @@ export function MvpPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold">Tri ân</h1>
+      {/* Tiêu đề 30px ≥ 18px nên dùng được chữ nổi `text-raised` (spec §3.2). */}
+      <h1 className="text-raised text-3xl leading-none font-extrabold text-white">Tri ân</h1>
 
-      {dates.isPending && <p className="text-slate-500 dark:text-slate-400">Đang tải…</p>}
-      {dates.isError && (
-        <div className="flex flex-col items-start gap-2">
-          <p role="alert" className="text-duck">
-            {errorMessage(dates.error)}
-          </p>
-          <button type="button" className="btn-secondary" onClick={() => void dates.refetch()}>
-            Thử lại
-          </button>
-        </div>
-      )}
+      {dates.isPending && <p className="text-night-300">Đang tải…</p>}
+      {dates.isError && <LoadError message={errorMessage(dates.error)} onRetry={() => void dates.refetch()} />}
 
       {dates.data && dates.data.length === 0 && selected === null && (
-        <p className="text-slate-600 dark:text-slate-400">Chưa có kết quả tri ân nào</p>
+        <EmptyState>
+          <p>Chưa có kết quả tri ân nào</p>
+        </EmptyState>
       )}
 
       {dates.data && dates.data.length > 0 && (
-        // Dải nút cuộn ngang trong chính nó (không cuộn cả trang); `-mx-4 px-4` cho dải chạm mép màn hình nhỏ.
+        // Dải chip cuộn ngang trong chính nó (không cuộn cả trang); `-mx-4 px-4` cho dải chạm mép màn hình nhỏ.
         <div
           role="group"
           aria-label="Chọn ngày"
@@ -68,12 +64,7 @@ export function MvpPage() {
                 key={date}
                 type="button"
                 aria-pressed={active}
-                className={cx(
-                  'btn shrink-0 border whitespace-nowrap tabular-nums',
-                  active
-                    ? 'border-goose bg-goose text-white'
-                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800',
-                )}
+                className={cx('chip shrink-0 px-4 py-1.5 text-base tabular-nums', active ? 'bg-gold text-gold-ink' : 'hover:brightness-110')}
                 onClick={() => select(date)}
               >
                 {formatDateLabel(date)}
@@ -84,7 +75,7 @@ export function MvpPage() {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor={pickerId} className="text-sm font-medium">
+        <label htmlFor={pickerId} className="text-sm font-bold text-night-300">
           Chọn ngày khác
         </label>
         <input
@@ -103,23 +94,30 @@ export function MvpPage() {
 
       {selected !== null && (
         <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">{formatDayLabel(selected)}</h2>
+          <h2 className="text-xl leading-tight font-extrabold text-white">{formatDayLabel(selected)}</h2>
           {hall.data ? (
             <DailyHall data={hall.data} emptyMessage="Ngày này chưa có kết quả vote" />
           ) : hall.isError ? (
-            <div className="flex flex-col items-start gap-2">
-              <p role="alert" className="text-duck">
-                {errorMessage(hall.error)}
-              </p>
-              <button type="button" className="btn-secondary" onClick={() => void hall.refetch()}>
-                Thử lại
-              </button>
-            </div>
+            <LoadError message={errorMessage(hall.error)} onRetry={() => void hall.refetch()} />
           ) : (
-            <p className="text-slate-500 dark:text-slate-400">Đang tải…</p>
+            <p className="text-night-300">Đang tải…</p>
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+/** Lỗi tải kèm nút Thử lại, cùng kiểu panel viền `duck-soft` của `QueryState`. */
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="panel flex flex-col items-start gap-3 border-duck-soft">
+      <p role="alert" className="font-bold text-duck-soft">
+        {message}
+      </p>
+      <button type="button" className="btn-secondary" onClick={onRetry}>
+        Thử lại
+      </button>
     </div>
   );
 }
