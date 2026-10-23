@@ -13,8 +13,10 @@ import { HallPage } from './pages/HallPage';
 import { LeaderboardPage } from './pages/LeaderboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { MvpPage } from './pages/MvpPage';
-import { ForbiddenPage, NotFoundPage, PlaceholderPage } from './pages/PlaceholderPage';
+import { AdminPage } from './pages/admin/AdminPage';
+import { ForbiddenPage, NotFoundPage } from './pages/PlaceholderPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { ReportPage } from './pages/ReportPage';
 import { TodayPage } from './pages/TodayPage';
 
 export function App() {
@@ -27,13 +29,13 @@ export function App() {
           <Route path="dai-sanh" element={<HallPage />} />
           <Route path="bang-xep-hang" element={<LeaderboardPage />} />
           <Route path="tri-an" element={<MvpPage />} />
-          <Route path="khai-diem" element={<PlaceholderPage title="Khai điểm" />} />
+          <Route path="khai-diem" element={<ReportPage />} />
           <Route path="ho-so" element={<ProfilePage />} />
           <Route
             path="quan-tri"
             element={
               <StaffOnly>
-                <PlaceholderPage title="Quản trị" />
+                <AdminPage />
               </StaffOnly>
             }
           />

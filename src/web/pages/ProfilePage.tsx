@@ -1,15 +1,23 @@
 /**
  * Hồ sơ của chính mình: avatar, tên, mã thành viên (sao chép), email (lưu bằng
- * PATCH) và hai công tắc nhắc giờ (PATCH ngay khi bật/tắt). Kết quả PATCH được
- * ghi thẳng vào cache `['me']` nên cả trang cập nhật theo.
+ * PATCH), hai công tắc nhắc giờ (PATCH ngay khi bật/tắt), các role đang hoá thân
+ * mùa này (`/api/me/titles`, nhân vật nhỏ mang tên mình) và link sang lịch sử khai.
+ * Kết quả PATCH được ghi thẳng vào cache `['me']` nên cả trang cập nhật theo.
  */
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
-import type { MeDto } from '../../shared/api-types';
-import { apiSend, errorMessage } from '../api';
+import { Link } from 'react-router';
+import type { HeldRoleDto, MeDto } from '../../shared/api-types';
+import { apiGet, apiSend, errorMessage } from '../api';
 import { Avatar } from '../components/Avatar';
+import { Character } from '../components/Character';
+import { QueryState } from '../components/QueryState';
 import { ME_QUERY_KEY, useCurrentMember } from '../hooks/useMe';
+
+const TITLES_QUERY_KEY = ['me', 'titles'] as const;
+/** Nhân vật nhỏ trong danh sách role đang giữ (px). */
+const HELD_CHARACTER_SIZE = 72;
 
 interface ProfilePatch {
   email?: string | null;
@@ -44,7 +52,43 @@ export function ProfilePage() {
 
       <EmailSection me={me} />
       <NotifySection me={me} />
+      <HeldRolesSection me={me} />
     </div>
+  );
+}
+
+/** Các role tôi đang dẫn đầu mùa này, mỗi role một nhân vật nhỏ mang tên tôi. */
+function HeldRolesSection({ me }: { me: MeDto }) {
+  const titles = useQuery({ queryKey: TITLES_QUERY_KEY, queryFn: () => apiGet<HeldRoleDto[]>('/api/me/titles') });
+
+  return (
+    <section className="card flex flex-col gap-3">
+      <h2 className="text-lg font-semibold">Role đang giữ mùa này</h2>
+      <QueryState query={titles}>
+        {(held) =>
+          held.length === 0 ? (
+            <p className="text-slate-600 dark:text-slate-400">Chưa giữ role nào mùa này</p>
+          ) : (
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {held.map(({ role, score }) => (
+                <li key={role.id} className="flex flex-col items-center gap-1 text-center">
+                  <Character role={role} holderName={me.displayName} variant="current" size={HELD_CHARACTER_SIZE} />
+                  <span className="leading-tight font-semibold">
+                    {role.icon} {role.nameVi}
+                  </span>
+                  <span className="text-sm leading-tight text-slate-600 dark:text-slate-400">
+                    <span className="font-semibold text-slate-900 tabular-nums dark:text-slate-100">{score}</span> {role.metricLabel}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </QueryState>
+      <Link to="/khai-diem" className="btn-secondary self-start">
+        Xem lịch sử khai điểm
+      </Link>
+    </section>
   );
 }
 

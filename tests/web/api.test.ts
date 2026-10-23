@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { ApiError, apiGet, apiSend } from '../../src/web/api';
+import { ApiError, apiGet, apiPutBlob, apiSend } from '../../src/web/api';
 
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -91,4 +91,39 @@ test('non-JSON error body becomes a generic ApiError', async () => {
     status: 502,
   });
   expect(assign).not.toHaveBeenCalled();
+});
+
+test('apiPutBlob sends the blob raw with its own content type and credentials', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const png = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' });
+
+  await expect(apiPutBlob('/api/admin/roles/1/image', png)).resolves.toBeUndefined();
+
+  const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+  expect(url).toBe('/api/admin/roles/1/image');
+  expect(init.method).toBe('PUT');
+  expect(init.credentials).toBe('include');
+  expect(init.body).toBe(png);
+  expect(new Headers(init.headers).get('content-type')).toBe('image/png');
+});
+
+test('apiPutBlob turns an error body into ApiError and 401 into a login redirect', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(jsonResponse(400, { error: { code: 'INVALID_IMAGE', message: 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB' } })),
+  );
+  await expect(apiPutBlob('/api/admin/roles/1/image', new Blob(['x'], { type: 'image/png' }))).rejects.toMatchObject({
+    code: 'INVALID_IMAGE',
+    message: 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB',
+    status: 400,
+  });
+  expect(assign).not.toHaveBeenCalled();
+
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(jsonResponse(401, { error: { code: 'UNAUTHENTICATED', message: 'Bạn cần đăng nhập' } })),
+  );
+  await expect(apiPutBlob('/api/admin/roles/1/image', new Blob(['x'], { type: 'image/png' }))).rejects.toMatchObject({ status: 401 });
+  expect(assign).toHaveBeenCalledWith('/login');
 });

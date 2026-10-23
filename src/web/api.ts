@@ -36,6 +36,22 @@ export function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : GENERIC_MESSAGE;
 }
 
+/**
+ * `PUT` một tệp nhị phân (ảnh role) dưới dạng body thô với content-type của chính
+ * tệp — route ảnh là ngoại lệ duy nhất của guard "chỉ nhận JSON". Lỗi và 401 xử lý
+ * như mọi lời gọi khác.
+ */
+export async function apiPutBlob(path: string, body: Blob): Promise<void> {
+  const res = await fetch(path, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { accept: 'application/json', 'content-type': body.type },
+    body,
+  });
+  if (res.ok) return;
+  throw await failure(res);
+}
+
 async function request<T>(method: 'GET' | MutatingMethod, path: string, body: unknown): Promise<T> {
   const headers: Record<string, string> = { accept: 'application/json' };
   const init: RequestInit = { method, credentials: 'include', headers };
@@ -49,10 +65,14 @@ async function request<T>(method: 'GET' | MutatingMethod, path: string, body: un
   const res = await fetch(path, init);
   if (res.status === 204) return undefined as T;
   if (res.ok) return (await res.json()) as T;
+  throw await failure(res);
+}
 
+/** Phản hồi lỗi → `ApiError`; 401 ngoài trang đăng nhập thì đưa về `/login` trước khi ném. */
+async function failure(res: Response): Promise<ApiError> {
   const error = await toApiError(res);
   if (res.status === 401 && window.location.pathname !== LOGIN_PATH) window.location.assign(LOGIN_PATH);
-  throw error;
+  return error;
 }
 
 async function toApiError(res: Response): Promise<ApiError> {

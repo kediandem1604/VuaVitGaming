@@ -1,8 +1,10 @@
 /**
  * Mọi định dạng ngày giờ hiển thị trên web nằm ở đây, đều qua `Intl.DateTimeFormat`
  * với múi giờ Việt Nam — web không tự làm toán múi giờ (đó là việc của
- * `src/server/lib/time.ts`) và không bao giờ tự tính "hôm nay" để gửi lên API:
- * bỏ tham số `date` thì server trả về ngày hôm nay của Việt Nam.
+ * `src/server/lib/time.ts`). Các trang danh sách không tự tính "hôm nay" để gửi lên
+ * API: bỏ tham số `date` thì server trả về ngày hôm nay của Việt Nam. Chỉ ô chọn
+ * ngày của form (giá trị mặc định, khoảng cho chọn) cần "hôm nay" phía client —
+ * `vnTodayIso` lấy nó từ `Intl` (ruling R34b); server vẫn là nơi quyết định cuối.
  *
  * Chuỗi được lắp từ `formatToParts` thay vì lấy nguyên `format()`, để hình dạng
  * (`HH:mm`, `Thứ Năm, 22/10`, `22/10/2026`) không phụ thuộc dấu câu của từng engine.
@@ -65,9 +67,10 @@ export function formatDayLabel(date: string | Date): string {
   return `${capitalise(weekday ?? '')}, ${day}/${month}`;
 }
 
-/** Ngày VN `YYYY-MM-DD` → `22/10/2026`. */
-export function formatDateLabel(date: string): string {
-  const { day, month, year } = parts(dateFormat, vnDateToInstant(date));
+/** `22/10/2026` của một ngày VN `YYYY-MM-DD`, hoặc của một mốc thời gian (lấy ngày Việt Nam của mốc đó). */
+export function formatDateLabel(date: string | Date): string {
+  const instant = typeof date === 'string' ? vnDateToInstant(date) : date;
+  const { day, month, year } = parts(dateFormat, instant);
   return `${day}/${month}/${year}`;
 }
 
@@ -75,4 +78,21 @@ export function formatDateLabel(date: string): string {
 export function formatSeasonLabel(seasonId: string): string {
   const [year = '', month = ''] = seasonId.split('-');
   return `Tháng ${Number(month)}/${year}`;
+}
+
+/** Ngày hôm nay theo giờ Việt Nam, dạng `YYYY-MM-DD` — cho giá trị mặc định / giới hạn của ô chọn ngày. */
+export function vnTodayIso(now: Date = new Date()): string {
+  const { day, month, year } = parts(dateFormat, now);
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Cộng `n` ngày (âm để lùi) vào một ngày `YYYY-MM-DD`. Thuần số học lịch (qua
+ * `Date.UTC`, không dính múi giờ): `addDaysIso('2026-11-01', -3) === '2026-10-29'`.
+ */
+export function addDaysIso(iso: string, n: number): string {
+  const [year = 0, month = 0, day = 0] = iso.split('-').map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + n));
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${String(shifted.getUTCFullYear()).padStart(4, '0')}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
 }

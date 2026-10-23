@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { formatDateLabel, formatDayLabel, formatSeasonLabel, formatTime } from '../../src/web/lib/format';
+import { addDaysIso, formatDateLabel, formatDayLabel, formatSeasonLabel, formatTime, vnTodayIso } from '../../src/web/lib/format';
 
 test('formatTime renders the Vietnam wall clock as HH:mm', () => {
   expect(formatTime('2026-10-22T14:00:00.000Z')).toBe('21:00');
@@ -26,7 +26,28 @@ test('formatDateLabel renders YYYY-MM-DD as dd/MM/yyyy', () => {
   expect(formatDateLabel('2026-01-03')).toBe('03/01/2026');
 });
 
+test('formatDateLabel of a Date uses the Vietnam day, not UTC', () => {
+  expect(formatDateLabel(new Date('2026-10-22T17:30:00.000Z'))).toBe('23/10/2026');
+  expect(formatDateLabel(new Date('2026-12-31T17:00:00.000Z'))).toBe('01/01/2027');
+});
+
 test('formatSeasonLabel renders a YYYY-MM season as Tháng M/yyyy', () => {
   expect(formatSeasonLabel('2026-10')).toBe('Tháng 10/2026');
   expect(formatSeasonLabel('2026-01')).toBe('Tháng 1/2026');
+});
+
+test('vnTodayIso is the Vietnam calendar day, not UTC', () => {
+  expect(vnTodayIso(new Date('2026-10-22T12:00:00.000Z'))).toBe('2026-10-22');
+  // 17:30Z ngày 22 đã là ngày 23 ở Việt Nam.
+  expect(vnTodayIso(new Date('2026-10-22T17:30:00.000Z'))).toBe('2026-10-23');
+  expect(vnTodayIso(new Date('2026-12-31T17:00:00.000Z'))).toBe('2027-01-01');
+  expect(vnTodayIso()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('addDaysIso shifts a YYYY-MM-DD across month and year boundaries', () => {
+  expect(addDaysIso('2026-10-22', -3)).toBe('2026-10-19');
+  expect(addDaysIso('2026-11-01', -3)).toBe('2026-10-29');
+  expect(addDaysIso('2026-12-31', 1)).toBe('2027-01-01');
+  expect(addDaysIso('2026-03-01', -1)).toBe('2026-02-28');
+  expect(addDaysIso('2026-10-22', 0)).toBe('2026-10-22');
 });

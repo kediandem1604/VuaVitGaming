@@ -31,9 +31,9 @@ afterEach(() => {
 });
 
 test('a failed background refetch keeps the layout when me is already loaded', async () => {
-  // Trang Hồ sơ không tự gọi API nào: mọi "Thử lại"/alert xuất hiện chỉ có thể là
-  // của màn hình lỗi toàn trang (trang Hôm nay ở `/` có nút Thử lại riêng của nó).
-  window.history.replaceState({}, '', '/ho-so');
+  // Trang 404 không tự gọi API nào: mọi "Thử lại"/alert xuất hiện chỉ có thể là của
+  // màn hình lỗi toàn trang (các trang thật đều có truy vấn và nút Thử lại riêng).
+  window.history.replaceState({}, '', '/khong-co-trang-nay');
   const queryClient = makeClient();
   queryClient.setQueryData(['me'], me);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(serverError()));

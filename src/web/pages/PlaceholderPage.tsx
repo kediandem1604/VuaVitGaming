@@ -1,14 +1,6 @@
-import { Link } from 'react-router';
+/** Hai trang "không có gì để xem": không tìm thấy và không có quyền. */
 
-/** Trang chưa làm: tiêu đề + "Sắp có". */
-export function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      <p className="text-slate-600 dark:text-slate-400">Sắp có</p>
-    </div>
-  );
-}
+import { Link } from 'react-router';
 
 export function NotFoundPage() {
   return (
