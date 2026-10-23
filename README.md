@@ -346,9 +346,9 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 
 ### Cài đặt (admin)
 
-- **Quản trị → Cài đặt**: thời gian mở vote (1–72 giờ, mặc định 12), tự kết thúc buổi sau (1–24 giờ, mặc định 4), nhắc trước (5–120 phút, mặc định 15).
+- **Quản trị → Cài đặt**: thời gian mở vote (1–72 giờ, mặc định 12), tự kết thúc buổi sau (1–24 giờ, mặc định 4), nhắc trước (5–120 phút, mặc định 15). Cuối tab là mục **Chế độ chơi**: sửa tên tiếng Việt của từng chế độ (tên Việt của dữ liệu mẫu chưa được xác minh hết) và bật/tắt — chế độ tắt không còn trong form tạo buổi, hạng mục và role; buổi cũ giữ nguyên.
 - **Hạng mục**: thêm/sửa/ẩn hạng mục tri ân; phạm vi *luôn có* / *theo chế độ* / *tuỳ chọn*.
-- **Role**: sửa tên tiếng Việt, tên chỉ số, giới hạn mỗi trận, biểu tượng, bật/tắt; tải ảnh riêng cho role (PNG/JPG/WebP, tối đa 1 MB) thay nhân vật vẽ sẵn. Thêm role mới khi game cập nhật.
+- **Role**: sửa phe, tên tiếng Việt, tên chỉ số, giới hạn mỗi trận, biểu tượng, bật/tắt; tải ảnh riêng cho role (PNG/JPG/WebP, tối đa 1 MB) thay nhân vật vẽ sẵn. Form **Thêm role** ở đầu tab khi game ra role mới (key cố định sau khi tạo; role riêng của một chế độ thì chọn chế độ đó).
 - **Thành viên**: tìm theo tên/mã, lọc đang hoạt động / đã rời. Email chỉ admin (và chính chủ) thấy.
 
 ---

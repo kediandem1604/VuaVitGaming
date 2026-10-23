@@ -26,6 +26,12 @@ export interface ModeDto {
   nameVi: string;
 }
 
+/** Một chế độ chơi cho admin (`GET /api/admin/modes` — kể cả đang tắt; `PATCH /api/admin/modes/:id`). */
+export interface AdminModeDto extends ModeDto {
+  nameEn: string;
+  active: boolean;
+}
+
 export interface SessionAttendeeDto {
   memberId: number;
   displayName: string;

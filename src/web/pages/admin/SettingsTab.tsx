@@ -5,15 +5,25 @@
  *
  * Mutation nằm ở tab (không ở form): form được dựng lại theo dữ liệu server (`key`)
  * để các ô luôn khớp cài đặt đã lưu, mà trạng thái "Đã lưu" / lỗi không bị mất theo.
+ *
+ * Cuối tab: mục "Chế độ chơi" — mọi chế độ kể cả đang tắt (`/api/admin/modes`), mỗi
+ * chế độ sửa được tên tiếng Việt (spec §6.5: tên Việt chưa xác minh) và bật/tắt (chế độ
+ * tắt không hiện trong form tạo buổi / hạng mục / role). Lưu xong thì danh sách chế độ
+ * công khai (`['modes']`, các form đó dùng) được tải lại.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
-import type { SettingsDto } from '../../../shared/api-types';
+import type { AdminModeDto, SettingsDto } from '../../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../../api';
 import { QueryState } from '../../components/QueryState';
+import { Chip } from './Chip';
 
 const SETTINGS_KEY = ['admin', 'settings'] as const;
+const ADMIN_MODES_KEY = ['admin', 'modes'] as const;
+/** Danh sách chế độ đang bật cho các form (tạo buổi, hạng mục, thêm role). */
+const PUBLIC_MODES_KEY = ['modes'] as const;
+const MODE_NAME_MAX = 60;
 
 interface FieldDef {
   key: keyof SettingsDto;
@@ -39,24 +49,27 @@ export function SettingsTab() {
   });
 
   return (
-    <section className="card flex max-w-lg flex-col gap-3">
-      <h2 className="text-lg font-semibold">Cài đặt</h2>
-      <QueryState query={settings}>
-        {(data) => (
-          <SettingsForm
-            key={JSON.stringify(data)}
-            settings={data}
-            pending={save.isPending}
-            serverError={save.isError ? errorMessage(save.error) : null}
-            saved={save.isSuccess}
-            onChange={() => {
-              if (save.isError || save.isSuccess) save.reset();
-            }}
-            onSubmit={(body) => save.mutate(body)}
-          />
-        )}
-      </QueryState>
-    </section>
+    <>
+      <section className="card flex max-w-lg flex-col gap-3">
+        <h2 className="text-lg font-semibold">Cài đặt</h2>
+        <QueryState query={settings}>
+          {(data) => (
+            <SettingsForm
+              key={JSON.stringify(data)}
+              settings={data}
+              pending={save.isPending}
+              serverError={save.isError ? errorMessage(save.error) : null}
+              saved={save.isSuccess}
+              onChange={() => {
+                if (save.isError || save.isSuccess) save.reset();
+              }}
+              onSubmit={(body) => save.mutate(body)}
+            />
+          )}
+        </QueryState>
+      </section>
+      <ModesSection />
+    </>
   );
 }
 
@@ -136,5 +149,118 @@ function SettingsForm({ settings, pending, serverError, saved, onChange, onSubmi
         </p>
       </div>
     </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Chế độ chơi
+// ---------------------------------------------------------------------------
+
+function ModesSection() {
+  const titleId = useId();
+  const modes = useQuery({ queryKey: ADMIN_MODES_KEY, queryFn: () => apiGet<AdminModeDto[]>('/api/admin/modes') });
+
+  return (
+    <section aria-labelledby={titleId} className="card flex max-w-lg flex-col gap-3">
+      <h2 id={titleId} className="text-lg font-semibold">
+        Chế độ chơi
+      </h2>
+      <p className="text-sm text-slate-600 dark:text-slate-400">
+        Tên tiếng Việt hiện ở buổi chơi, tin Discord và hạng mục. Chế độ tắt không còn trong form tạo buổi; buổi cũ giữ nguyên.
+      </p>
+      <QueryState query={modes}>
+        {(list) => (
+          <ul className="flex flex-col gap-3">
+            {list.map((mode) => (
+              <li key={mode.id}>
+                <ModeRow mode={mode} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </QueryState>
+    </section>
+  );
+}
+
+function ModeRow({ mode }: { mode: AdminModeDto }) {
+  const queryClient = useQueryClient();
+  const id = useId();
+  const [nameVi, setNameVi] = useState(mode.nameVi);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: (body: { nameVi?: string; active?: boolean }) => apiSend<AdminModeDto>('PATCH', `/api/admin/modes/${mode.id}`, body),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<AdminModeDto[]>(ADMIN_MODES_KEY, (current) => current?.map((item) => (item.id === updated.id ? updated : item)));
+      void queryClient.invalidateQueries({ queryKey: PUBLIC_MODES_KEY });
+    },
+  });
+
+  const rename = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = nameVi.trim();
+    if (trimmed === '') return setLocalError('Tên tiếng Việt không được để trống');
+    setLocalError(null);
+    if (trimmed !== mode.nameVi) save.mutate({ nameVi: trimmed });
+  };
+
+  const error = localError ?? (save.isError ? errorMessage(save.error) : null);
+  const renamed = save.isSuccess && save.variables?.nameVi !== undefined;
+
+  return (
+    <div role="group" aria-labelledby={`${id}-title`} className="flex flex-col gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span id={`${id}-title`} className="font-semibold">
+          {mode.nameEn}
+        </span>
+        {!mode.active && <Chip tone="duck">Đã tắt</Chip>}
+        <label htmlFor={`${id}-active`} className="ml-auto flex items-center gap-2 text-sm">
+          <input
+            id={`${id}-active`}
+            type="checkbox"
+            role="switch"
+            className="size-4 accent-goose"
+            checked={mode.active}
+            disabled={save.isPending}
+            onChange={(event) => {
+              setLocalError(null);
+              save.mutate({ active: event.target.checked });
+            }}
+          />
+          Đang bật
+        </label>
+      </div>
+      <form noValidate onSubmit={rename} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <label htmlFor={`${id}-name`} className="text-sm font-medium">
+            Tên tiếng Việt
+          </label>
+          <input
+            id={`${id}-name`}
+            type="text"
+            maxLength={MODE_NAME_MAX}
+            className="field"
+            value={nameVi}
+            onChange={(event) => {
+              setNameVi(event.target.value);
+              setLocalError(null);
+              if (save.isError || save.isSuccess) save.reset();
+            }}
+          />
+        </div>
+        <button type="submit" className="btn-secondary self-start sm:self-auto" disabled={save.isPending}>
+          {save.isPending ? 'Đang lưu…' : 'Lưu tên'}
+        </button>
+      </form>
+      {error && (
+        <p role="alert" className="text-sm text-duck">
+          {error}
+        </p>
+      )}
+      <p role="status" aria-live="polite" className="min-h-5 text-sm text-goose">
+        {renamed && 'Đã lưu'}
+      </p>
+    </div>
   );
 }

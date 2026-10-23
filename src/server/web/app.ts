@@ -19,6 +19,7 @@ import type { OAuthClient } from '../modules/auth/oauth.js';
 import { installAuth } from './auth-plugin.js';
 import { adminCategoryRoutes } from './routes/admin-categories.js';
 import { adminMiscRoutes } from './routes/admin-misc.js';
+import { adminModeRoutes } from './routes/admin-modes.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
 import { mvpRoutes } from './routes/mvp.js';
@@ -73,6 +74,7 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(mvpRoutes);
   await app.register(adminCategoryRoutes);
   await app.register(adminMiscRoutes);
+  await app.register(adminModeRoutes);
   await app.register(roleRoutes);
   await app.register(statsRoutes);
 

@@ -109,6 +109,8 @@ Trước đó: **Quản trị → Hạng mục** có ít nhất một hạng m�
 
 - [ ] **Cài đặt**: đổi *Nhắc trước* thành 20 → **Đã lưu**; nhập 3 → báo khoảng hợp lệ, không gửi. Trả về 15.
 - [ ] **Hạng mục**: thêm hạng mục *theo chế độ* cho Săn ngỗng → tạo buổi Săn ngỗng → kết thúc → hạng mục đó **tick sẵn**; buổi Classic **không** có. Ẩn hạng mục → không còn trong hộp kết thúc.
+- [ ] **Role → Thêm role**: thêm một role thử (key `thu_nghiem`, phe Vịt, giới hạn 5) → **Đã thêm**, role hiện cuối nhóm **Phe Vịt** và có trong **Khai điểm**; thêm lại cùng key → **Key đã tồn tại**. Đổi **Phe** của role đó sang Phe thứ 3 → **Lưu** → role chuyển nhóm; rồi tắt role đó.
+- [ ] **Cài đặt → Chế độ chơi**: đổi tên tiếng Việt của một chế độ → **Đã lưu** → form tạo buổi hiện tên mới; tắt chế độ đó → không còn trong form tạo buổi; bật lại.
 - [ ] **Role**: tải ảnh PNG ≤ 1 MB cho một role → **Đại sảnh** và **BXH** hiện ảnh mới (không phải ảnh cũ); **Xoá ảnh** → về nhân vật vẽ. Thử file 2 MB hoặc `.gif` → **Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB**, không gửi.
 - [ ] **Thành viên**: tìm `kẹ`/`ke` (không dấu) đều ra; lọc *Đã rời*; **M** mở cùng tab → **không thấy cột email**; **A** thấy.
 - [ ] **Gửi lỗi** (M đang xem): nội dung lỗi có địa chỉ email thì hiện `[email ẩn]`; **A** thấy địa chỉ thật.

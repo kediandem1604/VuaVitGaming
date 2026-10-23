@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { RoleDto } from '../../src/shared/api-types';
+import type { ModeDto, RoleDto } from '../../src/shared/api-types';
 import { RolesTab } from '../../src/web/pages/admin/RolesTab';
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn' | 'icon' | 'metricLabel'> & Partial<RoleDto>): RoleDto => ({
@@ -20,6 +20,11 @@ const roles: RoleDto[] = [
   role({ id: 61, key: 'swordsman', faction: 'duck', nameVi: 'Kiếm sĩ', nameEn: 'Swordsman', icon: '⚔️', metricLabel: 'Số mạng chém', maxPerGame: 15, hasImage: true }),
   role({ id: 70, key: 'dodo', faction: 'neutral', nameVi: 'Chim đa đa', nameEn: 'Dodo', icon: '🦤', metricLabel: 'Số trận thắng (bị vote ra)', maxPerGame: 1 }),
   role({ id: 80, key: 'inquisitor', faction: 'goose', nameVi: 'Thanh tra', nameEn: 'Inquisitor', icon: '🪿', metricLabel: 'Điểm', modeKey: 'corruption', active: false }),
+];
+
+const modes: ModeDto[] = [
+  { id: 1, key: 'classic', nameVi: 'Cổ điển (Classic)' },
+  { id: 6, key: 'corruption', nameVi: 'Tha hoá (Corruption)' },
 ];
 
 const json = (status: number, body: unknown) =>
@@ -60,12 +65,12 @@ afterEach(() => {
 });
 
 test('roles are grouped by faction with special-mode roles apart; inactive ones are marked', async () => {
-  stubFetch({ 'GET /api/roles?all=1': () => json(200, roles) });
+  stubFetch({ 'GET /api/roles?all=1': () => json(200, roles), 'GET /api/modes': () => json(200, modes) });
   renderTab();
   await swordsmanCard();
 
   const groups = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
-  expect(groups).toEqual(['Phe Ngỗng (1)', 'Phe Vịt (1)', 'Phe thứ 3 (1)', 'Chế độ đặc biệt (1)']);
+  expect(groups).toEqual(['Thêm role', 'Phe Ngỗng (1)', 'Phe Vịt (1)', 'Phe thứ 3 (1)', 'Chế độ đặc biệt (1)']);
   const inquisitor = screen.getByRole('region', { name: 'Thanh tra (Inquisitor)' });
   expect(inquisitor).toHaveTextContent('Đã tắt');
   expect(within(inquisitor).getByRole('checkbox', { name: 'Đang bật' })).not.toBeChecked();
@@ -75,7 +80,7 @@ test('roles are grouped by faction with special-mode roles apart; inactive ones 
 });
 
 test('a wrong type or an image over 1 MB is refused before any upload', async () => {
-  const fetchMock = stubFetch({ 'GET /api/roles?all=1': () => json(200, roles) });
+  const fetchMock = stubFetch({ 'GET /api/roles?all=1': () => json(200, roles), 'GET /api/modes': () => json(200, modes) });
   renderTab();
   const card = await swordsmanCard();
   const input = within(card).getByLabelText('Tải ảnh (PNG, JPG hoặc WebP, tối đa 1 MB)');
@@ -94,6 +99,7 @@ test('a wrong type or an image over 1 MB is refused before any upload', async ()
 test('a valid image is PUT raw with its own content type, then role and hall caches are refreshed', async () => {
   const fetchMock = stubFetch({
     'GET /api/roles?all=1': () => json(200, roles),
+    'GET /api/modes': () => json(200, modes),
     'PUT /api/admin/roles/1/image': () => noContent(),
   });
   const queryClient = renderTab();
@@ -117,6 +123,7 @@ test('saving edits patches only the changed fields', async () => {
   let patched: unknown = null;
   stubFetch({
     'GET /api/roles?all=1': () => json(200, roles),
+    'GET /api/modes': () => json(200, modes),
     'PATCH /api/admin/roles/61': (init) => {
       patched = JSON.parse(String(init?.body));
       return json(200, { ...(roles[1] as RoleDto), metricLabel: 'Số người bị chém', maxPerGame: 16 });
@@ -129,4 +136,84 @@ test('saving edits patches only the changed fields', async () => {
   fireEvent.click(within(card).getByRole('button', { name: 'Lưu' }));
   await waitFor(() => expect(patched).toEqual({ metricLabel: 'Số người bị chém', maxPerGame: 16 }));
   expect(await within(card).findByText('Đã lưu')).toBeInTheDocument();
+});
+
+test('the faction is edited inline and sent in the PATCH; the card moves to its new group', async () => {
+  let patched: unknown = null;
+  stubFetch({
+    'GET /api/roles?all=1': () => json(200, roles),
+    'GET /api/modes': () => json(200, modes),
+    'PATCH /api/admin/roles/70': (init) => {
+      patched = JSON.parse(String(init?.body));
+      return json(200, { ...(roles[2] as RoleDto), faction: 'duck' });
+    },
+  });
+  renderTab();
+  const card = await screen.findByRole('region', { name: 'Chim đa đa (Dodo)' });
+  const faction = within(card).getByRole('combobox', { name: 'Phe' });
+  expect(faction).toHaveValue('neutral');
+  expect(within(faction).getAllByRole('option').map((o) => o.textContent)).toEqual(['Phe Ngỗng', 'Phe Vịt', 'Phe thứ 3']);
+
+  fireEvent.change(faction, { target: { value: 'duck' } });
+  fireEvent.click(within(card).getByRole('button', { name: 'Lưu' }));
+  await waitFor(() => expect(patched).toEqual({ faction: 'duck' }));
+  await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Phe Vịt (2)' })).toBeInTheDocument());
+  expect(screen.getByRole('heading', { level: 2, name: 'Phe thứ 3 (0)' })).toBeInTheDocument();
+});
+
+test('"Thêm role" posts the new role, shows server errors such as a taken key, then resets', async () => {
+  const posted: unknown[] = [];
+  let reply = (): Response => json(400, { error: { code: 'VALIDATION', message: 'Key đã tồn tại' } });
+  const fetchMock = stubFetch({
+    'GET /api/roles?all=1': () => json(200, roles),
+    'GET /api/modes': () => json(200, modes),
+    'POST /api/admin/roles': (init) => {
+      posted.push(JSON.parse(String(init?.body)));
+      return reply();
+    },
+  });
+  renderTab();
+  const form = await screen.findByRole('form', { name: 'Thêm role' });
+  const field = (name: string) => within(form).getByRole('textbox', { name });
+
+  // Thiếu trường bắt buộc: báo tại chỗ, không gửi.
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm role' }));
+  expect(await within(form).findByRole('alert')).toHaveTextContent('Key không được để trống');
+
+  fireEvent.change(field('Key'), { target: { value: 'goose' } });
+  fireEvent.change(within(form).getByRole('combobox', { name: 'Phe' }), { target: { value: 'duck' } });
+  fireEvent.change(field('Tên tiếng Việt'), { target: { value: ' Vịt thợ săn ' } });
+  fireEvent.change(field('Tên tiếng Anh'), { target: { value: 'Hunter Duck' } });
+  fireEvent.change(field('Tên chỉ số'), { target: { value: 'Số mạng săn' } });
+  fireEvent.change(within(form).getByRole('spinbutton', { name: 'Tối đa mỗi trận' }), { target: { value: '7' } });
+  fireEvent.change(field('Biểu tượng'), { target: { value: '🦆' } });
+  fireEvent.change(field('Mô tả (không bắt buộc)'), { target: { value: 'Săn ngỗng ban đêm' } });
+  const mode = within(form).getByRole('combobox', { name: 'Chế độ đặc biệt (không bắt buộc)' });
+  expect(within(mode).getAllByRole('option').map((o) => o.textContent)).toEqual(['— Không —', 'Cổ điển (Classic)', 'Tha hoá (Corruption)']);
+  fireEvent.change(mode, { target: { value: 'corruption' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm role' }));
+
+  expect(await within(form).findByRole('alert')).toHaveTextContent('Key đã tồn tại');
+  expect(posted).toEqual([
+    {
+      key: 'goose',
+      faction: 'duck',
+      nameVi: 'Vịt thợ săn',
+      nameEn: 'Hunter Duck',
+      metricLabel: 'Số mạng săn',
+      maxPerGame: 7,
+      icon: '🦆',
+      description: 'Săn ngỗng ban đêm',
+      modeKey: 'corruption',
+    },
+  ]);
+
+  // Sửa key rồi gửi lại: tạo được, danh sách role được tải lại, form trống trở lại.
+  reply = () => json(201, role({ id: 99, key: 'hunter_duck', faction: 'duck', nameVi: 'Vịt thợ săn', nameEn: 'Hunter Duck', icon: '🦆', metricLabel: 'Số mạng săn', modeKey: 'corruption' }));
+  fireEvent.change(field('Key'), { target: { value: 'hunter_duck' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm role' }));
+  expect(await screen.findByText('Đã thêm “Vịt thợ săn”')).toBeInTheDocument();
+  expect(posted[1]).toMatchObject({ key: 'hunter_duck' });
+  await waitFor(() => expect(within(screen.getByRole('form', { name: 'Thêm role' })).getByRole('textbox', { name: 'Key' })).toHaveValue(''));
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/api/roles?all=1').length).toBeGreaterThanOrEqual(2);
 });
