@@ -306,3 +306,43 @@
     transform: rotate(-9deg);
   }
 }
+
+/*
+ * Hoạt ảnh nhân vật hoá thân (Character): cả hình nhún nhẹ 2px (`goose-idle`), mắt chớp
+ * thưa (`goose-eyes`). Chỉ chạy khi máy không bật giảm chuyển động (spec §3.5);
+ * `--goose-delay` do từng nhân vật đặt để lưới Đại sảnh không nhún đều một nhịp.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .goose-idle {
+    animation: goose-idle 3s ease-in-out infinite;
+    animation-delay: var(--goose-delay, 0s);
+  }
+
+  .goose-eyes {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: goose-blink 5.2s infinite;
+    animation-delay: var(--goose-delay, 0s);
+  }
+}
+
+@keyframes goose-idle {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes goose-blink {
+  0%,
+  94%,
+  100% {
+    transform: scaleY(1);
+  }
+  97% {
+    transform: scaleY(0.1);
+  }
+}

@@ -1,21 +1,32 @@
 /**
- * Nhân vật hoá thân (spec §4.8). Trong game ai cũng cùng một dáng, nên đây là một
- * dáng ngỗng SVG vẽ tay dùng chung cho mọi role: thân tròn tô màu phe, bụng trắng,
- * cổ dài, mỏ và chân cam, huy hiệu role trên ngực; bảng tên người giữ nổi trên đầu
- * như trong game — chữ trắng đậm viền tối, tự co theo độ dài (`nameplate.ts`).
+ * Nhân vật hoá thân (spec §4). Trong game ai cũng cùng một dáng, nên đây là một dáng
+ * ngỗng trắng vẽ tay dùng chung cho mọi role (`GooseBody`), mặc bộ đồ theo role
+ * (`KitArt`, bảng `roleKits.ts`). Màu phe không tô lên thân mà hiện ở vòng sáng dưới
+ * chân; bảng tên người giữ nổi trên đầu như trong game — chữ trắng đậm viền tối, tự co
+ * theo độ dài (`nameplate.ts`).
  *
- * Ba biến thể: `current` (đủ màu), `previous` (thân mờ 0.45 + nhãn "Mùa trước"),
- * `empty` (thân xám, bảng tên "Chưa ai hoá thân"). Role có ảnh tuỳ chỉnh thì một
- * `<img loading="lazy">` nằm đúng chỗ phần thân vẽ, SVG phía trên chỉ còn bảng tên
- * — ảnh của mỗi role được tải trễ vì endpoint ảnh có bucket giới hạn tốc độ riêng.
+ * Thứ tự vẽ: vòng sáng phe → lớp sau của bộ đồ → thân → lớp trước của bộ đồ, tất cả
+ * trong `<g data-part="figure">` (nhún nhẹ bằng lớp `goose-idle`); rồi bảng tên và nhãn
+ * "Mùa trước" nằm ngoài để không mờ theo hình.
+ *
+ * Ba biến thể: `current` (đủ màu), `previous` (hình mờ 0.45 + nhãn "Mùa trước"),
+ * `empty` (hình bóng `night-600`, không vòng sáng, không bộ đồ, bảng tên "Chưa ai hoá
+ * thân"). Role có ảnh tuỳ chỉnh thì một `<img loading="lazy">` nằm đúng chỗ phần thân
+ * vẽ, SVG chỉ còn vòng sáng và bảng tên — ảnh của mỗi role được tải trễ vì endpoint ảnh
+ * có bucket giới hạn tốc độ riêng.
  *
  * Toàn khối là một `role="img"` có `aria-label` "{role}: {tên}" nên trong lưới Đại
  * sảnh mỗi ô đọc được bằng một câu.
  */
 
-import type { Faction, RoleDto } from '../../shared/api-types';
+import type { CSSProperties } from 'react';
+import type { RoleDto } from '../../shared/api-types';
 import { cx } from '../lib/cx';
 import { nameplateFontSize, truncateName } from '../lib/nameplate';
+import { PALETTE } from '../lib/palette';
+import { FACTION_COLOUR, kitForRole } from '../lib/roleKits';
+import { GooseBody } from './goose/GooseBody';
+import { KitArt } from './goose/kits';
 
 export type CharacterVariant = 'current' | 'previous' | 'empty';
 
@@ -29,11 +40,6 @@ interface CharacterProps {
   className?: string;
 }
 
-/** Màu phe (Global Constraints) — cùng giá trị với `--goose/--duck/--neutral` trong styles.css. */
-const FACTION_COLOUR: Record<Faction, string> = { goose: '#2F80ED', duck: '#E5484D', neutral: '#8E4EC6' };
-const EMPTY_COLOUR = '#9CA3AF';
-const ORANGE = '#F59E0B';
-const INK = '#0B1020';
 const EMPTY_TEXT = 'Chưa ai hoá thân';
 const PREVIOUS_TEXT = 'Mùa trước';
 const DIMMED_OPACITY = 0.45;
@@ -44,10 +50,14 @@ const GLYPH_WIDTH_EM = 0.6;
 
 export function Character({ role, holderName, variant, size = 120, className }: CharacterProps) {
   const empty = variant === 'empty' || holderName === null;
-  const colour = empty ? EMPTY_COLOUR : FACTION_COLOUR[role.faction];
   const dimmed = variant === 'previous';
   const text = empty ? EMPTY_TEXT : truncateName(holderName);
   const label = `${role.nameVi}: ${empty ? EMPTY_TEXT : holderName}${dimmed && !empty ? ' (mùa trước)' : ''}`;
+  const drawn = !role.hasImage;
+  const dressed = drawn && !empty;
+  const kit = kitForRole(role.key);
+  // Mỗi role lệch nhịp một chút để lưới Đại sảnh không nhún đều như máy; trễ âm nên không có lúc đứng chờ.
+  const idleStyle = { '--goose-delay': `-${(role.id % 8) * 370}ms` } as CSSProperties;
 
   return (
     // Không tự căn giữa (mx-auto): trong hàng flex, lề tự động sẽ nuốt hết chỗ trống và đẩy
@@ -63,11 +73,31 @@ export function Character({ role, holderName, variant, size = 120, className }: 
         />
       )}
       <svg viewBox="0 0 120 160" className="relative block h-full w-full overflow-visible" aria-hidden="true">
-        {!role.hasImage && <Bird colour={colour} icon={role.icon} opacity={dimmed ? DIMMED_OPACITY : 1} />}
+        <g
+          data-part="figure"
+          className={dressed ? 'goose-idle' : undefined}
+          style={dressed ? idleStyle : undefined}
+          opacity={dimmed ? DIMMED_OPACITY : undefined}
+        >
+          {!empty && <Glow colour={FACTION_COLOUR[role.faction]} />}
+          {dressed && <KitArt kit={kit} role={role} layer="back" />}
+          {drawn && <GooseBody silhouette={empty} />}
+          {dressed && <KitArt kit={kit} role={role} layer="front" />}
+        </g>
         <Nameplate text={text} muted={empty} />
         {dimmed && <PreviousTag />}
       </svg>
     </div>
+  );
+}
+
+/** Vòng sáng phe dưới chân: hai elip cùng màu chồng nhau, vòng ngoài mờ hơn, cho cảm giác toả sáng. */
+function Glow({ colour }: { colour: string }) {
+  return (
+    <g data-part="glow" fill={colour}>
+      <ellipse cx="60" cy="153" rx="40" ry="6.5" opacity="0.2" />
+      <ellipse cx="60" cy="153" rx="30" ry="4.5" opacity="0.45" />
+    </g>
   );
 }
 
@@ -84,8 +114,8 @@ function Nameplate({ text, muted }: { text: string; muted: boolean }) {
       dominantBaseline="central"
       fontSize={fontSize}
       fontWeight={700}
-      fill={muted ? '#CBD5E1' : '#fff'}
-      stroke={INK}
+      fill={muted ? PALETTE['night-300'] : '#fff'}
+      stroke={PALETTE.ink}
       strokeWidth={4}
       strokeLinejoin="round"
       paintOrder="stroke"
@@ -100,48 +130,9 @@ function Nameplate({ text, muted }: { text: string; muted: boolean }) {
 function PreviousTag() {
   return (
     <g>
-      <rect x="34" y="27" width="52" height="12" rx="6" fill={INK} opacity="0.8" />
+      <rect x="34" y="27" width="52" height="12" rx="6" fill={PALETTE.ink} opacity="0.8" />
       <text x="60" y="33.4" textAnchor="middle" dominantBaseline="central" fontSize="8.5" fontWeight={600} fill="#fff">
         {PREVIOUS_TEXT}
-      </text>
-    </g>
-  );
-}
-
-/** Dáng ngỗng đứng quay mặt sang phải: đầu (41–67), cổ, thân (81–139), chân (–152). */
-function Bird({ colour, icon, opacity }: { colour: string; icon: string; opacity: number }) {
-  return (
-    <g opacity={opacity}>
-      {/* Bóng dưới chân theo màu chữ hiện tại → hợp cả nền sáng và tối. */}
-      <ellipse cx="60" cy="153" rx="28" ry="4" fill="currentColor" opacity="0.12" />
-
-      {/* Chân và bàn chân cam. */}
-      <path d="M52 136 L49 148 M68 136 L71 148" stroke={ORANGE} strokeWidth="3.5" strokeLinecap="round" />
-      <ellipse cx="47" cy="149" rx="8.5" ry="3.2" fill={ORANGE} />
-      <ellipse cx="73" cy="149" rx="8.5" ry="3.2" fill={ORANGE} />
-
-      {/* Cổ nối đầu với thân (cùng màu nên liền khối). */}
-      <rect x="53" y="52" width="14" height="42" rx="7" fill={colour} />
-
-      {/* Thân và hai cánh. */}
-      <ellipse cx="60" cy="110" rx="32" ry="29" fill={colour} />
-      <ellipse cx="33" cy="112" rx="8" ry="17" fill={INK} opacity="0.15" />
-      <ellipse cx="87" cy="112" rx="8" ry="17" fill={INK} opacity="0.15" />
-
-      {/* Bụng trắng. */}
-      <ellipse cx="60" cy="117" rx="20" ry="17" fill="#fff" />
-
-      {/* Đầu, điểm sáng, mỏ, mắt. */}
-      <circle cx="60" cy="54" r="12.5" fill={colour} />
-      <circle cx="55" cy="48.5" r="4" fill="#fff" opacity="0.25" />
-      <path d="M71 51 L87 55.5 L71 60 Z" fill={ORANGE} />
-      <circle cx="66" cy="50.5" r="2.4" fill={INK} />
-      <circle cx="66.9" cy="49.7" r="0.8" fill="#fff" />
-
-      {/* Huy hiệu role trên ngực. */}
-      <circle cx="60" cy="116" r="12" fill="#fff" stroke={colour} strokeWidth="2.5" />
-      <text x="60" y="116.5" textAnchor="middle" dominantBaseline="central" fontSize="13">
-        {icon}
       </text>
     </g>
   );
