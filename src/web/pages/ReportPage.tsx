@@ -5,8 +5,8 @@
  * ngày đó (không bắt buộc), ghi chú ≤ 300 ký tự — rồi "Lần khai của tôi" với trạng
  * thái và ô sửa cho lần khai còn chờ duyệt.
  *
- * Giao diện Sảnh đêm: mỗi gợi ý role có nhân vật thu nhỏ (không bảng tên) + tên role +
- * chip phe; role đã chọn hiện thành thẻ nhỏ có nhân vật; chip trạng thái lần khai: chờ
+ * Giao diện Sảnh đêm: mỗi gợi ý role có nhân vật thu nhỏ (không bảng tên, chỉ trang trí) +
+ * tên role + chip phe; role đã chọn hiện thành thẻ nhỏ có nhân vật; chip trạng thái lần khai: chờ
  * duyệt `gold`, đã duyệt `ok`, bị từ chối `duck-soft`.
  *
  * Form chỉ chặn tại chỗ hai lỗi hiển nhiên (chưa chọn role, chưa nhập giá trị); mọi
@@ -337,7 +337,7 @@ function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
                 <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="min-w-0 break-words">
                     <span className="font-bold text-white">
-                      {role.icon} {role.nameVi}
+                      <span aria-hidden="true">{role.icon}</span> {role.nameVi}
                     </span>
                     <span className="text-night-300"> — {role.metricLabel}</span>
                   </span>
@@ -354,7 +354,7 @@ function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
             <p className="text-sm text-night-300">
               Đã chọn:{' '}
               <span className="font-bold text-white">
-                {selected.icon} {selected.nameVi}
+                <span aria-hidden="true">{selected.icon}</span> {selected.nameVi}
               </span>{' '}
               ({selected.nameEn})
             </p>
@@ -369,11 +369,12 @@ function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
 /**
  * Nhân vật thu nhỏ không bảng tên, chỉ để nhận ra role bằng bộ đồ; tên người giữ để
  * trống (null sẽ ra hình bóng "chưa ai hoá thân"). Bọc trong ô bề rộng cố định vì
- * `Character` tự rộng hết ô chứa.
+ * `Character` tự rộng hết ô chứa. Ô bọc `aria-hidden`: tên role đã viết ngay bên cạnh,
+ * nếu để `role="img"` của nhân vật thì trình đọc màn hình đọc tên role hai lần.
  */
 function RoleFigure({ role, size, className }: { role: RoleDto; size: number; className: string }) {
   return (
-    <div className={cx('shrink-0', className)}>
+    <div aria-hidden="true" className={cx('shrink-0', className)}>
       <Character role={role} holderName="" variant="current" size={size} nameplate={false} />
     </div>
   );

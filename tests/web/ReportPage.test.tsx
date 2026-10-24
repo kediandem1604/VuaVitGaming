@@ -144,8 +144,12 @@ test('suggestions show a mini character and the faction, and the chosen role bec
   ];
   expected.forEach(([name, faction], index) => {
     const option = options[index] as HTMLElement;
-    // Nhân vật thu nhỏ không có bảng tên: nhãn đọc chỉ là tên role.
-    expect(within(option).getByRole('img', { name })).toBeInTheDocument();
+    // Nhân vật thu nhỏ có vẽ trong gợi ý nhưng chỉ trang trí (aria-hidden): tên gợi ý đọc tên
+    // role một lần, không kèm nhãn của hình hay emoji.
+    expect(option.querySelector('svg [data-part="body"]')).not.toBeNull();
+    expect(within(option).queryByRole('img')).toBeNull();
+    // Trước đây: "Kiếm sĩ ⚔️ Kiếm sĩ — …" (nhãn của hình, emoji, rồi tên).
+    expect(option).toHaveAccessibleName(new RegExp(`^${name}\\s*— `));
     expect(option).toHaveTextContent(faction);
   });
   // Không gợi ý nào mang bảng tên trống của nhân vật.
@@ -153,9 +157,11 @@ test('suggestions show a mini character and the faction, and the chosen role bec
 
   fireEvent.click(options[1] as HTMLElement);
   expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-  // Thẻ role đã chọn: nhân vật cùng tên, dòng "Đã chọn" và phe.
-  expect(screen.getByRole('img', { name: 'Kiếm sĩ' })).toBeInTheDocument();
-  expect(screen.queryByRole('img', { name: 'Ngỗng' })).not.toBeInTheDocument();
+  // Thẻ role đã chọn: nhân vật mặc bộ đồ của role (trang trí), dòng "Đã chọn" và phe.
+  const chosen = screen.getByText(/Đã chọn/).closest('.panel-inset') as HTMLElement;
+  expect(chosen.querySelector('svg [data-part="body"]')).not.toBeNull();
+  expect(chosen.querySelector('[data-kit="sword"]')).not.toBeNull();
+  expect(within(chosen).queryByRole('img')).toBeNull();
   expect(screen.getByText(/Đã chọn/)).toHaveTextContent('Đã chọn: ⚔️ Kiếm sĩ (Swordsman)');
   expect(screen.getByText('Phe Vịt')).toBeInTheDocument();
 });
