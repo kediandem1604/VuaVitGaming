@@ -17,6 +17,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 5. [Database: PostgreSQL trên Railway](#5-database-postgresql-trên-railway)
 6. [Deploy lên Railway](#6-deploy-lên-railway)
    - [6B. Phương án khác: deploy lên Render](#6b-phương-án-khác-deploy-lên-render)
+   - [6C. Phương án khác: deploy lên AWS Lightsail](#6c-phương-án-khác-deploy-lên-aws-lightsail)
 7. [Chạy ở máy (dành cho người sửa code)](#7-chạy-ở-máy-dành-cho-người-sửa-code)
 8. [Chạy test](#8-chạy-test)
 9. [Bảng biến môi trường](#9-bảng-biến-môi-trường)
@@ -35,6 +36,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 | Tài khoản **Railway** (railway.app, gói Hobby) | Chạy ứng dụng 24/7 **và** database PostgreSQL, cùng một project — tổng cộng khoảng **5–10 USD/tháng** (gói Hobby 5 USD/tháng đã gồm 5 USD tài nguyên; phần dùng vượt mới tính thêm) |
 | Tài khoản **GitHub** chứa bản sao repo này | Railway kéo code từ GitHub để build |
 | *Hoặc* tài khoản **Render** (render.com) thay cho Railway | Web + PostgreSQL trên Render, khoảng **13 USD/tháng** — xem mục 6B (dùng khi Railway tạm khoá đăng ký) |
+| *Hoặc* tài khoản **AWS** (máy chủ Lightsail) thay cho Railway | Một máy chủ 1 GB chạy cả ứng dụng lẫn PostgreSQL, **7 USD/tháng** (tài khoản mới có tín dụng dùng trong 6 tháng đầu) — tự quản máy chủ, xem mục 6C |
 
 Chỉ khi muốn **chạy ở máy** (mục 7) hoặc **chạy test** (mục 8) mới cần cài thêm:
 
@@ -286,6 +288,85 @@ Các bước:
 6. Kiểm tra: mở `https://….onrender.com/healthz` → `{"ok":true,"discord":"ready"}`; rồi chạy `docs/manual-test-checklist.md` như mục 6.5.
 
 Mỗi lần đẩy commit lên nhánh đã chọn, Render tự build và deploy lại. Biến `sync: false` chỉ được hỏi **lần tạo đầu**; về sau sửa ở tab **Environment** của dịch vụ.
+
+---
+
+## 6C. Phương án khác: deploy lên AWS Lightsail
+
+Một máy chủ ảo Ubuntu chạy mọi thứ bằng Docker Compose (thư mục `deploy/lightsail/`):
+
+- **Caddy** — nhận HTTPS ở cổng 443, tự xin và gia hạn chứng chỉ miễn phí. Địa chỉ web mặc định dạng `https://13-229-10-20.sslip.io` (IP tĩnh của máy, không cần mua tên miền).
+- **Ứng dụng** — build từ `Dockerfile`, mỗi lần khởi động tự migrate và nạp dữ liệu tham chiếu.
+- **PostgreSQL 16** — chỉ chạy trong máy, không mở ra Internet.
+- **Sao lưu** — mỗi ngày một bản `pg_dump` vào `deploy/lightsail/backups/`, giữ 14 ngày.
+
+**Chi phí và lưu ý quan trọng:**
+
+- Máy **7 USD/tháng** (1 GB RAM, 2 vCPU, 40 GB SSD). **Không** chọn gói 5 USD (0,5 GB): không đủ bộ nhớ để build.
+- Tài khoản AWS mới nhận **100 USD tín dụng** ngay, kiếm thêm tối đa 100 USD nữa, dùng trong **6 tháng** → khoảng 6 tháng đầu không mất tiền.
+- ⚠️ Tài khoản ở **gói Free tự đóng sau 6 tháng** (hoặc khi hết tín dụng), máy chủ tắt theo. Muốn chạy tiếp, **chuyển sang gói Paid trước hạn**: góc phải trên AWS Console → tên tài khoản → **Billing and Cost Management** → nâng cấp gói (*Upgrade plan*).
+- Khác Railway/Render, máy chủ này **bạn tự quản**: cập nhật code bằng một lệnh (mục 6C.2), thỉnh thoảng xem dung lượng ổ đĩa và bản sao lưu.
+
+### 6C.1 Tạo máy chủ (làm một lần)
+
+1. **Tài khoản AWS:** <https://aws.amazon.com> → **Create an AWS account** (cần thẻ thanh toán và xác minh số điện thoại).
+2. **Tạo máy:** <https://lightsail.aws.amazon.com> → **Create instance**:
+   - **Region:** *Singapore* (`ap-southeast-1`) — gần Việt Nam nhất.
+   - **Platform:** *Linux/Unix* → **Blueprint:** *OS Only* → **Ubuntu 24.04 LTS**.
+   - **Plan:** *General purpose* **7 USD** (1 GB RAM).
+   - **Tên:** `ggd-hub` → **Create instance**.
+3. **IP tĩnh** (miễn phí khi gắn vào máy): trang chủ Lightsail → tab **Networking** → **Create static IP** → gắn vào `ggd-hub`. Làm **trước** bước 6, vì địa chỉ web được tạo từ IP này.
+4. **Mở cổng HTTPS:** bấm vào máy `ggd-hub` → tab **Networking** → **IPv4 Firewall** → **Add rule** → *HTTPS* (443) → **Create**. (Cổng SSH 22 và HTTP 80 đã mở sẵn.)
+5. **Mở cửa sổ lệnh:** tab **Connect** → **Connect using SSH** (mở terminal ngay trong trình duyệt).
+6. **Tải code và chuẩn bị máy** — dán từng dòng vào terminal:
+
+   ```
+   git clone -b feat/ggd-hub-v1 https://github.com/kediandem1604/VuaVitGaming.git ggd-hub
+   cd ggd-hub
+   bash deploy/lightsail/setup.sh
+   ```
+
+   `setup.sh` cài Docker, tạo 2 GB swap, tạo file `deploy/lightsail/.env` và **tự điền** địa chỉ web, mật khẩu database, `SESSION_SECRET` (ngẫu nhiên, sinh ngay trên máy). Cuối cùng nó in ra địa chỉ web `https://….sslip.io`.
+
+7. **Điền Discord và email:**
+
+   ```
+   nano deploy/lightsail/.env
+   ```
+
+   Điền các biến `DISCORD_*` (mục 2–3), `BREVO_API_KEY` và `MAIL_FROM` (mục 4.1). Không sửa `SITE_ADDRESS`, `POSTGRES_PASSWORD`, `SESSION_SECRET`. Dán vào terminal trình duyệt: bấm biểu tượng clipboard ở góc dưới bên phải terminal, dán văn bản vào ô đó, rồi bấm chuột phải trong terminal. Lưu: `Ctrl+O`, `Enter`; thoát: `Ctrl+X`.
+
+8. **Chạy:**
+
+   ```
+   bash deploy/lightsail/update.sh
+   ```
+
+   Script kiểm tra `.env` đã đủ biến (thiếu thì báo tên biến và dừng), rồi build và khởi động. Lần đầu mất **5–10 phút**.
+
+9. **Kiểm tra:** mở `https://….sslip.io/healthz` → `{"ok":true,"discord":"ready"}` (lần đầu Caddy cần khoảng 1 phút để lấy chứng chỉ). Vào Discord Developer Portal → OAuth2 → **Redirects** → thêm `https://….sslip.io/auth/callback`. Rồi chạy `docs/manual-test-checklist.md` như mục 6.5.
+
+### 6C.2 Hằng ngày và bảo trì
+
+Mọi lệnh chạy trong terminal SSH của máy (bước 5), từ thư mục `~/ggd-hub`.
+
+- **Cập nhật lên code mới nhất** của nhánh: `bash deploy/lightsail/update.sh` (dữ liệu và chứng chỉ không mất).
+- **Xem log ứng dụng:** `cd deploy/lightsail && sudo docker compose logs -f app` (`Ctrl+C` để thoát).
+- **Trạng thái:** `cd deploy/lightsail && sudo docker compose ps`.
+- **Dung lượng ổ đĩa:** `df -h /` — ảnh Docker cũ được dọn sau mỗi lần cập nhật; log mỗi dịch vụ giới hạn 30 MB.
+- **Sao lưu** nằm cùng ổ đĩa với database, nên mất máy là mất luôn bản sao lưu. Bật thêm **Automatic snapshots** của Lightsail (máy `ggd-hub` → tab **Snapshots**, khoảng 0,05 USD/GB/tháng), và thỉnh thoảng tải một bản `.sql.gz` về máy của bạn.
+- **Khôi phục từ một bản sao lưu** (xoá dữ liệu hiện tại, thay bằng bản sao lưu):
+
+  ```
+  cd ~/ggd-hub/deploy/lightsail
+  sudo docker compose stop app
+  sudo docker compose exec -T db psql -U ggd -d ggd -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+  gunzip -c backups/ggd-2026-10-24.sql.gz | sudo docker compose exec -T db psql -U ggd -d ggd -v ON_ERROR_STOP=1 -q
+  sudo docker compose start app
+  ```
+
+- **Bản vá Ubuntu:** bản vá bảo mật tự cài hằng ngày. Thỉnh thoảng chạy `sudo apt update && sudo apt upgrade -y && sudo reboot`; sau khi khởi động lại, các container tự chạy lại.
+- **Dùng tên miền riêng:** trỏ bản ghi `A` của tên miền về IP tĩnh, sửa `SITE_ADDRESS=` trong `.env` thành tên miền (không có `https://`), chạy `update.sh`, rồi cập nhật Redirects bên Discord.
 
 ---
 

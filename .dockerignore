@@ -28,3 +28,6 @@ Thumbs.db
 .vscode
 .idea
 .claude
+
+# Cấu hình máy chủ (deploy/lightsail/.env chứa bí mật, backups/ chứa dữ liệu) — ảnh không cần
+deploy

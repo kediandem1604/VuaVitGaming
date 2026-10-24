@@ -5,3 +5,6 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Bản sao lưu database trên máy chủ Lightsail
+deploy/lightsail/backups/
