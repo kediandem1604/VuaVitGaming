@@ -1,4 +1,4 @@
-# GGD Hub trên một máy chủ Amazon Lightsail (Ubuntu) — hướng dẫn: README mục 6C.
+# GGD Hub trên một máy chủ Ubuntu (Google Cloud, AWS Lightsail…) — hướng dẫn: README mục 6C.
 #
 #   caddy   : cổng 80/443 ra Internet, tự xin chứng chỉ HTTPS (Let's Encrypt) cho SITE_ADDRESS,
 #             chuyển mọi yêu cầu vào app:3000. Là lớp proxy duy nhất → TRUST_PROXY_HOPS=1.

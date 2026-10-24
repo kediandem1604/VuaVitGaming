@@ -17,7 +17,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 5. [Database: PostgreSQL trên Railway](#5-database-postgresql-trên-railway)
 6. [Deploy lên Railway](#6-deploy-lên-railway)
    - [6B. Phương án khác: deploy lên Render](#6b-phương-án-khác-deploy-lên-render)
-   - [6C. Phương án khác: deploy lên AWS Lightsail](#6c-phương-án-khác-deploy-lên-aws-lightsail)
+   - [6C. Phương án khác: máy chủ Ubuntu riêng (Google Cloud hoặc AWS Lightsail)](#6c-phương-án-khác-máy-chủ-ubuntu-riêng-google-cloud-hoặc-aws-lightsail)
 7. [Chạy ở máy (dành cho người sửa code)](#7-chạy-ở-máy-dành-cho-người-sửa-code)
 8. [Chạy test](#8-chạy-test)
 9. [Bảng biến môi trường](#9-bảng-biến-môi-trường)
@@ -36,7 +36,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 | Tài khoản **Railway** (railway.app, gói Hobby) | Chạy ứng dụng 24/7 **và** database PostgreSQL, cùng một project — tổng cộng khoảng **5–10 USD/tháng** (gói Hobby 5 USD/tháng đã gồm 5 USD tài nguyên; phần dùng vượt mới tính thêm) |
 | Tài khoản **GitHub** chứa bản sao repo này | Railway kéo code từ GitHub để build |
 | *Hoặc* tài khoản **Render** (render.com) thay cho Railway | Web + PostgreSQL trên Render, khoảng **13 USD/tháng** — xem mục 6B (dùng khi Railway tạm khoá đăng ký) |
-| *Hoặc* tài khoản **AWS** (máy chủ Lightsail) thay cho Railway | Một máy chủ 1 GB chạy cả ứng dụng lẫn PostgreSQL, **7 USD/tháng** (tài khoản mới có tín dụng dùng trong 6 tháng đầu) — tự quản máy chủ, xem mục 6C |
+| *Hoặc* tài khoản **Google Cloud** hoặc **AWS** (máy chủ Ubuntu riêng) thay cho Railway | Một máy chủ 1 GB chạy cả ứng dụng lẫn PostgreSQL: Google Cloud e2-micro ~3,6 USD/tháng (máy miễn phí, chỉ trả IPv4, đặt ở Mỹ) hoặc AWS Lightsail 7 USD/tháng (Singapore) — tự quản máy chủ, xem mục 6C |
 
 Chỉ khi muốn **chạy ở máy** (mục 7) hoặc **chạy test** (mục 8) mới cần cài thêm:
 
@@ -291,74 +291,102 @@ Mỗi lần đẩy commit lên nhánh đã chọn, Render tự build và deploy 
 
 ---
 
-## 6C. Phương án khác: deploy lên AWS Lightsail
+## 6C. Phương án khác: máy chủ Ubuntu riêng (Google Cloud hoặc AWS Lightsail)
 
-Một máy chủ ảo Ubuntu chạy mọi thứ bằng Docker Compose (thư mục `deploy/lightsail/`):
+Một máy chủ ảo Ubuntu 24.04 chạy mọi thứ bằng Docker Compose (thư mục `deploy/server/`):
 
-- **Caddy** — nhận HTTPS ở cổng 443, tự xin và gia hạn chứng chỉ miễn phí. Địa chỉ web mặc định dạng `https://13-229-10-20.sslip.io` (IP tĩnh của máy, không cần mua tên miền).
+- **Caddy** — nhận HTTPS ở cổng 443, tự xin và gia hạn chứng chỉ miễn phí. Địa chỉ web mặc định dạng `https://34-82-10-20.sslip.io` (IP tĩnh của máy, không cần mua tên miền).
 - **Ứng dụng** — build từ `Dockerfile`, mỗi lần khởi động tự migrate và nạp dữ liệu tham chiếu.
 - **PostgreSQL 16** — chỉ chạy trong máy, không mở ra Internet.
-- **Sao lưu** — mỗi ngày một bản `pg_dump` vào `deploy/lightsail/backups/`, giữ 14 ngày.
+- **Sao lưu** — mỗi ngày một bản `pg_dump` vào `deploy/server/backups/`, giữ 14 ngày.
 
-**Chi phí và lưu ý quan trọng:**
+Khác Railway/Render, máy chủ này **bạn tự quản**: cập nhật code bằng một lệnh, thỉnh thoảng xem dung lượng ổ đĩa và bản sao lưu (mục 6C.4).
 
-- Máy **7 USD/tháng** (1 GB RAM, 2 vCPU, 40 GB SSD). **Không** chọn gói 5 USD (0,5 GB): không đủ bộ nhớ để build.
-- Tài khoản AWS mới nhận **100 USD tín dụng** ngay, kiếm thêm tối đa 100 USD nữa, dùng trong **6 tháng** → khoảng 6 tháng đầu không mất tiền.
-- ⚠️ Tài khoản ở **gói Free tự đóng sau 6 tháng** (hoặc khi hết tín dụng), máy chủ tắt theo. Muốn chạy tiếp, **chuyển sang gói Paid trước hạn**: góc phải trên AWS Console → tên tài khoản → **Billing and Cost Management** → nâng cấp gói (*Upgrade plan*).
-- Khác Railway/Render, máy chủ này **bạn tự quản**: cập nhật code bằng một lệnh (mục 6C.2), thỉnh thoảng xem dung lượng ổ đĩa và bản sao lưu.
+**Chọn nơi đặt máy** (bảng giá 10/2026):
 
-### 6C.1 Tạo máy chủ (làm một lần)
+| | Google Cloud — máy e2-micro (mục 6C.1) | AWS Lightsail (mục 6C.2) |
+|---|---|---|
+| Chi phí hằng tháng | Máy **miễn phí** (Free Tier); địa chỉ IPv4 công khai **~3,6 USD**; vượt 1 GB dữ liệu gửi đi thì ~0,12 USD/GB | **7 USD** (đã gồm IPv4 và 2 TB dữ liệu) |
+| Lúc mới tạo tài khoản | 300 USD tín dụng, dùng trong 90 ngày | 100–200 USD tín dụng, dùng trong 6 tháng |
+| Vị trí | Chỉ ở Mỹ — chọn Oregon (`us-west1`), gần Việt Nam nhất; mỗi lần bấm chậm thêm khoảng 0,2 giây | Singapore |
+| Sức máy | 1 GB RAM, CPU yếu (khoảng 1/4 nhân chạy liên tục) — build lần đầu **15–30 phút** | 1 GB RAM, 2 vCPU — build **5–10 phút** |
 
-1. **Tài khoản AWS:** <https://aws.amazon.com> → **Create an AWS account** (cần thẻ thanh toán và xác minh số điện thoại).
+### 6C.1 Tạo máy trên Google Cloud (e2-micro miễn phí)
+
+1. **Tài khoản:** <https://cloud.google.com/free> → **Get started for free** → đăng nhập Google → nhập thẻ (chỉ để xác minh; trong 90 ngày dùng thử không bị trừ tiền) → nhận 300 USD tín dụng.
+2. **Project và Compute Engine:** tạo project (vd `ggd-hub`) nếu được hỏi → menu ☰ → **Compute Engine** → **VM instances** → bấm **Enable** để bật Compute Engine API (chờ 1–2 phút).
+3. **Cảnh báo chi phí** (nên làm): menu ☰ → **Billing** → **Budgets & alerts** → **Create budget** → 5 USD/tháng → Google gửi email khi chi phí sắp vượt.
+4. **Tạo máy:** **VM instances** → **Create instance**:
+   - **Name:** `ggd-hub`.
+   - **Region:** `us-west1 (Oregon)`; **Zone:** để mặc định.
+   - **Machine configuration:** series **E2** → machine type **`e2-micro`** (đúng loại này mới miễn phí).
+   - **OS and storage** (*Boot disk*) → **Change** → **Operating system:** *Ubuntu* → **Version:** *Ubuntu 24.04 LTS* (bản **x86/64**, không chọn bản *Minimal*) → **Boot disk type:** **Standard persistent disk** → **Size:** **30 GB** → **Select**. Phải đổi khỏi loại *Balanced* mặc định: chỉ ổ *Standard* tới 30 GB mới miễn phí.
+   - **Networking** → **Firewall:** tick **Allow HTTP traffic** và **Allow HTTPS traffic**.
+   - Bấm **Create**.
+5. **IP tĩnh:** menu ☰ → **VPC network** → **IP addresses** → dòng địa chỉ *External* của `ggd-hub` → **⋮** → **Promote to static IP address** → tên `ggd-hub-ip` → **Reserve**. Làm **trước** mục 6C.3, vì địa chỉ web được tạo từ IP này. Giá giữ nguyên (~3,6 USD/tháng khi gắn vào máy). Nếu sau này **xoá máy**, nhớ **Release** luôn IP tĩnh — IP giữ mà không gắn vào máy bị tính giá cao hơn.
+6. **Mở cửa sổ lệnh:** **Compute Engine** → **VM instances** → nút **SSH** trên dòng `ggd-hub` → mở cửa sổ terminal trong trình duyệt (lần đầu bấm **Authorize**). Dán bằng `Ctrl+V`.
+7. ⚠️ **Trước khi hết 90 ngày dùng thử:** menu ☰ → **Billing** → **Activate full account** (nâng cấp lên tài khoản trả phí), nếu không máy bị dừng khi hết thời gian dùng thử. Máy e2-micro vẫn miễn phí sau khi nâng cấp; bạn chỉ trả tiền IPv4 và phần vượt hạn mức.
+
+Tiếp theo: mục 6C.3.
+
+### 6C.2 Tạo máy trên AWS Lightsail
+
+1. **Tài khoản AWS:** <https://aws.amazon.com> → **Create an AWS account** (cần thẻ thanh toán và xác minh số điện thoại). ⚠️ Tài khoản ở **gói Free tự đóng sau 6 tháng** (hoặc khi hết tín dụng), máy chủ tắt theo. Muốn chạy tiếp, **chuyển sang gói Paid trước hạn**: góc phải trên AWS Console → tên tài khoản → **Billing and Cost Management** → nâng cấp gói (*Upgrade plan*).
 2. **Tạo máy:** <https://lightsail.aws.amazon.com> → **Create instance**:
-   - **Region:** *Singapore* (`ap-southeast-1`) — gần Việt Nam nhất.
+   - **Region:** *Singapore* (`ap-southeast-1`).
    - **Platform:** *Linux/Unix* → **Blueprint:** *OS Only* → **Ubuntu 24.04 LTS**.
-   - **Plan:** *General purpose* **7 USD** (1 GB RAM).
+   - **Plan:** *General purpose* **7 USD** (1 GB RAM). **Không** chọn gói 5 USD (0,5 GB): không đủ bộ nhớ để build.
    - **Tên:** `ggd-hub` → **Create instance**.
-3. **IP tĩnh** (miễn phí khi gắn vào máy): trang chủ Lightsail → tab **Networking** → **Create static IP** → gắn vào `ggd-hub`. Làm **trước** bước 6, vì địa chỉ web được tạo từ IP này.
+3. **IP tĩnh** (miễn phí khi gắn vào máy): trang chủ Lightsail → tab **Networking** → **Create static IP** → gắn vào `ggd-hub`. Làm **trước** mục 6C.3.
 4. **Mở cổng HTTPS:** bấm vào máy `ggd-hub` → tab **Networking** → **IPv4 Firewall** → **Add rule** → *HTTPS* (443) → **Create**. (Cổng SSH 22 và HTTP 80 đã mở sẵn.)
-5. **Mở cửa sổ lệnh:** tab **Connect** → **Connect using SSH** (mở terminal ngay trong trình duyệt).
-6. **Tải code và chuẩn bị máy** — dán từng dòng vào terminal:
+5. **Mở cửa sổ lệnh:** tab **Connect** → **Connect using SSH**. Dán vào terminal: bấm biểu tượng clipboard ở góc dưới bên phải, dán văn bản vào ô đó, rồi bấm chuột phải trong terminal.
+
+Tiếp theo: mục 6C.3.
+
+### 6C.3 Cài đặt và chạy (giống nhau cho cả hai)
+
+1. **Tải code và chuẩn bị máy** — dán từng dòng vào terminal:
 
    ```
+   sudo apt-get update && sudo apt-get install -y git
    git clone -b feat/ggd-hub-v1 https://github.com/kediandem1604/VuaVitGaming.git ggd-hub
    cd ggd-hub
-   bash deploy/lightsail/setup.sh
+   bash deploy/server/setup.sh
    ```
 
-   `setup.sh` cài Docker, tạo 2 GB swap, tạo file `deploy/lightsail/.env` và **tự điền** địa chỉ web, mật khẩu database, `SESSION_SECRET` (ngẫu nhiên, sinh ngay trên máy). Cuối cùng nó in ra địa chỉ web `https://….sslip.io`.
+   `setup.sh` cài Docker, tạo 2 GB swap, tạo file `deploy/server/.env` và **tự điền** địa chỉ web, mật khẩu database, `SESSION_SECRET` (ngẫu nhiên, sinh ngay trên máy). Cuối cùng nó in ra địa chỉ web `https://….sslip.io`.
 
-7. **Điền Discord và email:**
-
-   ```
-   nano deploy/lightsail/.env
-   ```
-
-   Điền các biến `DISCORD_*` (mục 2–3), `BREVO_API_KEY` và `MAIL_FROM` (mục 4.1). Không sửa `SITE_ADDRESS`, `POSTGRES_PASSWORD`, `SESSION_SECRET`. Dán vào terminal trình duyệt: bấm biểu tượng clipboard ở góc dưới bên phải terminal, dán văn bản vào ô đó, rồi bấm chuột phải trong terminal. Lưu: `Ctrl+O`, `Enter`; thoát: `Ctrl+X`.
-
-8. **Chạy:**
+2. **Điền Discord và email:**
 
    ```
-   bash deploy/lightsail/update.sh
+   nano deploy/server/.env
    ```
 
-   Script kiểm tra `.env` đã đủ biến (thiếu thì báo tên biến và dừng), rồi build và khởi động. Lần đầu mất **5–10 phút**.
+   Điền các biến `DISCORD_*` (mục 2–3), `BREVO_API_KEY` và `MAIL_FROM` (mục 4.1). Không sửa `SITE_ADDRESS`, `POSTGRES_PASSWORD`, `SESSION_SECRET`. Lưu: `Ctrl+O`, `Enter`; thoát: `Ctrl+X`.
 
-9. **Kiểm tra:** mở `https://….sslip.io/healthz` → `{"ok":true,"discord":"ready"}` (lần đầu Caddy cần khoảng 1 phút để lấy chứng chỉ). Vào Discord Developer Portal → OAuth2 → **Redirects** → thêm `https://….sslip.io/auth/callback`. Rồi chạy `docs/manual-test-checklist.md` như mục 6.5.
+3. **Chạy:**
 
-### 6C.2 Hằng ngày và bảo trì
+   ```
+   bash deploy/server/update.sh
+   ```
 
-Mọi lệnh chạy trong terminal SSH của máy (bước 5), từ thư mục `~/ggd-hub`.
+   Script kiểm tra `.env` đã đủ biến (thiếu thì báo tên biến và dừng), rồi build và khởi động. Lần đầu mất 5–10 phút trên Lightsail, 15–30 phút trên e2-micro của Google Cloud. Cửa sổ SSH bị ngắt giữa chừng thì mở lại và chạy lại lệnh này.
 
-- **Cập nhật lên code mới nhất** của nhánh: `bash deploy/lightsail/update.sh` (dữ liệu và chứng chỉ không mất).
-- **Xem log ứng dụng:** `cd deploy/lightsail && sudo docker compose logs -f app` (`Ctrl+C` để thoát).
-- **Trạng thái:** `cd deploy/lightsail && sudo docker compose ps`.
+4. **Kiểm tra:** mở `https://….sslip.io/healthz` → `{"ok":true,"discord":"ready"}` (lần đầu Caddy cần khoảng 1 phút để lấy chứng chỉ). Vào Discord Developer Portal → OAuth2 → **Redirects** → thêm `https://….sslip.io/auth/callback`. Rồi chạy `docs/manual-test-checklist.md` như mục 6.5.
+
+### 6C.4 Hằng ngày và bảo trì
+
+Mọi lệnh chạy trong terminal SSH của máy, từ thư mục `~/ggd-hub`.
+
+- **Cập nhật lên code mới nhất** của nhánh: `bash deploy/server/update.sh` (dữ liệu và chứng chỉ không mất).
+- **Xem log ứng dụng:** `cd deploy/server && sudo docker compose logs -f app` (`Ctrl+C` để thoát).
+- **Trạng thái:** `cd deploy/server && sudo docker compose ps`.
 - **Dung lượng ổ đĩa:** `df -h /` — ảnh Docker cũ được dọn sau mỗi lần cập nhật; log mỗi dịch vụ giới hạn 30 MB.
-- **Sao lưu** nằm cùng ổ đĩa với database, nên mất máy là mất luôn bản sao lưu. Bật thêm **Automatic snapshots** của Lightsail (máy `ggd-hub` → tab **Snapshots**, khoảng 0,05 USD/GB/tháng), và thỉnh thoảng tải một bản `.sql.gz` về máy của bạn.
+- **Sao lưu** nằm cùng ổ đĩa với database, nên mất máy là mất luôn bản sao lưu. Nên bật thêm bản chụp ổ đĩa tự động (khoảng 0,05 USD/GB/tháng): Google Cloud → **Compute Engine** → **Snapshots** → **Create snapshot schedule** rồi gắn vào ổ của `ggd-hub`; Lightsail → máy `ggd-hub` → tab **Snapshots** → **Automatic snapshots**. Thỉnh thoảng tải một bản `.sql.gz` về máy của bạn.
 - **Khôi phục từ một bản sao lưu** (xoá dữ liệu hiện tại, thay bằng bản sao lưu):
 
   ```
-  cd ~/ggd-hub/deploy/lightsail
+  cd ~/ggd-hub/deploy/server
   sudo docker compose stop app
   sudo docker compose exec -T db psql -U ggd -d ggd -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
   gunzip -c backups/ggd-2026-10-24.sql.gz | sudo docker compose exec -T db psql -U ggd -d ggd -v ON_ERROR_STOP=1 -q

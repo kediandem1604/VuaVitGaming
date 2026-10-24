@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Chuẩn bị một máy Lightsail Ubuntu 24.04 mới cho GGD Hub (README mục 6C). Chạy một lần,
-# trong thư mục repo vừa clone:
+# Chuẩn bị một máy Ubuntu 24.04 mới (Google Cloud, AWS Lightsail…) cho GGD Hub (README mục 6C).
+# Chạy một lần, trong thư mục repo vừa clone:
 #
-#   bash deploy/lightsail/setup.sh
+#   bash deploy/server/setup.sh
 #
 # Làm gì: cài Docker + Compose, tạo 2 GB swap (máy 1 GB RAM build ảnh Docker cần thêm bộ nhớ),
-# tạo deploy/lightsail/.env từ .env.example và tự điền SITE_ADDRESS (theo IP công khai của máy),
+# tạo deploy/server/.env từ .env.example và tự điền SITE_ADDRESS (theo IP công khai của máy),
 # mật khẩu database và SESSION_SECRET ngẫu nhiên. Chạy lại an toàn: không ghi đè .env đã có.
 set -euo pipefail
 
@@ -53,6 +53,6 @@ mkdir -p "$here/backups"
 cat <<EOF
 
 Xong phần chuẩn bị. Tiếp theo:
-  1. Điền Discord và email:   nano deploy/lightsail/.env    (Ctrl+O, Enter để lưu; Ctrl+X để thoát)
-  2. Chạy ứng dụng:           bash deploy/lightsail/update.sh
+  1. Điền Discord và email:   nano deploy/server/.env    (Ctrl+O, Enter để lưu; Ctrl+X để thoát)
+  2. Chạy ứng dụng:           bash deploy/server/update.sh
 EOF
