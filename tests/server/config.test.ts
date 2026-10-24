@@ -109,3 +109,13 @@ test('PUBLIC_URL is normalised without trailing slashes', () => {
     devLogin: true,
   });
 });
+
+test('on Render, a missing PUBLIC_URL falls back to RENDER_EXTERNAL_URL', () => {
+  const onRender = { ...base, RENDER_EXTERNAL_URL: 'https://ggd-hub.onrender.com' };
+  expect(loadConfig({ ...onRender, PUBLIC_URL: undefined }).publicUrl).toBe('https://ggd-hub.onrender.com');
+  expect(loadConfig({ ...onRender, PUBLIC_URL: '' }).publicUrl).toBe('https://ggd-hub.onrender.com');
+  // Tên miền riêng (PUBLIC_URL đặt tay) thắng địa chỉ onrender.com.
+  expect(loadConfig({ ...onRender, PUBLIC_URL: 'https://ggd.example.com' }).publicUrl).toBe('https://ggd.example.com');
+  // Thiếu cả hai thì vẫn báo đúng tên biến cần đặt.
+  expect(() => loadConfig({ ...base, PUBLIC_URL: undefined })).toThrow(/PUBLIC_URL/);
+});

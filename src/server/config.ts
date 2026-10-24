@@ -135,7 +135,11 @@ const envSchema = z.object({
 });
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
-  const parsed = envSchema.safeParse(env);
+  // Trên Render địa chỉ `…onrender.com` chỉ có sau khi tạo dịch vụ; Render tự đặt nó vào
+  // `RENDER_EXTERNAL_URL`. Để trống PUBLIC_URL thì dùng địa chỉ đó; đặt PUBLIC_URL (vd tên
+  // miền riêng) thì PUBLIC_URL thắng. Thiếu cả hai → báo lỗi tên PUBLIC_URL như cũ.
+  const publicUrlSource = blankToUndefined(env.PUBLIC_URL) ?? blankToUndefined(env.RENDER_EXTERNAL_URL);
+  const parsed = envSchema.safeParse({ ...env, PUBLIC_URL: publicUrlSource });
   if (!parsed.success) {
     const details = parsed.error.issues
       .map((issue) => `${issue.path.join('.')}: ${issue.message}`)

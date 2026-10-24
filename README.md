@@ -16,6 +16,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 4. [Email nhắc giờ: Brevo](#4-email-nhắc-giờ-brevo)
 5. [Database: PostgreSQL trên Railway](#5-database-postgresql-trên-railway)
 6. [Deploy lên Railway](#6-deploy-lên-railway)
+   - [6B. Phương án khác: deploy lên Render](#6b-phương-án-khác-deploy-lên-render)
 7. [Chạy ở máy (dành cho người sửa code)](#7-chạy-ở-máy-dành-cho-người-sửa-code)
 8. [Chạy test](#8-chạy-test)
 9. [Bảng biến môi trường](#9-bảng-biến-môi-trường)
@@ -33,6 +34,7 @@ Tài liệu này viết cho người quản trị server Discord, **không cần
 | Một địa chỉ email của hội (nên tạo Gmail riêng, vd `ggdhub.hoi@gmail.com`) và tài khoản **Brevo** (brevo.com, gói Free) | Gửi email nhắc giờ — Railway gói Hobby chặn SMTP nên email đi qua API HTTPS của Brevo (mục 4) |
 | Tài khoản **Railway** (railway.app, gói Hobby) | Chạy ứng dụng 24/7 **và** database PostgreSQL, cùng một project — tổng cộng khoảng **5–10 USD/tháng** (gói Hobby 5 USD/tháng đã gồm 5 USD tài nguyên; phần dùng vượt mới tính thêm) |
 | Tài khoản **GitHub** chứa bản sao repo này | Railway kéo code từ GitHub để build |
+| *Hoặc* tài khoản **Render** (render.com) thay cho Railway | Web + PostgreSQL trên Render, khoảng **13 USD/tháng** — xem mục 6B (dùng khi Railway tạm khoá đăng ký) |
 
 Chỉ khi muốn **chạy ở máy** (mục 7) hoặc **chạy test** (mục 8) mới cần cài thêm:
 
@@ -263,6 +265,30 @@ Mỗi lần bạn (hoặc người sửa code) đẩy commit mới lên nhánh m
 
 ---
 
+## 6B. Phương án khác: deploy lên Render
+
+Dùng khi không có Railway (vd Railway tạm khoá đăng ký tài khoản mới). File `render.yaml` ở gốc repo là một **Blueprint**: Render đọc nó để tự tạo cả dịch vụ web (build từ `Dockerfile`) lẫn PostgreSQL 16, cùng vùng **Singapore**, đúng 1 bản chạy, kiểm tra sức khoẻ ở `/healthz`.
+
+- **Chi phí** (bảng giá Render 10/2026): web `0.5c-512mb` 7 USD/tháng + PostgreSQL `0.1c-256mb` (1 GB) 6 USD/tháng. **Không** dùng gói miễn phí: web miễn phí tự "ngủ" khi không ai vào (bot Discord và nhắc giờ ngừng), PostgreSQL miễn phí bị xoá sau 30 ngày.
+- **Email:** dùng Brevo (mục 4.1) như trên Railway.
+- **Database** chỉ nhận kết nối từ mạng nội bộ của Render (`ipAllowList: []`). Muốn `pg_dump` từ máy thì thêm IP của bạn ở tab **Networking** của database.
+
+Các bước:
+
+1. Đẩy repo lên GitHub (nhánh có file `render.yaml`).
+2. Mở <https://dashboard.render.com/blueprint/new> → chọn repo → chọn **nhánh** muốn deploy → Render đọc `render.yaml` và liệt kê dịch vụ `ggd-hub` + database `ggd-db`.
+3. Render hỏi giá trị cho các biến đánh dấu `sync: false` — điền như mục 6.3: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, 3 ID kênh, `DISCORD_ADMIN_ROLE_IDS`, `DISCORD_MOD_ROLE_IDS`, `BREVO_API_KEY`, `MAIL_FROM`. **Không** cần điền:
+   - `DATABASE_URL` — Render tự nối tới `ggd-db`;
+   - `SESSION_SECRET` — Render tự sinh chuỗi ngẫu nhiên;
+   - `PUBLIC_URL` — ứng dụng tự dùng địa chỉ `https://….onrender.com` mà Render cấp (biến `RENDER_EXTERNAL_URL`). Gắn tên miền riêng thì thêm `PUBLIC_URL` trong tab **Environment** của dịch vụ.
+4. **Apply** → chờ build xong (vài phút). Lần đầu ứng dụng tự tạo bảng và nạp dữ liệu (log giống mục 6.5).
+5. Lấy địa chỉ `https://….onrender.com` ở đầu trang dịch vụ `ggd-hub` → Discord Developer Portal → OAuth2 → **Redirects** → thêm `https://….onrender.com/auth/callback`.
+6. Kiểm tra: mở `https://….onrender.com/healthz` → `{"ok":true,"discord":"ready"}`; rồi chạy `docs/manual-test-checklist.md` như mục 6.5.
+
+Mỗi lần đẩy commit lên nhánh đã chọn, Render tự build và deploy lại. Biến `sync: false` chỉ được hỏi **lần tạo đầu**; về sau sửa ở tab **Environment** của dịch vụ.
+
+---
+
 ## 7. Chạy ở máy (dành cho người sửa code)
 
 ```bash
@@ -324,7 +350,7 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 | Biến | Ý nghĩa | Ví dụ / mặc định |
 |---|---|---|
 | `PORT` | Cổng web lắng nghe | `3000` (mặc định nếu bỏ trống) |
-| `PUBLIC_URL` | Địa chỉ web công khai, không `/` cuối — dùng cho OAuth và link trong tin nhắn/email | `https://ggd-hub-production.up.railway.app` |
+| `PUBLIC_URL` | Địa chỉ web công khai, không `/` cuối — dùng cho OAuth và link trong tin nhắn/email. Trên Render có thể để trống: ứng dụng dùng `RENDER_EXTERNAL_URL` do Render cấp | `https://ggd-hub-production.up.railway.app` |
 | `SESSION_SECRET` | Khoá ký cookie đăng nhập, ≥ 32 ký tự | chuỗi ngẫu nhiên |
 | `TRUST_PROXY_HOPS` | Số lớp proxy phía trước app, để lấy đúng IP người dùng cho giới hạn tốc độ | `1` (mặc định); `2` nếu có CDN trước Railway |
 | `DEV_LOGIN` | *Chỉ dev.* `1` bật `/auth/dev-login`; chỉ có tác dụng khi `PUBLIC_URL` bắt đầu bằng `http://localhost` | `0` / không đặt |
