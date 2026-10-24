@@ -27,6 +27,9 @@ done
 if [ "${#missing[@]}" -gt 0 ]; then
   echo "Còn thiếu trong deploy/server/.env: ${missing[*]}" >&2
   echo "Mở bằng: nano deploy/server/.env" >&2
+  if [[ " ${missing[*]} " == *"_CHANNEL_ID "* ]]; then
+    echo "Chưa có kênh? Để bot tự tạo kênh và điền ID: bash deploy/server/discord-setup.sh" >&2
+  fi
   exit 1
 fi
 

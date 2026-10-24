@@ -66,13 +66,14 @@ Chỉ khi muốn **chạy ở máy** (mục 7) hoặc **chạy test** (mục 8) 
 
 1. Tab **OAuth2** → kéo xuống **OAuth2 URL Generator**.
 2. **Scopes**: tick `bot` và `applications.commands` (lệnh slash `/baocao`, `/bxh`, `/hoso`).
-3. **Bot Permissions**: tick **View Channels**, **Send Messages**, **Embed Links**, **Read Message History** (để bot sửa lại tin đã đăng). Không cần quyền Administrator.
+3. **Bot Permissions**: tick **View Channels**, **Send Messages**, **Embed Links**, **Read Message History** (để bot sửa lại tin đã đăng). Muốn bot **tự tạo ba kênh** (máy chủ riêng, mục 6C.3) thì tick thêm **Manage Channels** — tạo kênh xong có thể tắt quyền này trong Server Settings → Roles → role của bot. Không cần quyền Administrator.
 4. Chép **Generated URL** ở dưới cùng, mở trong trình duyệt → chọn server của hội → **Authorize**.
 
-Link mời tương đương (thay `APPLICATION_ID`):
+Link mời tương đương (thay `APPLICATION_ID`; link thứ hai có thêm Manage Channels):
 
 ```
 https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot%20applications.commands&permissions=84992
+https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot%20applications.commands&permissions=85008
 ```
 
 5. Trong Discord, kiểm tra bot **thấy và gửi được** vào ba kênh sẽ dùng (lịch chơi, vote, thông báo). Kênh riêng tư thì thêm role của bot vào quyền kênh.
@@ -82,6 +83,8 @@ Bot cần có trong server **trước** lần khởi động đầu: mỗi lần
 ---
 
 ## 3. Lấy ID server, kênh và role
+
+Chạy trên máy chủ riêng (mục 6C) thì có thể để bot **tự tạo ba kênh và tự điền ID kênh** (mục 6C.3, bước 3) — khi đó ở mục này chỉ cần ID server.
 
 Discord ẩn ID; bật chế độ nhà phát triển để thấy nút chép ID:
 
@@ -362,9 +365,17 @@ Tiếp theo: mục 6C.3.
    nano deploy/server/.env
    ```
 
-   Điền các biến `DISCORD_*` (mục 2–3), `BREVO_API_KEY` và `MAIL_FROM` (mục 4.1). Không sửa `SITE_ADDRESS`, `POSTGRES_PASSWORD`, `SESSION_SECRET`. Lưu: `Ctrl+O`, `Enter`; thoát: `Ctrl+X`.
+   Điền `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID` (mục 2–3), `BREVO_API_KEY` và `MAIL_FROM` (mục 4.1). Đã có sẵn kênh thì điền luôn ba ID kênh và ID role admin/mod (mục 3) rồi sang bước 4. Không sửa `SITE_ADDRESS`, `POSTGRES_PASSWORD`, `SESSION_SECRET`. Lưu: `Ctrl+O`, `Enter`; thoát: `Ctrl+X`.
 
-3. **Chạy:**
+3. **Để bot tự tạo kênh** (bỏ qua nếu đã điền ba ID kênh). Bot phải có quyền **Manage Channels** (mục 2.2):
+
+   ```
+   bash deploy/server/discord-setup.sh
+   ```
+
+   Script build ảnh ứng dụng (lần đầu lâu, `update.sh` dùng lại), rồi bot tạo nhóm kênh **GGD Hub** gồm `#lịch-chơi`, `#vote-mvp`, `#thông-báo` — thành viên xem được nhưng không nhắn, chỉ bot đăng tin (nút Tham gia và menu vote vẫn bấm được) — và **tự ghi ba ID kênh vào `.env`**. Chạy lại không tạo trùng (kênh cùng tên được dùng lại); đổi tên kênh trong Discord sau đó không ảnh hưởng gì. Cuối cùng script in danh sách role của server kèm ID: chép ID role admin/mod vào `DISCORD_ADMIN_ROLE_IDS` và `DISCORD_MOD_ROLE_IDS` (`nano deploy/server/.env`).
+
+4. **Chạy:**
 
    ```
    bash deploy/server/update.sh
@@ -372,7 +383,7 @@ Tiếp theo: mục 6C.3.
 
    Script kiểm tra `.env` đã đủ biến (thiếu thì báo tên biến và dừng), rồi build và khởi động. Lần đầu mất 5–10 phút trên Lightsail, 15–30 phút trên e2-micro của Google Cloud. Cửa sổ SSH bị ngắt giữa chừng thì mở lại và chạy lại lệnh này.
 
-4. **Kiểm tra:** mở `https://….sslip.io/healthz` → `{"ok":true,"discord":"ready"}` (lần đầu Caddy cần khoảng 1 phút để lấy chứng chỉ). Vào Discord Developer Portal → OAuth2 → **Redirects** → thêm `https://….sslip.io/auth/callback`. Rồi chạy `docs/manual-test-checklist.md` như mục 6.5.
+5. **Kiểm tra:** mở `https://….sslip.io/healthz` → `{"ok":true,"discord":"ready"}` (lần đầu Caddy cần khoảng 1 phút để lấy chứng chỉ). Vào Discord Developer Portal → OAuth2 → **Redirects** → thêm `https://….sslip.io/auth/callback`. Rồi chạy `docs/manual-test-checklist.md` như mục 6.5.
 
 ### 6C.4 Hằng ngày và bảo trì
 
