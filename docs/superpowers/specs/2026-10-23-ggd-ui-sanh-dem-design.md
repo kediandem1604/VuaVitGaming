@@ -161,7 +161,7 @@ Mỗi role được gán một **bộ đồ** (kit) vẽ chồng lên dáng chun
 ### 5.4 Các thành phần khác
 
 - `Modal`: nền panel, viền đậm, lớp phủ `night-950` mờ 70%. Giữ nguyên logic focus.
-- `QueryState` (đang tải / lỗi / trống): đang tải là nhân vật ngỗng nhún kèm chữ "Đang tải…"; lỗi là panel viền `duck` + nút "Thử lại"; trống là nhân vật ngồi + một câu mời.
+- `QueryState` (đang tải / lỗi / trống): đang tải là nhân vật ngỗng nhún kèm chữ "Đang tải…"; lỗi là panel viền và chữ `duck-soft` + nút "Thử lại" (`duck` gốc chỉ đạt 3.06:1 trên `night-800`); trống (`EmptyState`) là ngỗng nhỏ đứng (`MiniGoose`) + một câu mời.
 - `Avatar`: viền 2px `night-950`; người không có ảnh Discord hiện chữ cái đầu màu `gold` trên nền `night-700`.
 - `SeasonSelect`: kiểu `field`.
 
