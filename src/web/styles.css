@@ -1,13 +1,6 @@
 @import "tailwindcss";
 
 /*
- * Tạm thời: giao diện chỉ có bản tối (spec §3.6) nhưng các trang chưa làm lại vẫn dùng
- * lớp `dark:` theo `prefers-color-scheme`; máy đặt giao diện sáng sẽ thấy lớp sáng cũ
- * trên nền đêm. Biến thể này cho `dark:` luôn khớp. Xoá ở Task 11 cùng các lớp `dark:`.
- */
-@custom-variant dark (&:where(*));
-
-/*
  * Bộ nhận diện "Sảnh đêm" (spec §3). Token màu khai báo ở đây phải khớp với
  * `src/web/lib/palette.ts` — test `tests/web/palette.test.ts` so từng giá trị.
  * Màu phe (Global Constraints) giữ nguyên: Ngỗng `goose`, Vịt `duck`, Phe thứ 3 `third`.
@@ -61,7 +54,11 @@
       48px 76px;
   }
 
-  /* Viền focus bàn phím cho mọi phần tử bấm được: outline 3px `gold`, cách 2px (spec §3.3). */
+  /*
+   * Viền focus bàn phím cho mọi phần tử bấm được: outline 3px `gold`, cách 2px (spec §3.3).
+   * Ô nhập liệu `field` tự tắt outline này vì đã đổi viền sang `gold` khi focus (xem
+   * `@utility field`) — mỗi phần tử chỉ một chỉ báo focus.
+   */
   a:focus-visible,
   button:focus-visible,
   input:focus-visible,
@@ -80,11 +77,6 @@
  */
 @utility panel {
   @apply rounded-2xl border-3 border-night-950 bg-night-800 p-4;
-}
-
-/* Bí danh tạm cho các trang chưa đổi sang `panel` — xoá ở Task 11. */
-@utility card {
-  @apply panel;
 }
 
 @utility panel-inset {
@@ -128,9 +120,17 @@
   @apply btn bg-duck-strong text-white;
 }
 
-/* Ô nhập liệu: chữ 16px để iOS không tự zoom; focus đổi viền sang `gold` (ngoài outline chung). */
+/*
+ * Ô nhập liệu: chữ 16px để iOS không tự zoom. Focus đổi viền sang `gold` và tắt outline
+ * chung của `@layer base` — một chỉ báo focus duy nhất, không hai vòng vàng lồng nhau.
+ * (Công tắc bật/tắt dùng checkbox ẩn + `peer-focus-visible` trên rãnh vẽ, không đi qua đây.)
+ */
 @utility field {
   @apply w-full rounded-xl border-2 border-night-600 bg-night-900 px-3 py-2 text-base text-white placeholder:text-night-300 focus:border-gold;
+
+  &:focus-visible {
+    outline: none;
+  }
 }
 
 /* Viên thuốc bo tròn hẳn; biến thể phe thêm `bg-goose-strong` / `bg-duck-strong` / `bg-third` (chữ trắng). */
