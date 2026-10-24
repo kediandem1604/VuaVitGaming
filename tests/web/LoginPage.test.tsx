@@ -24,7 +24,7 @@ test('?error=not_member explains that the user must join the server', () => {
   expect(screen.getByRole('alert')).toHaveTextContent('Bạn cần vào server Discord trước');
 });
 
-test('the duck squad is decorative: every drawing is hidden from assistive tech', () => {
+test('the lobby squad is decorative: every drawing is hidden from assistive tech', () => {
   const { container } = renderAt('/login');
   const drawings = container.querySelectorAll('svg');
   expect(drawings.length).toBeGreaterThan(0);
@@ -32,20 +32,34 @@ test('the duck squad is decorative: every drawing is hidden from assistive tech'
   expect(screen.getByRole('heading', { level: 1, name: 'GGD Hub' })).toBeInTheDocument();
 });
 
-test('a touched duck hops, and can hop again once the hop has finished', () => {
+test('the squad shows the five kits', () => {
   const { container } = renderAt('/login');
-  const duck = container.querySelector('[data-duck]');
-  if (duck === null) throw new Error('no duck on the login page');
-  expect(duck).not.toHaveAttribute('data-hopping');
+  const members = container.querySelectorAll('[data-member]');
+  expect(Array.from(members, (m) => m.getAttribute('data-member')).sort()).toEqual(
+    ['ninja', 'detective', 'crown', 'wizard', 'knife'].sort(),
+  );
+  // Mỗi con mặc đúng bộ đồ của kit (vẽ bằng KitArt, không phải hình riêng).
+  for (const member of members) {
+    const kit = member.getAttribute('data-member');
+    expect(member.querySelector(`[data-kit="${kit}"]`)).not.toBeNull();
+    expect(member.querySelector('[data-part="body"]')).not.toBeNull();
+  }
+});
 
-  fireEvent.pointerDown(duck);
-  expect(duck).toHaveAttribute('data-hopping');
+test('a touched goose hops, and can hop again once the hop has finished', () => {
+  const { container } = renderAt('/login');
+  const goose = container.querySelector('[data-member="crown"]');
+  if (goose === null) throw new Error('no crowned goose on the login page');
+  expect(goose).not.toHaveAttribute('data-hopping');
 
-  fireEvent.animationEnd(duck);
-  expect(duck).not.toHaveAttribute('data-hopping');
+  fireEvent.pointerDown(goose);
+  expect(goose).toHaveAttribute('data-hopping');
 
-  fireEvent.pointerDown(duck);
-  expect(duck).toHaveAttribute('data-hopping');
+  fireEvent.animationEnd(goose);
+  expect(goose).not.toHaveAttribute('data-hopping');
+
+  fireEvent.pointerDown(goose);
+  expect(goose).toHaveAttribute('data-hopping');
 });
 
 test('?error=state and ?error=oauth show their own messages', () => {

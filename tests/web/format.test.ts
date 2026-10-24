@@ -1,5 +1,15 @@
 import { expect, test } from 'vitest';
-import { addDaysIso, formatDateLabel, formatDayLabel, formatDayMonth, formatSeasonLabel, formatTime, isIsoDate, vnTodayIso } from '../../src/web/lib/format';
+import {
+  addDaysIso,
+  formatCountdown,
+  formatDateLabel,
+  formatDayLabel,
+  formatDayMonth,
+  formatSeasonLabel,
+  formatTime,
+  isIsoDate,
+  vnTodayIso,
+} from '../../src/web/lib/format';
 
 test('formatTime renders the Vietnam wall clock as HH:mm', () => {
   expect(formatTime('2026-10-22T14:00:00.000Z')).toBe('21:00');
@@ -55,6 +65,28 @@ test('addDaysIso shifts a YYYY-MM-DD across month and year boundaries', () => {
 test('formatDayMonth renders YYYY-MM-DD as dd/MM', () => {
   expect(formatDayMonth('2026-10-21')).toBe('21/10');
   expect(formatDayMonth('2026-01-05')).toBe('05/01');
+});
+
+const start = '2026-10-23T13:00:00.000Z';
+const at = (iso: string) => new Date(iso);
+
+test('countdown wording', () => {
+  expect(formatCountdown(start, at('2026-10-23T10:45:00.000Z'))).toBe('còn 2 giờ 15 phút');
+  expect(formatCountdown(start, at('2026-10-23T11:00:00.000Z'))).toBe('còn 2 giờ');
+  expect(formatCountdown(start, at('2026-10-23T12:20:00.000Z'))).toBe('còn 40 phút');
+  expect(formatCountdown(start, at('2026-10-23T12:59:30.000Z'))).toBe('còn dưới 1 phút');
+  expect(formatCountdown(start, at('2026-10-23T13:00:00.000Z'))).toBe('Đang chơi');
+  expect(formatCountdown(start, at('2026-10-23T15:00:00.000Z'))).toBe('Đang chơi');
+  expect(formatCountdown(start, at('2026-10-22T10:00:00.000Z'))).toBe('còn 1 ngày 3 giờ');
+  expect(formatCountdown(start, at('2026-10-21T13:00:00.000Z'))).toBe('còn 2 ngày');
+});
+
+test('countdown rounds minutes down and never depends on the time zone', () => {
+  // 59 phút 59 giây → vẫn là 59 phút; 1 giờ 0 phút 59 giây → "còn 1 giờ".
+  expect(formatCountdown(start, at('2026-10-23T12:00:01.000Z'))).toBe('còn 59 phút');
+  expect(formatCountdown(start, at('2026-10-23T11:59:01.000Z'))).toBe('còn 1 giờ');
+  // Hiệu thời gian thuần: cùng kết quả dù mốc bắt đầu ghi theo +07:00.
+  expect(formatCountdown('2026-10-23T20:00:00.000+07:00', at('2026-10-23T10:45:00.000Z'))).toBe('còn 2 giờ 15 phút');
 });
 
 test('isIsoDate accepts only real calendar days in YYYY-MM-DD form', () => {

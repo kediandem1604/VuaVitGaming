@@ -3,18 +3,27 @@
  * và Từ chối (bắt buộc lý do ≤ 200 ký tự, kiểm tra tại chỗ trước khi gửi). Lần khai
  * đã xử lý rời hàng chờ ngay (sửa cache). `NOT_PENDING` (người khác vừa duyệt, hoặc
  * người khai vừa sửa — server nhắn "hãy xem lại") → hiện lời nhắn và tải lại hàng chờ.
+ *
+ * Giao diện Sảnh đêm (spec §6 Quản trị): hàng chờ là danh sách kiểu bảng (một panel,
+ * hàng kẻ `night-700`, chữ 14px); Xác nhận từ chối là `btn-danger`.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
 import type { ReportDto } from '../../../shared/api-types';
 import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
+import { EmptyState } from '../../components/EmptyState';
 import { QueryState } from '../../components/QueryState';
+import { cx } from '../../lib/cx';
 import { formatDateLabel, formatTime } from '../../lib/format';
 
 export const PENDING_REPORTS_KEY = ['admin', 'reports', 'pending'] as const;
 const REASON_MAX = 200;
 const REASON_REQUIRED = 'Cần ghi lý do từ chối';
+
+const LABEL_CLASS = 'text-sm font-bold text-night-200';
+const HINT_CLASS = 'text-sm text-night-300';
+const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
 
 type ReviewBody = { approve: true } | { approve: false; reason: string };
 
@@ -24,7 +33,7 @@ export function ReviewsTab() {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">Hàng chờ duyệt{queue.data ? ` (${queue.data.length})` : ''}</h2>
+        <h2 className="text-xl leading-tight font-extrabold text-white">Hàng chờ duyệt{queue.data ? ` (${queue.data.length})` : ''}</h2>
         <button type="button" className="btn-secondary" disabled={queue.isFetching} onClick={() => void queue.refetch()}>
           Tải lại
         </button>
@@ -32,9 +41,11 @@ export function ReviewsTab() {
       <QueryState query={queue}>
         {(list) =>
           list.length === 0 ? (
-            <p className="text-slate-600 dark:text-slate-400">Không có lần khai nào chờ duyệt</p>
+            <EmptyState>
+              <p>Không có lần khai nào chờ duyệt</p>
+            </EmptyState>
           ) : (
-            <ul className="flex flex-col gap-3">
+            <ul className="panel flex flex-col divide-y divide-night-700 p-0">
               {list.map((report) => (
                 <PendingReport key={report.id} report={report} />
               ))}
@@ -78,30 +89,30 @@ function PendingReport({ report }: { report: ReportDto }) {
   const error = localError ?? (review.isError ? errorMessage(review.error) : null);
 
   return (
-    <li className="card flex flex-col gap-2">
+    <li className="flex flex-col gap-2 px-4 py-3 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-semibold">{report.member.displayName}</span>
-        <span className="text-slate-700 dark:text-slate-300">
+        <span className="text-base font-bold text-white">{report.member.displayName}</span>
+        <span className="text-night-200">
           {report.role.icon} {report.role.nameVi}
         </span>
-        <time dateTime={report.playedOn} className="ml-auto text-sm text-slate-600 tabular-nums dark:text-slate-400">
+        <time dateTime={report.playedOn} className="ml-auto text-night-300 tabular-nums">
           {formatDateLabel(report.playedOn)}
         </time>
       </div>
-      <p className="text-lg">{`${report.value} ${report.role.metricLabel}`}</p>
-      <p className="text-sm text-slate-600 dark:text-slate-400">
+      <p className="text-lg leading-tight font-extrabold text-white">{`${report.value} ${report.role.metricLabel}`}</p>
+      <p className="text-night-300">
         {report.sessionId !== null && <>Buổi #{report.sessionId} · </>}
         Khai lúc {formatTime(report.createdAt)} {formatDateLabel(new Date(report.createdAt))}
       </p>
-      {report.note && <p className="text-sm text-slate-700 dark:text-slate-300">{report.note}</p>}
+      {report.note && <p className="text-night-200">{report.note}</p>}
 
       {rejecting ? (
         <form noValidate onSubmit={onReject} className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-2">
-            <label htmlFor={reasonId} className="text-sm font-medium">
+            <label htmlFor={reasonId} className={LABEL_CLASS}>
               Lý do từ chối
             </label>
-            <span className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
+            <span className={cx(HINT_CLASS, 'tabular-nums')}>
               {reason.length}/{REASON_MAX}
             </span>
           </div>
@@ -117,7 +128,7 @@ function PendingReport({ report }: { report: ReportDto }) {
             }}
           />
           <div className="flex flex-wrap gap-2">
-            <button type="submit" className="btn bg-duck text-white hover:bg-red-600" disabled={review.isPending}>
+            <button type="submit" className="btn-danger" disabled={review.isPending}>
               {review.isPending ? 'Đang gửi…' : 'Xác nhận từ chối'}
             </button>
             <button type="button" className="btn-secondary" disabled={review.isPending} onClick={() => setRejecting(false)}>
@@ -136,7 +147,7 @@ function PendingReport({ report }: { report: ReportDto }) {
         </div>
       )}
       {error && (
-        <p role="alert" className="text-sm text-duck">
+        <p role="alert" className={ERROR_CLASS}>
           {error}
         </p>
       )}

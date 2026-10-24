@@ -1,23 +1,24 @@
 /**
- * Hồ sơ của chính mình: avatar, tên, mã thành viên (sao chép), email (lưu bằng
- * PATCH), hai công tắc nhắc giờ (PATCH ngay khi bật/tắt), các role đang hoá thân
- * mùa này (`/api/me/titles`, nhân vật nhỏ mang tên mình) và link sang lịch sử khai.
- * Kết quả PATCH được ghi thẳng vào cache `['me']` nên cả trang cập nhật theo.
+ * Hồ sơ của chính mình (spec §6 "Hồ sơ"): thẻ "hộ chiếu" (avatar, tên, mã thành viên
+ * trong chip vàng kèm nút sao chép), các role đang hoá thân mùa này (`/api/me/titles`,
+ * mỗi role một `RoleCard` mang tên mình), email (lưu bằng PATCH) và hai công tắc nhắc
+ * giờ (PATCH ngay khi bật/tắt). Kết quả PATCH được ghi thẳng vào cache `['me']` nên cả
+ * trang cập nhật theo.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, Copy } from 'lucide-react';
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import type { HeldRoleDto, MeDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { Avatar } from '../components/Avatar';
-import { Character } from '../components/Character';
+import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
+import { RoleCard } from '../components/RoleCard';
 import { ME_QUERY_KEY, useCurrentMember } from '../hooks/useMe';
 
 const TITLES_QUERY_KEY = ['me', 'titles'] as const;
-/** Nhân vật nhỏ trong danh sách role đang giữ (px). */
-const HELD_CHARACTER_SIZE = 72;
 
 interface ProfilePatch {
   email?: string | null;
@@ -26,6 +27,10 @@ interface ProfilePatch {
 }
 
 const NO_EMAIL_NOTE = 'Chưa có email — bạn chỉ nhận nhắc qua Discord';
+const PASSPORT_BAND = 'Hộ chiếu thành viên';
+
+const HEADING_CLASS = 'text-xl leading-tight font-extrabold text-white';
+const LABEL_CLASS = 'text-sm font-bold text-night-200';
 
 function useProfilePatch() {
   const queryClient = useQueryClient();
@@ -40,45 +45,51 @@ export function ProfilePage() {
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4">
-      <h1 className="text-2xl font-bold">Hồ sơ</h1>
+      {/* Tiêu đề 30px ≥ 18px nên dùng được chữ nổi `text-raised` (spec §3.2). */}
+      <h1 className="text-raised text-3xl leading-none font-extrabold text-white">Hồ sơ</h1>
 
-      <section className="card flex items-center gap-4">
-        <Avatar name={me.displayName} url={me.avatarUrl} className="size-16 text-2xl" />
-        <div className="flex min-w-0 flex-col gap-1">
-          <p className="truncate text-lg font-semibold">{me.displayName}</p>
-          <MemberCode code={me.memberCode} />
-        </div>
-      </section>
-
+      <Passport me={me} />
+      <HeldRolesSection me={me} />
       <EmailSection me={me} />
       <NotifySection me={me} />
-      <HeldRolesSection me={me} />
     </div>
   );
 }
 
-/** Các role tôi đang dẫn đầu mùa này, mỗi role một nhân vật nhỏ mang tên tôi. */
+/** Thẻ "hộ chiếu": băng vàng trên cùng như băng phe của thẻ role, rồi avatar, tên và mã thành viên. */
+function Passport({ me }: { me: MeDto }) {
+  return (
+    <section className="panel overflow-hidden p-0">
+      <p className="bg-gold px-4 py-1 text-xs font-extrabold tracking-wide text-gold-ink uppercase">{PASSPORT_BAND}</p>
+      <div className="flex items-center gap-4 p-4">
+        <Avatar name={me.displayName} url={me.avatarUrl} className="size-16 text-2xl" />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="truncate text-lg leading-tight font-extrabold text-white">{me.displayName}</p>
+          <MemberCode code={me.memberCode} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Các role tôi đang dẫn đầu mùa này, mỗi role một thẻ role mang tên tôi (không phải link: hồ sơ không dẫn đi đâu). */
 function HeldRolesSection({ me }: { me: MeDto }) {
   const titles = useQuery({ queryKey: TITLES_QUERY_KEY, queryFn: () => apiGet<HeldRoleDto[]>('/api/me/titles') });
 
   return (
-    <section className="card flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Role đang giữ mùa này</h2>
+    <section className="flex flex-col gap-3">
+      <h2 className={HEADING_CLASS}>Role đang giữ mùa này</h2>
       <QueryState query={titles}>
         {(held) =>
           held.length === 0 ? (
-            <p className="text-slate-600 dark:text-slate-400">Chưa giữ role nào mùa này</p>
+            <EmptyState>
+              <p>Chưa giữ role nào mùa này</p>
+            </EmptyState>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {held.map(({ role, score }) => (
-                <li key={role.id} className="flex flex-col items-center gap-1 text-center">
-                  <Character role={role} holderName={me.displayName} variant="current" size={HELD_CHARACTER_SIZE} />
-                  <span className="leading-tight font-semibold">
-                    {role.icon} {role.nameVi}
-                  </span>
-                  <span className="text-sm leading-tight text-slate-600 dark:text-slate-400">
-                    <span className="font-semibold text-slate-900 tabular-nums dark:text-slate-100">{score}</span> {role.metricLabel}
-                  </span>
+                <li key={role.id} className="flex">
+                  <RoleCard role={role} holderName={me.displayName} variant="current" score={score} className="w-full" />
                 </li>
               ))}
             </ul>
@@ -111,15 +122,19 @@ function MemberCode({ code }: { code: string }) {
   };
 
   return (
-    <p className="flex flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-      <span>
-        Mã thành viên:{' '}
-        <code className="font-mono font-semibold text-slate-900 select-all dark:text-slate-100">{code}</code>
-      </span>
-      <button type="button" className="btn-secondary px-2 py-1 text-xs" aria-live="polite" onClick={() => void copy()}>
-        {copied ? 'Đã chép' : 'Sao chép'}
-      </button>
-    </p>
+    <div className="flex flex-col gap-1">
+      <p className="text-sm text-night-300">Mã thành viên</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="chip bg-gold text-gold-ink">
+          <code className="font-mono tracking-wide select-all">{code}</code>
+        </span>
+        {/* Icon chỉ trang trí: tên nút vẫn là "Sao chép" / "Đã chép". */}
+        <button type="button" className="btn-secondary px-2 py-1 text-xs" aria-live="polite" onClick={() => void copy()}>
+          {copied ? <Check aria-hidden="true" className="size-3.5" /> : <Copy aria-hidden="true" className="size-3.5" />}
+          {copied ? 'Đã chép' : 'Sao chép'}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -143,11 +158,11 @@ function EmailSection({ me }: { me: MeDto }) {
   };
 
   return (
-    <section className="card flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Email</h2>
-      <p className="text-sm text-slate-600 dark:text-slate-400">Dùng để nhận nhắc giờ chơi. Để trống nếu không muốn.</p>
+    <section className="panel flex flex-col gap-3">
+      <h2 className={HEADING_CLASS}>Email</h2>
+      <p className="text-sm text-night-300">Dùng để nhận nhắc giờ chơi. Để trống nếu không muốn.</p>
       <form noValidate onSubmit={onSubmit} className="flex flex-col gap-2">
-        <label htmlFor="email" className="text-sm font-medium">
+        <label htmlFor="email" className={LABEL_CLASS}>
           Địa chỉ email
         </label>
         <div className="flex gap-2">
@@ -165,13 +180,13 @@ function EmailSection({ me }: { me: MeDto }) {
             Lưu
           </button>
         </div>
-        <p role="status" aria-live="polite" className="min-h-5 text-sm">
-          {patch.isPending && <span className="text-slate-500">Đang lưu…</span>}
-          {patch.isSuccess && <span className="text-goose">Đã lưu</span>}
-          {patch.isError && <span className="text-duck">{errorMessage(patch.error)}</span>}
+        <p role="status" aria-live="polite" className="min-h-5 text-sm font-bold">
+          {patch.isPending && <span className="text-night-300">Đang lưu…</span>}
+          {patch.isSuccess && <span className="text-ok">Đã lưu</span>}
+          {patch.isError && <span className="text-duck-soft">{errorMessage(patch.error)}</span>}
         </p>
       </form>
-      {me.email === null && <p className="text-sm text-amber-700 dark:text-amber-400">{NO_EMAIL_NOTE}</p>}
+      {me.email === null && <p className="text-sm font-bold text-gold">{NO_EMAIL_NOTE}</p>}
     </section>
   );
 }
@@ -180,8 +195,8 @@ function NotifySection({ me }: { me: MeDto }) {
   const patch = useProfilePatch();
 
   return (
-    <section className="card flex flex-col gap-1">
-      <h2 className="text-lg font-semibold">Nhắc giờ chơi</h2>
+    <section className="panel flex flex-col gap-1">
+      <h2 className={HEADING_CLASS}>Nhắc giờ chơi</h2>
       <Switch
         id="notify-email"
         label="Nhận nhắc qua email"
@@ -196,9 +211,9 @@ function NotifySection({ me }: { me: MeDto }) {
         disabled={patch.isPending}
         onChange={(event) => patch.mutate({ notifyDm: event.target.checked })}
       />
-      {me.email === null && <p className="pt-1 text-sm text-amber-700 dark:text-amber-400">{NO_EMAIL_NOTE}</p>}
+      {me.email === null && <p className="pt-1 text-sm font-bold text-gold">{NO_EMAIL_NOTE}</p>}
       {patch.isError && (
-        <p role="alert" className="pt-1 text-sm text-duck">
+        <p role="alert" className="pt-1 text-sm font-bold text-duck-soft">
           {errorMessage(patch.error)}
         </p>
       )}
@@ -214,11 +229,17 @@ interface SwitchProps {
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
 }
 
-/** Checkbox đóng vai công tắc: input ẩn (vẫn focus/đọc được), hình vẽ bằng `peer`. */
+/**
+ * Checkbox đóng vai công tắc: input ẩn (vẫn focus/đọc được), hình vẽ bằng `peer`. Máng tắt
+ * `night-700` có vòng `ring-2 ring-night-600` (3,31:1 trên panel `night-800`, đạt ≥ 3:1 nên
+ * thấy được máng khi tắt), bật `gold` với vòng cũng vàng; vòng là box-shadow nên không đẩy núm
+ * định vị tuyệt đối. Núm trắng viền `night-950`; focus bàn phím viền `gold` 3px như mọi phần tử
+ * bấm được. Chuyển động trượt chỉ khi máy không giảm chuyển động (`motion-safe`).
+ */
 function Switch({ id, label, checked, disabled, onChange }: SwitchProps) {
   return (
     <label htmlFor={id} className="flex cursor-pointer items-center justify-between gap-4 py-2">
-      <span className="font-medium">{label}</span>
+      <span className="font-bold text-white">{label}</span>
       <span className="relative inline-flex shrink-0">
         <input
           id={id}
@@ -231,7 +252,7 @@ function Switch({ id, label, checked, disabled, onChange }: SwitchProps) {
         />
         <span
           aria-hidden="true"
-          className="relative h-7 w-12 rounded-full bg-slate-300 transition after:absolute after:top-0.5 after:left-0.5 after:size-6 after:rounded-full after:bg-white after:shadow after:transition peer-checked:bg-goose peer-checked:after:translate-x-5 peer-focus-visible:ring-2 peer-focus-visible:ring-goose/50 peer-focus-visible:ring-offset-2 peer-disabled:opacity-50 dark:bg-slate-600"
+          className="relative h-7 w-12 rounded-full bg-night-700 ring-2 ring-night-600 after:absolute after:top-0.5 after:left-0.5 after:size-6 after:rounded-full after:border-2 after:border-night-950 after:bg-white peer-checked:bg-gold peer-checked:ring-gold peer-checked:after:translate-x-5 peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-gold peer-disabled:opacity-50 motion-safe:transition motion-safe:after:transition"
         />
       </span>
     </label>

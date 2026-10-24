@@ -1,7 +1,11 @@
-/** Trang duy nhất không cần đăng nhập. `?error=` do `/auth/callback` gắn khi thất bại. */
+/**
+ * Trang duy nhất không cần đăng nhập (spec §6 "Đăng nhập"): nền đêm toàn màn hình (nền
+ * của `body`), nhóm ngỗng ở trên, tiêu đề chữ nổi vàng, nút Discord kiểu khối. `?error=`
+ * do `/auth/callback` gắn khi thất bại, hiện trong panel viền đỏ.
+ */
 
 import { useSearchParams } from 'react-router';
-import { DuckSquad } from '../components/DuckSquad';
+import { LobbySquad } from '../components/LobbySquad';
 
 const ERROR_MESSAGES: Record<string, string> = {
   not_member: 'Bạn cần vào server Discord trước',
@@ -18,26 +22,24 @@ export function LoginPage() {
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-4 py-8 text-center">
-      <div className="flex w-full max-w-md flex-col items-center gap-2">
-        <DuckSquad className="mb-2 w-full" />
-        <h1 className="text-3xl font-bold text-goose">GGD Hub</h1>
-        <p className="text-slate-600 dark:text-slate-400">Cộng đồng Goose Goose Duck Việt Nam</p>
+      <div className="flex w-full max-w-lg flex-col items-center gap-3">
+        <LobbySquad className="w-full" />
+        <h1 className="text-raised text-5xl leading-none font-extrabold text-gold">GGD Hub</h1>
+        <p className="text-lg text-night-200">Cộng đồng Goose Goose Duck Việt Nam</p>
       </div>
 
       {message && (
-        <p role="alert" className="w-full max-w-xs rounded-lg border border-duck/40 bg-duck/10 px-4 py-3 text-sm font-medium text-duck">
+        <p role="alert" className="panel w-full max-w-xs border-duck-soft py-3 text-base font-bold text-duck-soft">
           {message}
         </p>
       )}
 
-      <a
-        href="/auth/login"
-        className="w-full max-w-xs rounded-xl bg-[#5865F2] px-6 py-4 text-lg font-semibold text-white shadow transition hover:bg-[#4752C4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5865F2]"
-      >
+      {/* Màu Discord là token `--color-discord` (= `PALETTE.discord`); chữ trắng đạt 4.6:1, rê chuột 5.1:1. */}
+      <a href="/auth/login" className="btn w-full max-w-xs bg-discord px-6 py-3 text-lg text-white">
         Đăng nhập bằng Discord
       </a>
 
-      <p className="text-sm text-slate-500 dark:text-slate-400">Chỉ thành viên trong server Discord mới đăng nhập được.</p>
+      <p className="text-sm text-night-300">Chỉ thành viên trong server Discord mới đăng nhập được.</p>
     </main>
   );
 }

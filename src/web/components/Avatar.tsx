@@ -13,7 +13,7 @@ interface AvatarProps {
   label?: string;
 }
 
-/** Ảnh đại diện; không có ảnh thì hiện chữ cái đầu trên nền màu Ngỗng. */
+/** Ảnh đại diện viền 2px `night-950`; không có ảnh thì hiện chữ cái đầu màu `gold` trên nền `night-700` (spec §5.4). */
 export function Avatar({ name, url, className, label }: AvatarProps) {
   if (url) {
     return (
@@ -21,7 +21,7 @@ export function Avatar({ name, url, className, label }: AvatarProps) {
         src={url}
         alt={label ?? ''}
         title={label}
-        className={cx('shrink-0 rounded-full bg-slate-200 object-cover', className)}
+        className={cx('shrink-0 rounded-full border-2 border-night-950 bg-night-700 object-cover', className)}
       />
     );
   }
@@ -29,7 +29,7 @@ export function Avatar({ name, url, className, label }: AvatarProps) {
     <span
       {...(label === undefined ? { 'aria-hidden': true } : { role: 'img', 'aria-label': label, title: label })}
       className={cx(
-        'inline-flex shrink-0 items-center justify-center rounded-full bg-goose font-semibold text-white',
+        'inline-flex shrink-0 items-center justify-center rounded-full border-2 border-night-950 bg-night-700 font-bold text-gold',
         className,
       )}
     >

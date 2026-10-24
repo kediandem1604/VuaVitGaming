@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { HallOfDayDto, SessionAttendeeDto, SessionDto } from '../../src/shared/api-types';
+import type { HallOfDayDto, MeDto, SessionAttendeeDto, SessionDto } from '../../src/shared/api-types';
 import { TodayPage } from '../../src/web/pages/TodayPage';
 
 const me: SessionAttendeeDto = { memberId: 9, displayName: 'Tôi', avatarUrl: null };
@@ -49,12 +49,28 @@ function stubFetch(routes: Record<string, Handler>) {
   return fetchMock;
 }
 
-const renderPage = () => {
+/** Người đang đăng nhập (Outlet context như trong App): nhắc qua cả email và Discord. */
+const member: MeDto = {
+  id: 9,
+  memberCode: 'GGD-0009',
+  displayName: 'Tôi',
+  avatarUrl: null,
+  email: 'toi@example.com',
+  notifyEmail: true,
+  notifyDm: true,
+  accessLevel: 'member',
+};
+
+const renderPage = (me: MeDto = member) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <TodayPage />
+        <Routes>
+          <Route element={<Outlet context={me} />}>
+            <Route path="/" element={<TodayPage />} />
+          </Route>
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -86,6 +102,23 @@ test('shows the day label, distinct attendee count, ordered sessions and empty h
   expect(screen.getByText('Đã huỷ')).toBeInTheDocument();
 });
 
+test("each upcoming card's reminder line follows the signed-in member's own channels", async () => {
+  // Buổi còn xa trong tương lai: chưa tới giờ nên dòng nhắc còn hiện.
+  const upcoming: SessionDto = { ...base, id: 5, startsAt: '2099-01-01T12:00:00.000Z', attendees: [] };
+  stubFetch({
+    'GET /api/sessions': () => json(200, [upcoming]),
+    'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
+  });
+  // Đã bật email nhưng chưa có địa chỉ → chỉ còn Discord.
+  renderPage({ ...member, email: null });
+  expect(await screen.findByText('Nhắc trước giờ chơi qua Discord')).toBeInTheDocument();
+  cleanup();
+
+  renderPage({ ...member, notifyEmail: false, notifyDm: false });
+  expect(await screen.findByRole('link', { name: 'Hồ sơ' })).toHaveAttribute('href', '/ho-so');
+});
+
 test('an empty day says there are no sessions yet', async () => {
   stubFetch({
     'GET /api/sessions': () => json(200, []),
@@ -93,7 +126,9 @@ test('an empty day says there are no sessions yet', async () => {
     'GET /api/mvp/dates': () => json(200, []),
   });
   renderPage();
-  expect(await screen.findByText('Hôm nay chưa có buổi chơi nào')).toBeInTheDocument();
+  const empty = await screen.findByText('Hôm nay chưa có buổi chơi nào');
+  // Câu "chưa có" nằm trong ô EmptyState dùng chung (panel-inset + ngỗng trang trí).
+  expect(empty.closest('.panel-inset')).not.toBeNull();
   expect(screen.getByText('0 người tham gia hôm nay')).toBeInTheDocument();
 });
 
@@ -115,12 +150,16 @@ test('joining replaces that card with the returned session and updates the total
   const firstCard = joinButtons[0]?.closest('article');
   expect(firstCard).not.toBeNull();
   expect(within(firstCard as HTMLElement).getByText('19:00')).toBeInTheDocument();
-  expect(within(firstCard as HTMLElement).getByText('2/16')).toBeInTheDocument();
+  expect(within(firstCard as HTMLElement).getByText('2/16 ghế đã có người')).toBeInTheDocument();
 
   fireEvent.click(joinButtons[0] as HTMLElement);
 
   expect(await within(firstCard as HTMLElement).findByRole('button', { name: 'Huỷ tham gia' })).toBeInTheDocument();
-  expect(within(firstCard as HTMLElement).getByText('3/16')).toBeInTheDocument();
+  expect(within(firstCard as HTMLElement).getByText('3/16 ghế đã có người')).toBeInTheDocument();
+  // Ghế mới có người: "Tôi" ngồi vào ô thứ ba, còn 13 ghế trống.
+  const seats = within(firstCard as HTMLElement).getByRole('list', { name: 'Hàng ghế' });
+  expect(within(seats).getByRole('img', { name: 'Tôi' })).toBeInTheDocument();
+  expect(within(seats).getAllByLabelText('Ghế trống')).toHaveLength(13);
   expect(screen.getByText('4 người tham gia hôm nay')).toBeInTheDocument();
 
   // Không tải lại danh sách sau khi thành công: dùng ngay DTO trả về.

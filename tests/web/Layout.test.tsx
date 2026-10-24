@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { MeDto } from '../../src/shared/api-types';
@@ -20,9 +20,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const renderLayout = (who: MeDto) =>
+const renderLayout = (who: MeDto, path = '/') =>
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <Layout me={who}>
         <p>nội dung</p>
       </Layout>
@@ -67,6 +67,41 @@ test('header nav, bottom bar and content padding switch at the same breakpoint',
   const name = screen.getByText(me.displayName);
   expect(name.className).toMatch(/\bmax-w-\d+\b/);
   expect(name.className).toMatch(/\btruncate\b/);
+  // Ở màn hình chỉ còn avatar (dưới sm, từ lg) tên vẫn trong cây truy cập: sr-only, không display:none.
+  expect(name.className).toMatch(/(^|\s)sr-only\b/);
+  expect(name.className).toMatch(/\blg:sr-only\b/);
+  expect(name.className).not.toMatch(/(^|\s)(lg:)?hidden\b/);
+});
+
+test('navigation uses drawn icons, not emoji', () => {
+  renderLayout({ ...me, accessLevel: 'admin' });
+  const navs = screen.getAllByRole('navigation', { name: 'Điều hướng chính' });
+  expect(navs).toHaveLength(2);
+  for (const nav of navs) {
+    // Emoji hiện mỗi máy một kiểu (spec §3.4) — thanh điều hướng chỉ còn chữ và icon vẽ.
+    expect(nav.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
+    const links = within(nav).getAllByRole('link');
+    expect(links).toHaveLength(7);
+    for (const link of links) {
+      expect(link.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(1);
+    }
+  }
+});
+
+test('the open page is marked in gold in both navs', () => {
+  renderLayout(me, '/ho-so');
+  const [headerLink, dockLink] = screen.getAllByRole('link', { name: /Hồ sơ/ });
+  expect(headerLink).toHaveAttribute('aria-current', 'page');
+  expect(dockLink).toHaveAttribute('aria-current', 'page');
+  // Hàng trên: viên thuốc nền vàng chữ `gold-ink`; thanh dưới: icon và nhãn vàng.
+  expect(headerLink?.className).toMatch(/\bbg-gold\b/);
+  expect(headerLink?.className).toMatch(/\btext-gold-ink\b/);
+  expect(dockLink?.className).toMatch(/\btext-gold\b/);
+
+  const [otherHeader, otherDock] = screen.getAllByRole('link', { name: /Hôm nay/ });
+  expect(otherHeader).not.toHaveAttribute('aria-current');
+  expect(otherHeader?.className).not.toMatch(/\bbg-gold\b/);
+  expect(otherDock?.className).not.toMatch(/\btext-gold\b/);
 });
 
 test('a failed logout shows its alert on its own line under the header row', async () => {

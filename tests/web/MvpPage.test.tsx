@@ -112,8 +112,22 @@ test('an invalid ?ngay= falls back to the newest date', async () => {
 test('no results at all shows the empty copy', async () => {
   stubFetch([]);
   renderAt('/tri-an');
-  expect(await screen.findByText('Chưa có kết quả tri ân nào')).toBeInTheDocument();
+  const copy = await screen.findByText('Chưa có kết quả tri ân nào');
+  expect(copy.closest('.panel-inset')).not.toBeNull();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});
+
+test('date chips: the viewed day is the gold chip and the row scrolls inside itself', async () => {
+  stubFetch(['2026-10-22', '2026-10-20']);
+  renderAt('/tri-an');
+  await screen.findByRole('heading', { level: 3, name: 'Cổ điển 21:00' });
+
+  expect(screen.getByRole('group', { name: 'Chọn ngày' }).className.split(' ')).toContain('overflow-x-auto');
+  const active = screen.getByRole('button', { name: '22/10/2026' }).className.split(' ');
+  const idle = screen.getByRole('button', { name: '20/10/2026' }).className.split(' ');
+  expect(active).toEqual(expect.arrayContaining(['chip', 'bg-gold', 'text-gold-ink']));
+  expect(idle).toContain('chip');
+  expect(idle).not.toContain('bg-gold');
 });
 
 test('a date picker reaches any past day (up to today) and keeps it in ?ngay=', async () => {

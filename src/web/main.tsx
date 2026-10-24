@@ -3,6 +3,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError } from './api';
 import { App } from './App';
+// styles.css khai báo luôn font Baloo 2 (@font-face, chỉ bộ Latin + tiếng Việt) cho `--font-sans`.
 import './styles.css';
 
 const queryClient = new QueryClient({

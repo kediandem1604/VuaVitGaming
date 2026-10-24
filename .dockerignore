@@ -22,8 +22,9 @@ vitest.config.ts
 .env.*
 !.env.example
 
-# Linh tinh của hệ điều hành / IDE
+# Linh tinh của hệ điều hành / IDE / công cụ AI (worktree trong .claude có cả node_modules)
 .DS_Store
 Thumbs.db
 .vscode
 .idea
+.claude

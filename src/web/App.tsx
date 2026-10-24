@@ -65,7 +65,9 @@ function Shell() {
     }
     return (
       <FullScreenNotice>
-        <p role="alert">{errorMessage(me.error)}</p>
+        <p role="alert" className="font-bold text-duck-soft">
+          {errorMessage(me.error)}
+        </p>
         <button type="button" className="btn-secondary" onClick={() => void me.refetch()}>
           Thử lại
         </button>
@@ -84,7 +86,7 @@ function StaffOnly({ children }: { children: ReactNode }) {
 
 function FullScreenNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4 text-center text-slate-600 dark:text-slate-400">
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4 text-center text-night-300">
       {children}
     </div>
   );

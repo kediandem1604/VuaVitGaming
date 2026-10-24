@@ -6,17 +6,22 @@
  * trước giờ chơi) và Huỷ buổi; các đợt vote đang mở với nút Đóng vote sớm. Sau mỗi thao
  * tác ghi, các danh sách liên quan được tải lại (kể cả trang Hôm nay dùng khoá
  * `['sessions', …]`).
+ *
+ * Giao diện Sảnh đêm (spec §6 Quản trị): form trong `panel`, danh sách kiểu bảng — một
+ * panel, hàng kẻ `night-700`, chữ 14px; Huỷ buổi là `btn-danger`.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import type { EndOptionDto, ModeDto, OpenVoteRoundDto, SessionDto } from '../../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../../api';
+import { EmptyState } from '../../components/EmptyState';
 import { Modal } from '../../components/Modal';
 import { QueryState } from '../../components/QueryState';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatDayLabel, formatTime, vnTodayIso } from '../../lib/format';
 import { Chip } from './Chip';
+import { Checkbox } from './Controls';
 
 const MODES_KEY = ['modes'] as const;
 const OPEN_ROUNDS_KEY = ['admin', 'vote-rounds', 'open'] as const;
@@ -30,6 +35,14 @@ const CAPACITY_MIN = 1;
 const CAPACITY_MAX = 25;
 const ROOM_CODE_MAX = 20;
 const NOTE_MAX = 300;
+
+const H2_CLASS = 'text-xl leading-tight font-extrabold text-white';
+const LABEL_CLASS = 'text-sm font-bold text-night-200';
+const HINT_CLASS = 'text-sm text-night-300';
+const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
+/** Danh sách kiểu bảng: một panel không đệm, các hàng kẻ `night-700`, chữ 14px; `overflow-hidden` để nền hàng mờ không lòi ra khỏi góc bo. */
+const ROWS_CLASS = 'panel flex flex-col divide-y divide-night-700 overflow-hidden p-0';
+const ROW_CLASS = 'flex flex-col gap-2 px-4 py-3 text-sm';
 
 interface CreateBody {
   date: string;
@@ -120,8 +133,8 @@ function CreateSessionForm({ onCreated }: { onCreated: (date: string) => void })
   const error = localError ?? (create.isError ? errorMessage(create.error) : null);
 
   return (
-    <section className="card flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Tạo buổi chơi</h2>
+    <section className="panel flex flex-col gap-3">
+      <h2 className={H2_CLASS}>Tạo buổi chơi</h2>
       <form noValidate onSubmit={onSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field id={`${id}-date`} label="Ngày">
           <input id={`${id}-date`} type="date" className="field" value={date} onChange={(e) => (setDate(e.target.value), touch())} />
@@ -162,13 +175,13 @@ function CreateSessionForm({ onCreated }: { onCreated: (date: string) => void })
           <button type="submit" className="btn-primary w-full sm:w-auto sm:self-start" disabled={create.isPending || modes.data === undefined}>
             {create.isPending ? 'Đang tạo…' : 'Tạo buổi'}
           </button>
-          {modes.isError && <p className="text-sm text-duck">Không tải được danh sách chế độ chơi: {errorMessage(modes.error)}</p>}
+          {modes.isError && <p className="text-sm text-duck-soft">Không tải được danh sách chế độ chơi: {errorMessage(modes.error)}</p>}
           {error && (
-            <p role="alert" className="text-sm text-duck">
+            <p role="alert" className={ERROR_CLASS}>
               {error}
             </p>
           )}
-          <p role="status" aria-live="polite" className="min-h-5 text-sm text-goose">
+          <p role="status" aria-live="polite" className="min-h-5 text-sm font-bold text-ok">
             {create.isSuccess && `Đã tạo buổi ${formatTime(create.data.startsAt)} ${create.data.modeName}`}
           </p>
         </div>
@@ -180,11 +193,11 @@ function CreateSessionForm({ onCreated }: { onCreated: (date: string) => void })
 function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium">
+      <label htmlFor={id} className={LABEL_CLASS}>
         {label}
       </label>
       {children}
-      {hint && <p className="text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
+      {hint && <p className={HINT_CLASS}>{hint}</p>}
     </div>
   );
 }
@@ -205,18 +218,20 @@ function DaySessions({ date, onDateChange }: { date: string; onDateChange: (date
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <h2 className="text-lg font-semibold">{valid ? `Buổi chơi ${formatDayLabel(date)}` : 'Buổi chơi'}</h2>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="font-medium">Xem buổi ngày</span>
+        <h2 className={H2_CLASS}>{valid ? `Buổi chơi ${formatDayLabel(date)}` : 'Buổi chơi'}</h2>
+        <label className="flex items-center gap-2">
+          <span className={LABEL_CLASS}>Xem buổi ngày</span>
           <input id={`${id}-day`} type="date" className="field w-auto" value={date} onChange={(e) => onDateChange(e.target.value)} />
         </label>
       </div>
       <QueryState query={sessions}>
         {(list) =>
           list.length === 0 ? (
-            <p className="text-slate-600 dark:text-slate-400">Ngày này chưa có buổi chơi nào</p>
+            <EmptyState>
+              <p>Ngày này chưa có buổi chơi nào</p>
+            </EmptyState>
           ) : (
-            <ul className="flex flex-col gap-3">
+            <ul className={ROWS_CLASS}>
               {list.map((session) => (
                 <AdminSessionRow key={session.id} session={session} onMoved={onDateChange} />
               ))}
@@ -249,25 +264,32 @@ function AdminSessionRow({ session, onMoved }: { session: SessionDto; onMoved: (
     if (window.confirm(`Huỷ buổi ${label}? Người đã đăng ký sẽ nhận DM báo huỷ.`)) cancel.mutate();
   };
 
+  const open = session.status === 'scheduled';
+  // Buổi đã huỷ/kết thúc mờ đi bằng màu, không bằng opacity (ruling R12, như SessionCard trang
+  // Hôm nay): nền hàng tối hơn (`night-900` 60% trên panel `night-800`) và chữ `night-300`
+  // (≈ 7.4:1 trên nền đó); chip trạng thái giữ nguyên màu nên vẫn ≥ 4.5:1.
+  const primary = open ? 'text-white' : 'text-night-300';
+  const secondary = open ? 'text-night-200' : 'text-night-300';
+
   return (
     <li>
-      <article aria-label={label} className={cx('card flex flex-col gap-2', session.status === 'cancelled' && 'opacity-70')}>
+      <article aria-label={label} className={cx(ROW_CLASS, !open && 'bg-night-900/60')}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <time dateTime={session.startsAt} className="text-xl font-bold tabular-nums">
+          <time dateTime={session.startsAt} className={cx('text-xl leading-tight font-extrabold tabular-nums', primary)}>
             {formatTime(session.startsAt)}
           </time>
-          <span className="font-semibold">{session.modeName}</span>
+          <span className={cx('font-bold', primary)}>{session.modeName}</span>
           {session.status !== 'scheduled' && <Chip tone={STATUS_CHIP[session.status].tone}>{STATUS_CHIP[session.status].text}</Chip>}
-          <span className="ml-auto text-sm text-slate-600 dark:text-slate-400">
-            <span className="font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+          <span className="ml-auto text-night-300">
+            <span className={cx('font-bold tabular-nums', primary)}>
               {session.attendees.length}/{session.capacity}
             </span>{' '}
             người
           </span>
         </div>
-        {session.roomCode && <p className="text-sm font-medium">Mã phòng: {session.roomCode}</p>}
-        {session.note && <p className="text-sm text-slate-700 dark:text-slate-300">{session.note}</p>}
-        {session.status === 'scheduled' && (
+        {session.roomCode && <p className={cx('font-bold', secondary)}>Mã phòng: {session.roomCode}</p>}
+        {session.note && <p className={secondary}>{session.note}</p>}
+        {open && (
           <div className="flex flex-col gap-1">
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-primary" disabled={cancel.isPending} onClick={() => setEnding(true)}>
@@ -276,12 +298,13 @@ function AdminSessionRow({ session, onMoved }: { session: SessionDto; onMoved: (
               <button type="button" className="btn-secondary" disabled={cancel.isPending} onClick={() => setEditing(true)}>
                 Sửa
               </button>
-              <button type="button" className="btn-secondary" disabled={cancel.isPending} onClick={onCancel}>
+              <button type="button" className="btn-danger" disabled={cancel.isPending} onClick={onCancel}>
+
                 {cancel.isPending ? 'Đang huỷ…' : 'Huỷ buổi'}
               </button>
             </div>
             {cancel.isError && (
-              <p role="alert" className="text-sm text-duck">
+              <p role="alert" className={ERROR_CLASS}>
                 {errorMessage(cancel.error)}
               </p>
             )}
@@ -363,7 +386,7 @@ function EditDialog({ session, label, onClose, onMoved }: EditDialogProps) {
 
   return (
     <Modal titleId={titleId} onClose={onClose}>
-      <h3 id={titleId} className="text-lg font-semibold">
+      <h3 id={titleId} className={H2_CLASS}>
         Sửa buổi {label}
       </h3>
       <form noValidate onSubmit={onSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -414,7 +437,7 @@ function EditDialog({ session, label, onClose, onMoved }: EditDialogProps) {
             </button>
           </div>
           {error && (
-            <p role="alert" className="text-sm text-duck">
+            <p role="alert" className={ERROR_CLASS}>
               {error}
             </p>
           )}
@@ -480,24 +503,23 @@ function EndDialog({ session, label, onClose }: EndDialogProps) {
 
   return (
     <Modal titleId={titleId} onClose={onClose}>
-      <h3 id={titleId} className="text-lg font-semibold">
+      <h3 id={titleId} className={H2_CLASS}>
         Kết thúc buổi {label}
       </h3>
-      <p className="text-sm text-slate-600 dark:text-slate-400">Chọn hạng mục mở vote. Không tick gì thì buổi kết thúc mà không mở vote.</p>
+      <p className={HINT_CLASS}>Chọn hạng mục mở vote. Không tick gì thì buổi kết thúc mà không mở vote.</p>
       <QueryState query={options}>
         {(list) => (
           <form noValidate onSubmit={onSubmit} className="flex flex-col gap-3">
             {list.length === 0 ? (
-              <p className="text-sm text-slate-600 dark:text-slate-400">Không có hạng mục nào đang bật</p>
+              <p className={HINT_CLASS}>Không có hạng mục nào đang bật</p>
             ) : (
               <ul className="flex flex-col gap-1">
                 {list.map((option) => (
                   <li key={option.id}>
-                    <label className="flex items-center gap-2 py-1">
-                      <input type="checkbox" className="size-4 accent-goose" checked={ticked.has(option.id)} onChange={() => toggle(option.id)} />
-                      <span className="min-w-0 flex-1">{option.name}</span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400">{SCOPE_NOTE[option.scope]}</span>
-                    </label>
+                    <Checkbox id={`${titleId}-option-${option.id}`} checked={ticked.has(option.id)} onChange={() => toggle(option.id)} className="py-1">
+                      <span className="min-w-0 flex-1 text-night-200">{option.name}</span>
+                      <span className={HINT_CLASS}>{SCOPE_NOTE[option.scope]}</span>
+                    </Checkbox>
                   </li>
                 ))}
               </ul>
@@ -511,7 +533,7 @@ function EndDialog({ session, label, onClose }: EndDialogProps) {
               </button>
             </div>
             {end.isError && (
-              <p role="alert" className="text-sm text-duck">
+              <p role="alert" className={ERROR_CLASS}>
                 {errorMessage(end.error)}
               </p>
             )}
@@ -531,13 +553,15 @@ function OpenVoteRounds() {
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Vote đang mở</h2>
+      <h2 className={H2_CLASS}>Vote đang mở</h2>
       <QueryState query={rounds}>
         {(list) =>
           list.length === 0 ? (
-            <p className="text-slate-600 dark:text-slate-400">Không có vote nào đang mở</p>
+            <EmptyState>
+              <p>Không có vote nào đang mở</p>
+            </EmptyState>
           ) : (
-            <ul className="flex flex-col gap-2">
+            <ul className={ROWS_CLASS}>
               {list.map((round) => (
                 <OpenRoundRow key={round.id} round={round} />
               ))}
@@ -564,10 +588,10 @@ function OpenRoundRow({ round }: { round: OpenVoteRoundDto }) {
   };
 
   return (
-    <li className="card flex flex-col gap-2">
+    <li className={ROW_CLASS}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-semibold">{round.sessionLabel}</span>
-        <span className="text-sm text-slate-600 dark:text-slate-400">
+        <span className="font-bold text-white">{round.sessionLabel}</span>
+        <span className="text-night-300">
           Tự đóng lúc {formatTime(round.closesAt)} {formatDateLabel(new Date(round.closesAt))}
         </span>
         <button type="button" className="btn-secondary ml-auto" disabled={close.isPending} onClick={onClose}>
@@ -575,7 +599,7 @@ function OpenRoundRow({ round }: { round: OpenVoteRoundDto }) {
         </button>
       </div>
       {close.isError && (
-        <p role="alert" className="text-sm text-duck">
+        <p role="alert" className={ERROR_CLASS}>
           {errorMessage(close.error)}
         </p>
       )}

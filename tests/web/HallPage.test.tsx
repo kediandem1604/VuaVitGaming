@@ -160,6 +160,53 @@ test('the special-mode tab appears only when such roles exist and keeps them out
   expect(screen.getByTestId('location')).toHaveTextContent('/dai-sanh?phe=special');
 });
 
+test('each hall tile is a role card inside the leaderboard link', async () => {
+  stubFetch();
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+
+  // Mỗi ô là một link (lớp `lift`) bọc thẻ role có băng phe; không có link lồng trong link.
+  const tiles = screen.getAllByRole('link');
+  expect(tiles).toHaveLength(2);
+  for (const tile of tiles) {
+    expect(tile).toHaveTextContent('PHE NGỖNG');
+    expect(within(tile).queryByRole('link')).toBeNull();
+    expect(tile.className.split(' ')).toContain('lift');
+  }
+  // Ô trống mời khai điểm (chỉ là chữ); ô có người thì không.
+  expect(screen.getByRole('link', { name: /Thầy đồng/ })).toHaveTextContent('Khai điểm để giành');
+  expect(screen.getByRole('link', { name: /Ngỗng: Ngỗng Một/ })).not.toHaveTextContent('Khai điểm để giành');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe Vịt' }));
+  const duckTile = screen.getByRole('link', { name: /Kiếm sĩ/ });
+  expect(duckTile).toHaveTextContent('PHE VỊT');
+  // Có người giữ mùa trước: không phải ô trống.
+  expect(duckTile).not.toHaveTextContent('Khai điểm để giành');
+});
+
+test('faction tabs are chips coloured by the selected faction', async () => {
+  stubFetch({ '2026-10': { seasonId: '2026-10', closed: false, roles: [...mainRoles, specialEntry] } });
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+  const classes = (name: string) => screen.getByRole('button', { name }).className.split(' ');
+
+  expect(classes('Phe Ngỗng')).toEqual(expect.arrayContaining(['chip', 'bg-goose-strong']));
+  expect(classes('Phe Vịt')).toContain('chip');
+  expect(classes('Phe Vịt')).not.toContain('bg-duck-strong');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe Vịt' }));
+  expect(classes('Phe Vịt')).toContain('bg-duck-strong');
+  expect(classes('Phe Ngỗng')).not.toContain('bg-goose-strong');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe thứ 3' }));
+  expect(classes('Phe thứ 3')).toContain('bg-third');
+
+  // Tab không thuộc phe nào: mục đang chọn nền vàng chữ `gold-ink`.
+  fireEvent.click(screen.getByRole('button', { name: 'Chế độ đặc biệt' }));
+  expect(classes('Chế độ đặc biệt')).toEqual(expect.arrayContaining(['bg-gold', 'text-gold-ink']));
+  expect(classes('Phe thứ 3')).not.toContain('bg-third');
+});
+
 test('?mua= and ?phe= select a closed season and a tab', async () => {
   const fetchMock = stubFetch();
   renderAt('/dai-sanh?mua=2026-09&phe=neutral');

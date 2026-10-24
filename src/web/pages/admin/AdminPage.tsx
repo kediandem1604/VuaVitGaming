@@ -4,6 +4,9 @@
  * trong `?tab=` để chia sẻ/tải lại được; giá trị lạ (hoặc tab admin với mod) thì về
  * tab mặc định. Mỗi tab là một file riêng trong thư mục này; App đã chặn thành viên
  * thường (`StaffOnly`), server vẫn kiểm tra quyền cho từng API.
+ *
+ * Giao diện Sảnh đêm (spec §6 Quản trị): thanh tab là dải chip cuộn ngang, tab đang chọn
+ * nền `gold`; nội dung các tab ưu tiên dễ đọc hơn trang trí.
  */
 
 import type { ReactNode } from 'react';
@@ -55,10 +58,14 @@ export function AdminPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-bold">Quản trị</h1>
+      {/* Tiêu đề 30px ≥ 18px nên dùng được chữ nổi `text-raised` (spec §3.2). */}
+      <h1 className="text-raised text-3xl leading-none font-extrabold text-white">Quản trị</h1>
 
-      {/* Dải tab cuộn ngang trong chính nó (không cuộn cả trang); `-mx-4 px-4` cho dải chạm mép màn hình nhỏ. */}
-      <div role="tablist" aria-label="Mục quản trị" className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:thin]">
+      {/*
+       * Dải chip cuộn ngang trong chính nó (không cuộn cả trang); `-mx-4 px-4` cho dải chạm
+       * mép màn hình nhỏ, `-my-1.5 py-1.5` chừa chỗ cho viền focus 3px (+2px) không bị khung cuộn cắt.
+       */}
+      <div role="tablist" aria-label="Mục quản trị" className="-mx-4 -my-1.5 flex gap-2 overflow-x-auto px-4 py-1.5 [scrollbar-width:thin]">
         {tabs.map((tab) => {
           const selected = tab.key === active.key;
           return (
@@ -69,12 +76,7 @@ export function AdminPage() {
               id={`tab-${tab.key}`}
               aria-selected={selected}
               aria-controls={`panel-${tab.key}`}
-              className={cx(
-                'btn shrink-0 border whitespace-nowrap',
-                selected
-                  ? 'border-goose bg-goose text-white'
-                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800',
-              )}
+              className={cx('chip shrink-0 px-4 py-1.5 text-base hover:brightness-110', selected && 'bg-gold text-gold-ink')}
               onClick={() => select(tab.key)}
             >
               {tab.label}

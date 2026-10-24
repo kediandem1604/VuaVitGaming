@@ -128,6 +128,54 @@ test('a diacritic-less query finds Kiếm sĩ and selecting it labels the value 
   expect(await screen.findByText('Không có role nào khớp')).toBeInTheDocument();
 });
 
+test('suggestions show a mini character and the faction, and the chosen role becomes a card', async () => {
+  stubFetch(baseRoutes);
+  renderPage();
+
+  // "o" khớp cả ba role (goose, swordsman, dodo) nên thấy đủ ba phe.
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Role' }), { target: { value: 'o' } });
+  const listbox = await screen.findByRole('listbox', { name: 'Kết quả tìm role' });
+  const options = within(listbox).getAllByRole('option');
+  expect(options).toHaveLength(3);
+  const expected: Array<[string, string]> = [
+    ['Ngỗng', 'Phe Ngỗng'],
+    ['Kiếm sĩ', 'Phe Vịt'],
+    ['Chim đa đa', 'Phe thứ 3'],
+  ];
+  expected.forEach(([name, faction], index) => {
+    const option = options[index] as HTMLElement;
+    // Nhân vật thu nhỏ có vẽ trong gợi ý nhưng chỉ trang trí (aria-hidden): tên gợi ý đọc tên
+    // role một lần, không kèm nhãn của hình hay emoji.
+    expect(option.querySelector('svg [data-part="body"]')).not.toBeNull();
+    expect(within(option).queryByRole('img')).toBeNull();
+    // Trước đây: "Kiếm sĩ ⚔️ Kiếm sĩ — …" (nhãn của hình, emoji, rồi tên).
+    expect(option).toHaveAccessibleName(new RegExp(`^${name}\\s*— `));
+    expect(option).toHaveTextContent(faction);
+  });
+  // Không gợi ý nào mang bảng tên trống của nhân vật.
+  expect(within(listbox).queryByText('Chưa ai hoá thân')).toBeNull();
+
+  fireEvent.click(options[1] as HTMLElement);
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  // Thẻ role đã chọn: nhân vật mặc bộ đồ của role (trang trí), dòng "Đã chọn" và phe.
+  const chosen = screen.getByText(/Đã chọn/).closest('.panel-inset') as HTMLElement;
+  expect(chosen.querySelector('svg [data-part="body"]')).not.toBeNull();
+  expect(chosen.querySelector('[data-kit="sword"]')).not.toBeNull();
+  expect(within(chosen).queryByRole('img')).toBeNull();
+  expect(screen.getByText(/Đã chọn/)).toHaveTextContent('Đã chọn: ⚔️ Kiếm sĩ (Swordsman)');
+  expect(screen.getByText('Phe Vịt')).toBeInTheDocument();
+});
+
+test('status chips are gold while pending, ok once approved and duck-soft when rejected', async () => {
+  stubFetch(baseRoutes);
+  renderPage();
+
+  const items = await screen.findAllByRole('listitem');
+  expect(within(items[0] as HTMLElement).getByText('Chờ duyệt')).toHaveClass('chip', 'bg-gold');
+  expect(within(items[1] as HTMLElement).getByText('Đã duyệt')).toHaveClass('chip', 'bg-ok');
+  expect(within(items[2] as HTMLElement).getByText('Bị từ chối')).toHaveClass('chip', 'bg-duck-soft');
+});
+
 test('the date input is bounded to the last three days and lists that day\'s sessions', async () => {
   const fetchMock = stubFetch(baseRoutes);
   renderPage();
