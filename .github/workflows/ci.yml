@@ -1,0 +1,39 @@
+# CI của GGD Hub: kiểm tra kiểu, chạy toàn bộ test (PostgreSQL test chạy bằng Docker
+# Compose — máy Ubuntu của GitHub có sẵn Docker) và build ảnh Docker giống Railway.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Prisma Client phải được sinh trước khi tsc đọc kiểu của nó.
+      - run: npx prisma generate
+
+      - run: npm run typecheck
+
+      # global-setup tự chạy `docker compose up -d --wait db-test` (PostgreSQL 16 ở cổng
+      # 54330, dữ liệu trong RAM) rồi áp dụng migration — không cần bước service riêng.
+      - run: npm test
+
+      - run: docker build .

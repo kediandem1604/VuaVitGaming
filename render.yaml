@@ -1,0 +1,61 @@
+# GGD Hub trên Render (Blueprint). Hướng dẫn từng bước: README mục 6B.
+#
+# - Một dịch vụ web build từ Dockerfile (`npm start` = migrate → nạp dữ liệu tham chiếu → chạy),
+#   một PostgreSQL 16 chỉ nhận kết nối qua mạng nội bộ, cùng vùng Singapore.
+# - Gói trả phí nhỏ nhất: web miễn phí tự "ngủ" khi không ai vào (bot Discord và bộ hẹn giờ
+#   nhắc giờ sẽ ngừng), PostgreSQL miễn phí bị xoá sau 30 ngày.
+# - Đúng 1 bản (numInstances: 1): hai bản sẽ mở hai kết nối Discord → DM chào mừng và tin buổi
+#   chơi bị gửi hai lần (README mục 6.4).
+# - PUBLIC_URL để trống: ứng dụng tự dùng địa chỉ onrender.com mà Render đặt vào
+#   RENDER_EXTERNAL_URL. Gắn tên miền riêng thì thêm PUBLIC_URL trong Dashboard.
+# - Biến `sync: false` được hỏi một lần khi tạo Blueprint trong Dashboard; giá trị bí mật
+#   không bao giờ nằm trong file này.
+
+services:
+  - type: web
+    name: ggd-hub
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    numInstances: 1
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ggd-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: TRUST_PROXY_HOPS
+        value: '1'
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: DISCORD_SCHEDULE_CHANNEL_ID
+        sync: false
+      - key: DISCORD_VOTE_CHANNEL_ID
+        sync: false
+      - key: DISCORD_ANNOUNCE_CHANNEL_ID
+        sync: false
+      - key: DISCORD_ADMIN_ROLE_IDS
+        sync: false
+      - key: DISCORD_MOD_ROLE_IDS
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+
+databases:
+  - name: ggd-db
+    databaseName: ggd
+    user: ggd
+    region: singapore
+    plan: 0.1c-256mb
+    postgresMajorVersion: '16'
+    ipAllowList: []
