@@ -26,7 +26,8 @@ export function testConfig(): Config {
       adminRoleIds: ['r-admin'],
       modRoleIds: ['r-mod'],
     },
-    smtp: {
+    mail: {
+      provider: 'smtp',
       host: 'smtp.test',
       port: 465,
       user: 'test-user',

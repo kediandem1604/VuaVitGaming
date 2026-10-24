@@ -26,7 +26,52 @@ test('parses comma lists and defaults', () => {
   expect(c.discord.adminRoleIds).toEqual(['10', '11']);
   expect(c.discord.modRoleIds).toEqual([]);
   expect(c.port).toBe(3000);
-  expect(c.smtp.port).toBe(465);
+  expect(c.mail).toEqual({
+    provider: 'smtp',
+    host: 'smtp.gmail.com',
+    port: 465,
+    user: 'u',
+    pass: 'p',
+    from: 'GGD <u@gmail.com>',
+  });
+});
+
+const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, ...noSmtp } = base;
+
+test('BREVO_API_KEY switches email to Brevo and makes the SMTP variables optional', () => {
+  expect(loadConfig({ ...noSmtp, BREVO_API_KEY: 'xkeysib-abc', MAIL_FROM: 'GGD Hub <hoi@gmail.com>' }).mail).toEqual({
+    provider: 'brevo',
+    apiKey: 'xkeysib-abc',
+    sender: { name: 'GGD Hub', email: 'hoi@gmail.com' },
+  });
+  // Có Brevo thì biến SMTP còn sót lại bị bỏ qua.
+  expect(loadConfig({ ...base, BREVO_API_KEY: 'k' }).mail).toMatchObject({ provider: 'brevo' });
+  // MAIL_FROM chỉ có địa chỉ, hoặc tên trong ngoặc kép.
+  expect(loadConfig({ ...noSmtp, BREVO_API_KEY: 'k', MAIL_FROM: ' hoi@gmail.com ' }).mail).toMatchObject({
+    sender: { email: 'hoi@gmail.com' },
+  });
+  expect(loadConfig({ ...noSmtp, BREVO_API_KEY: 'k', MAIL_FROM: '"Hội GGD" <hoi@gmail.com>' }).mail).toMatchObject({
+    sender: { name: 'Hội GGD', email: 'hoi@gmail.com' },
+  });
+});
+
+test('with Brevo, MAIL_FROM must hold a usable address', () => {
+  for (const from of ['GGD Hub', 'GGD <hoi>', 'GGD <hoi@gmail>', '<>']) {
+    expect(() => loadConfig({ ...noSmtp, BREVO_API_KEY: 'k', MAIL_FROM: from }), from).toThrow(/MAIL_FROM: phải có dạng/);
+  }
+});
+
+test('without BREVO_API_KEY every missing SMTP variable is named', () => {
+  expect(() => loadConfig(noSmtp)).toThrow(/SMTP_HOST: thiếu biến \(hoặc đặt BREVO_API_KEY\)/);
+  let message = '';
+  try {
+    loadConfig({ ...noSmtp, BREVO_API_KEY: '  ' }); // để trống = chưa đặt
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  for (const key of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS']) expect(message).toContain(key);
+  expect(() => loadConfig({ ...base, SMTP_PORT: 'abc' })).toThrow(/SMTP_PORT: phải là số/);
+  expect(() => loadConfig({ ...base, MAIL_FROM: '' })).toThrow(/MAIL_FROM/);
 });
 
 test('missing variable is named in the error', () => {

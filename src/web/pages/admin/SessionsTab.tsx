@@ -1,9 +1,11 @@
 /**
  * Tab Buổi chơi (spec §4.3, §4.5): form tạo buổi (ngày, giờ, chế độ, sức chứa, mã
- * phòng, ghi chú); buổi của một ngày với nút Huỷ buổi và Kết thúc (hộp chọn hạng mục
- * từ `end-options`, tick sẵn theo `preselected`; không tick gì = kết thúc không mở
- * vote); các đợt vote đang mở với nút Đóng vote sớm. Sau mỗi thao tác ghi, các danh
- * sách liên quan được tải lại (kể cả trang Hôm nay dùng khoá `['sessions', …]`).
+ * phòng, ghi chú); buổi của một ngày với nút Kết thúc (hộp chọn hạng mục từ
+ * `end-options`, tick sẵn theo `preselected`; không tick gì = kết thúc không mở vote),
+ * Sửa (hộp sửa mã phòng, ghi chú, sức chứa, ngày giờ — thường để thêm mã phòng ngay
+ * trước giờ chơi) và Huỷ buổi; các đợt vote đang mở với nút Đóng vote sớm. Sau mỗi thao
+ * tác ghi, các danh sách liên quan được tải lại (kể cả trang Hôm nay dùng khoá
+ * `['sessions', …]`).
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -36,6 +38,15 @@ interface CreateBody {
   capacity: number;
   roomCode?: string;
   note?: string;
+}
+
+/** Thân PATCH sửa buổi: chỉ các trường đổi; ngày và giờ luôn đi cùng nhau; null = xoá. */
+interface UpdateBody {
+  date?: string;
+  time?: string;
+  capacity?: number;
+  roomCode?: string | null;
+  note?: string | null;
 }
 
 export function SessionsTab() {
@@ -168,7 +179,7 @@ function CreateSessionForm({ onCreated }: { onCreated: (date: string) => void })
 
 function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex min-w-0 flex-col gap-1">
       <label htmlFor={id} className="text-sm font-medium">
         {label}
       </label>
@@ -207,7 +218,7 @@ function DaySessions({ date, onDateChange }: { date: string; onDateChange: (date
           ) : (
             <ul className="flex flex-col gap-3">
               {list.map((session) => (
-                <AdminSessionRow key={session.id} session={session} />
+                <AdminSessionRow key={session.id} session={session} onMoved={onDateChange} />
               ))}
             </ul>
           )
@@ -222,9 +233,11 @@ const STATUS_CHIP: Record<Exclude<SessionDto['status'], 'scheduled'>, { text: st
   ended: { text: 'Đã kết thúc', tone: 'neutral' },
 };
 
-function AdminSessionRow({ session }: { session: SessionDto }) {
+/** `onMoved`: buổi được dời sang ngày khác → chuyển danh sách sang ngày đó để vẫn thấy buổi. */
+function AdminSessionRow({ session, onMoved }: { session: SessionDto; onMoved: (date: string) => void }) {
   const queryClient = useQueryClient();
   const [ending, setEnding] = useState(false);
+  const [editing, setEditing] = useState(false);
   const label = `${formatTime(session.startsAt)} ${session.modeName}`;
 
   const cancel = useMutation({
@@ -260,6 +273,9 @@ function AdminSessionRow({ session }: { session: SessionDto }) {
               <button type="button" className="btn-primary" disabled={cancel.isPending} onClick={() => setEnding(true)}>
                 Kết thúc
               </button>
+              <button type="button" className="btn-secondary" disabled={cancel.isPending} onClick={() => setEditing(true)}>
+                Sửa
+              </button>
               <button type="button" className="btn-secondary" disabled={cancel.isPending} onClick={onCancel}>
                 {cancel.isPending ? 'Đang huỷ…' : 'Huỷ buổi'}
               </button>
@@ -272,8 +288,139 @@ function AdminSessionRow({ session }: { session: SessionDto }) {
           </div>
         )}
         {ending && <EndDialog session={session} label={label} onClose={() => setEnding(false)} />}
+        {editing && <EditDialog session={session} label={label} onClose={() => setEditing(false)} onMoved={onMoved} />}
       </article>
     </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hộp "Sửa buổi"
+// ---------------------------------------------------------------------------
+
+interface EditDialogProps {
+  session: SessionDto;
+  label: string;
+  onClose: () => void;
+  onMoved: (date: string) => void;
+}
+
+/**
+ * Sửa mã phòng, ghi chú, sức chứa và ngày giờ của một buổi còn `scheduled`. Mã phòng
+ * đứng đầu (nhận tiêu điểm khi mở) vì việc hay làm nhất là thêm mã ngay trước giờ chơi.
+ * Chỉ gửi những trường đã đổi (ngày và giờ đi cùng nhau); không đổi gì thì chỉ đóng hộp.
+ */
+function EditDialog({ session, label, onClose, onMoved }: EditDialogProps) {
+  const queryClient = useQueryClient();
+  const titleId = useId();
+  const id = useId();
+  const initialDate = vnTodayIso(new Date(session.startsAt));
+  const initialTime = formatTime(session.startsAt);
+
+  const [roomCode, setRoomCode] = useState(session.roomCode ?? '');
+  const [note, setNote] = useState(session.note ?? '');
+  const [capacity, setCapacity] = useState(String(session.capacity));
+  const [date, setDate] = useState(initialDate);
+  const [time, setTime] = useState(initialTime);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: (body: UpdateBody) => apiSend<SessionDto>('PATCH', `/api/admin/sessions/${session.id}`, body),
+    onSuccess: (updated) => {
+      void queryClient.invalidateQueries({ queryKey: SESSIONS_PREFIX });
+      const day = vnTodayIso(new Date(updated.startsAt));
+      if (day !== initialDate) onMoved(day);
+      onClose();
+    },
+  });
+
+  const touch = () => {
+    setLocalError(null);
+    if (save.isError) save.reset();
+  };
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (date === '') return setLocalError('Hãy chọn ngày');
+    if (time === '') return setLocalError('Hãy nhập giờ bắt đầu');
+    setLocalError(null);
+
+    const body: UpdateBody = {};
+    const room = roomCode.trim();
+    const text = note.trim();
+    if (room !== (session.roomCode ?? '')) body.roomCode = room === '' ? null : room;
+    if (text !== (session.note ?? '')) body.note = text === '' ? null : text;
+    if (capacity !== String(session.capacity)) body.capacity = Number(capacity);
+    if (date !== initialDate || time !== initialTime) {
+      body.date = date;
+      body.time = time;
+    }
+    if (Object.keys(body).length === 0) return onClose();
+    save.mutate(body);
+  };
+
+  const error = localError ?? (save.isError ? errorMessage(save.error) : null);
+
+  return (
+    <Modal titleId={titleId} onClose={onClose}>
+      <h3 id={titleId} className="text-lg font-semibold">
+        Sửa buổi {label}
+      </h3>
+      <form noValidate onSubmit={onSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field id={`${id}-room`} label="Mã phòng" hint="Để trống nếu chưa có">
+          <input
+            id={`${id}-room`}
+            type="text"
+            maxLength={ROOM_CODE_MAX}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            className="field"
+            value={roomCode}
+            onChange={(e) => (setRoomCode(e.target.value), touch())}
+          />
+        </Field>
+        <Field id={`${id}-capacity`} label="Sức chứa" hint={`${CAPACITY_MIN}–${CAPACITY_MAX} người, đang có ${session.attendees.length}`}>
+          <input
+            id={`${id}-capacity`}
+            type="number"
+            inputMode="numeric"
+            min={Math.max(CAPACITY_MIN, session.attendees.length)}
+            max={CAPACITY_MAX}
+            step={1}
+            className="field"
+            value={capacity}
+            onChange={(e) => (setCapacity(e.target.value), touch())}
+          />
+        </Field>
+        <div className="min-w-0 sm:col-span-2">
+          <Field id={`${id}-note`} label="Ghi chú" hint={`${note.length}/${NOTE_MAX}`}>
+            <input id={`${id}-note`} type="text" maxLength={NOTE_MAX} className="field" value={note} onChange={(e) => (setNote(e.target.value), touch())} />
+          </Field>
+        </div>
+        <Field id={`${id}-date`} label="Ngày">
+          <input id={`${id}-date`} type="date" className="field" value={date} onChange={(e) => (setDate(e.target.value), touch())} />
+        </Field>
+        <Field id={`${id}-time`} label="Giờ bắt đầu">
+          <input id={`${id}-time`} type="time" className="field" value={time} onChange={(e) => (setTime(e.target.value), touch())} />
+        </Field>
+        <div className="flex flex-col gap-2 sm:col-span-2">
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" className="btn-primary" disabled={save.isPending}>
+              {save.isPending ? 'Đang lưu…' : 'Lưu'}
+            </button>
+            <button type="button" className="btn-secondary" disabled={save.isPending} onClick={onClose}>
+              Đóng
+            </button>
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-duck">
+              {error}
+            </p>
+          )}
+        </div>
+      </form>
+    </Modal>
   );
 }
 
