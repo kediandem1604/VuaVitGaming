@@ -6,14 +6,17 @@
  * theo độ dài (`nameplate.ts`).
  *
  * Thứ tự vẽ: vòng sáng phe → lớp sau của bộ đồ → thân → lớp trước của bộ đồ, tất cả
- * trong `<g data-part="figure">` (nhún nhẹ bằng lớp `goose-idle`); rồi bảng tên và nhãn
- * "Mùa trước" nằm ngoài để không mờ theo hình.
+ * trong `<g data-part="figure">` (để `previous` làm mờ cả hình một lần); chỉ bộ đồ và thân
+ * nằm trong nhóm con `<g data-part="pose">` nhún nhẹ (`goose-idle`) — vòng sáng đứng yên
+ * dưới chân, không bay lên theo con ngỗng. Bảng tên và nhãn "Mùa trước" nằm ngoài để không
+ * mờ theo hình.
  *
  * Ba biến thể: `current` (đủ màu), `previous` (hình mờ 0.45 + nhãn "Mùa trước"),
  * `empty` (hình bóng `night-600`, không vòng sáng, không bộ đồ, bảng tên "Chưa ai hoá
  * thân"). Role có ảnh tuỳ chỉnh thì một `<img loading="lazy">` nằm đúng chỗ phần thân
- * vẽ, SVG chỉ còn vòng sáng và bảng tên — ảnh của mỗi role được tải trễ vì endpoint ảnh
- * có bucket giới hạn tốc độ riêng.
+ * vẽ, xếp ba lớp: SVG vòng sáng ở dưới cùng → ảnh → SVG bảng tên ở trên cùng, nên màu phe
+ * không tô lên chân ảnh. Ảnh của mỗi role được tải trễ vì endpoint ảnh có bucket giới hạn
+ * tốc độ riêng.
  *
  * Toàn khối là một `role="img"` có `aria-label` "{role}: {tên}" nên trong lưới Đại
  * sảnh mỗi ô đọc được bằng một câu. `nameplate={false}` bỏ bảng tên và nhãn "Mùa trước",
@@ -68,31 +71,40 @@ export function Character({ role, holderName, variant, size = 120, nameplate = t
   // Mỗi role lệch nhịp một chút để lưới Đại sảnh không nhún đều như máy; trễ âm nên không có lúc đứng chờ.
   const idleStyle = { '--goose-delay': `-${(role.id % 8) * 370}ms` } as CSSProperties;
 
+  const figure = (
+    <g data-part="figure" opacity={dimmed ? DIMMED_OPACITY : undefined}>
+      {!empty && <Glow colour={FACTION_COLOUR[role.faction]} />}
+      {drawn && (
+        <g data-part="pose" className={dressed ? 'goose-idle' : undefined} style={dressed ? idleStyle : undefined}>
+          {dressed && <KitArt kit={kit} role={role} layer="back" />}
+          <GooseBody silhouette={empty} />
+          {dressed && <KitArt kit={kit} role={role} layer="front" />}
+        </g>
+      )}
+    </g>
+  );
+
   return (
     // Không tự căn giữa (mx-auto): trong hàng flex, lề tự động sẽ nuốt hết chỗ trống và đẩy
     // phần tử bên cạnh ra mép; nơi cần căn giữa (ô Đại sảnh) dùng items-center của ô chứa.
     <div role="img" aria-label={label} className={cx('relative aspect-[3/4] w-full', className)} style={{ maxWidth: size }}>
       {role.hasImage && (
-        <img
-          src={`/api/roles/${role.id}/image`}
-          alt=""
-          loading="lazy"
-          className="absolute inset-x-0 bottom-0 h-[74%] w-full object-contain object-bottom"
-          style={dimmed ? { opacity: DIMMED_OPACITY } : undefined}
-        />
+        <>
+          {/* Lớp dưới cùng: vòng sáng phe, vẽ trước ảnh nên nằm dưới ảnh. */}
+          <svg viewBox="0 0 120 160" className="absolute inset-0 block h-full w-full overflow-visible" aria-hidden="true">
+            {figure}
+          </svg>
+          <img
+            src={`/api/roles/${role.id}/image`}
+            alt=""
+            loading="lazy"
+            className="absolute inset-x-0 bottom-0 h-[74%] w-full object-contain object-bottom"
+            style={dimmed ? { opacity: DIMMED_OPACITY } : undefined}
+          />
+        </>
       )}
       <svg viewBox="0 0 120 160" className="relative block h-full w-full overflow-visible" aria-hidden="true">
-        <g
-          data-part="figure"
-          className={dressed ? 'goose-idle' : undefined}
-          style={dressed ? idleStyle : undefined}
-          opacity={dimmed ? DIMMED_OPACITY : undefined}
-        >
-          {!empty && <Glow colour={FACTION_COLOUR[role.faction]} />}
-          {dressed && <KitArt kit={kit} role={role} layer="back" />}
-          {drawn && <GooseBody silhouette={empty} />}
-          {dressed && <KitArt kit={kit} role={role} layer="front" />}
-        </g>
+        {drawn && figure}
         {nameplate && <Nameplate text={text} muted={empty} />}
         {nameplate && dimmed && <PreviousTag />}
       </svg>

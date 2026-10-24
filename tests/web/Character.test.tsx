@@ -91,6 +91,13 @@ test('custom image replaces drawing', () => {
   expect(part('glow')).toHaveAttribute('fill', DUCK);
   expect(screen.getByText('Kẹ')).toBeInTheDocument();
   expect(screen.getByLabelText('Kiếm sĩ: Kẹ')).toBeInTheDocument();
+  // Ba lớp theo thứ tự vẽ: vòng sáng (SVG riêng) → ảnh → bảng tên — màu phe không phủ lên ảnh.
+  const glowSvg = part('glow')!.closest('svg') as SVGSVGElement;
+  const plateSvg = screen.getByText('Kẹ').closest('svg') as SVGSVGElement;
+  expect(glowSvg).not.toBe(plateSvg);
+  expect(glowSvg.compareDocumentPosition(img!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(img!.compareDocumentPosition(plateSvg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(plateSvg.querySelector('[data-part="glow"]')).toBeNull();
 });
 
 test('empty variant says nobody holds the role', () => {
@@ -116,7 +123,7 @@ test('nameplate={false} draws only the figure', () => {
   // Hình vẫn đủ: bộ đồ, vòng sáng phe, nhún nhẹ.
   expect(document.querySelector('[data-kit="sword"]')).not.toBeNull();
   expect(part('glow')).toHaveAttribute('fill', DUCK);
-  expect(part('figure')).toHaveClass('goose-idle');
+  expect(part('pose')).toHaveClass('goose-idle');
   unmount();
 
   // Biến thể `previous` cũng bỏ nhãn "Mùa trước" nhưng vẫn mờ hình.
@@ -173,10 +180,25 @@ test.each(KITS)('kit %s has a <g data-kit> front root', (kit) => {
   expect(root?.tagName).toBe('g');
 });
 
-test('idle bob and blink hooks are on the figure and the eyes', () => {
+test('idle bob and blink hooks are on the pose (body and kit) and the eyes', () => {
   render(<Character role={swordsman} holderName="Kẹ" variant="current" />);
-  expect(part('figure')).toHaveClass('goose-idle');
+  const pose = part('pose');
+  expect(pose).toHaveClass('goose-idle');
+  // Mỗi role lệch nhịp nhún (id 61 → 61 % 8 = 5 → -1850ms), đặt trên đúng nhóm nhún.
+  expect((pose as SVGElement).style.getPropertyValue('--goose-delay')).toBe('-1850ms');
+  expect(pose).toContainElement(part('body') as SVGElement);
+  expect(pose).toContainElement(document.querySelector('[data-kit="sword"]') as SVGElement);
   expect(document.querySelector('.goose-eyes')).not.toBeNull();
+  // Khung ngoài chỉ làm mờ, không nhún.
+  expect(part('figure')).not.toHaveClass('goose-idle');
+});
+
+test('the faction glow stays planted: it is in the figure but outside the bobbing group', () => {
+  render(<Character role={swordsman} holderName="Kẹ" variant="current" />);
+  const glow = part('glow') as SVGElement;
+  expect(part('figure')).toContainElement(glow);
+  expect(glow.closest('.goose-idle')).toBeNull();
+  expect(document.querySelector('.goose-idle')).not.toContainElement(glow);
 });
 
 /** Nội dung mọi khối `@media (prefers-reduced-motion: no-preference) { … }` trong styles.css, nối lại. */
