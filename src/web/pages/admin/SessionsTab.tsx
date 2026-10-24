@@ -38,8 +38,8 @@ const H2_CLASS = 'text-xl leading-tight font-extrabold text-white';
 const LABEL_CLASS = 'text-sm font-bold text-night-200';
 const HINT_CLASS = 'text-sm text-night-300';
 const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
-/** Danh sách kiểu bảng: một panel không đệm, các hàng kẻ `night-700`, chữ 14px. */
-const ROWS_CLASS = 'panel flex flex-col divide-y divide-night-700 p-0';
+/** Danh sách kiểu bảng: một panel không đệm, các hàng kẻ `night-700`, chữ 14px; `overflow-hidden` để nền hàng mờ không lòi ra khỏi góc bo. */
+const ROWS_CLASS = 'panel flex flex-col divide-y divide-night-700 overflow-hidden p-0';
 const ROW_CLASS = 'flex flex-col gap-2 px-4 py-3 text-sm';
 
 interface CreateBody {
@@ -251,26 +251,32 @@ function AdminSessionRow({ session }: { session: SessionDto }) {
     if (window.confirm(`Huỷ buổi ${label}? Người đã đăng ký sẽ nhận DM báo huỷ.`)) cancel.mutate();
   };
 
+  const open = session.status === 'scheduled';
+  // Buổi đã huỷ/kết thúc mờ đi bằng màu, không bằng opacity (ruling R12, như SessionCard trang
+  // Hôm nay): nền hàng tối hơn (`night-900` 60% trên panel `night-800`) và chữ `night-300`
+  // (≈ 7.4:1 trên nền đó); chip trạng thái giữ nguyên màu nên vẫn ≥ 4.5:1.
+  const primary = open ? 'text-white' : 'text-night-300';
+  const secondary = open ? 'text-night-200' : 'text-night-300';
+
   return (
     <li>
-      {/* Buổi đã huỷ mờ 80%: chữ phụ `night-300` vẫn còn ≥ 5:1 trên `night-800`. */}
-      <article aria-label={label} className={cx(ROW_CLASS, session.status === 'cancelled' && 'opacity-80')}>
+      <article aria-label={label} className={cx(ROW_CLASS, !open && 'bg-night-900/60')}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <time dateTime={session.startsAt} className="text-xl leading-tight font-extrabold text-white tabular-nums">
+          <time dateTime={session.startsAt} className={cx('text-xl leading-tight font-extrabold tabular-nums', primary)}>
             {formatTime(session.startsAt)}
           </time>
-          <span className="font-bold text-white">{session.modeName}</span>
+          <span className={cx('font-bold', primary)}>{session.modeName}</span>
           {session.status !== 'scheduled' && <Chip tone={STATUS_CHIP[session.status].tone}>{STATUS_CHIP[session.status].text}</Chip>}
           <span className="ml-auto text-night-300">
-            <span className="font-bold text-white tabular-nums">
+            <span className={cx('font-bold tabular-nums', primary)}>
               {session.attendees.length}/{session.capacity}
             </span>{' '}
             người
           </span>
         </div>
-        {session.roomCode && <p className="font-bold text-night-200">Mã phòng: {session.roomCode}</p>}
-        {session.note && <p className="text-night-200">{session.note}</p>}
-        {session.status === 'scheduled' && (
+        {session.roomCode && <p className={cx('font-bold', secondary)}>Mã phòng: {session.roomCode}</p>}
+        {session.note && <p className={secondary}>{session.note}</p>}
+        {open && (
           <div className="flex flex-col gap-1">
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-primary" disabled={cancel.isPending} onClick={() => setEnding(true)}>
