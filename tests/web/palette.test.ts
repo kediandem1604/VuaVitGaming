@@ -5,8 +5,8 @@ import { contrastRatio, PALETTE, type PaletteToken } from '../../src/web/lib/pal
 
 /**
  * Token màu của spec §3.1 — mỗi tên phải được khai báo là `--color-<tên>` trong
- * `styles.css` với đúng giá trị trong `PALETTE`. `white`, `discord`, `ink`, `beak`,
- * `wing` chỉ dùng trong SVG (TS) nên không cần token CSS.
+ * `styles.css` với đúng giá trị trong `PALETTE` (kể cả `discord`, màu nút đăng nhập).
+ * `white`, `ink`, `beak`, `wing` chỉ dùng trong SVG (TS) nên không cần token CSS.
  */
 const TOKENS = [
   'night-950',
@@ -27,6 +27,7 @@ const TOKENS = [
   'duck-soft',
   'third-soft',
   'ok',
+  'discord',
 ] as const satisfies readonly PaletteToken[];
 
 // Môi trường jsdom cho `import.meta.url` dạng http, nên đi từ `__dirname` của vitest.
@@ -65,4 +66,30 @@ test.each<[PaletteToken, PaletteToken, number]>([
   ['night-600', 'night-900', 3],
 ])('%s on %s reaches %s:1', (fg, bg, min) => {
   expect(contrastRatio(PALETTE[fg], PALETTE[bg])).toBeGreaterThanOrEqual(min);
+});
+
+/** Phần khai báo `@utility btn { … }` trong styles.css (tới utility kế tiếp). */
+const btnUtility = stylesCss.slice(stylesCss.indexOf('@utility btn {'), stylesCss.indexOf('@utility btn-primary'));
+
+/** Màu `#rrggbb` phủ một lớp đen có độ mờ `alpha` (tối đi `alpha`, như trình duyệt trộn trong sRGB). */
+function darken(hex: string, alpha: number): string {
+  const value = Number.parseInt(hex.slice(1), 16);
+  const channels = [16, 8, 0].map((shift) => Math.round(((value >> shift) & 0xff) * (1 - alpha)));
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+test.each<[PaletteToken, PaletteToken]>([
+  ['white', 'discord'],
+  ['white', 'duck-strong'],
+  ['gold-ink', 'gold'],
+  ['white', 'night-700'],
+])('button hover darkens only the fill: %s on hovered %s still reaches 4.5:1', (fg, bg) => {
+  // `filter` (sáng hay tối) đổi luôn màu chữ — hover phải là lớp phủ đen trên nền, dưới chữ.
+  expect(btnUtility).toContain('&:hover:not(:disabled)');
+  expect(btnUtility).not.toMatch(/filter:\s*brightness/);
+  const overlay = /background-image:\s*linear-gradient\(rgb\(0 0 0 \/ ([\d.]+)\)/.exec(btnUtility);
+  expect(overlay, 'hover của btn phải là lớp phủ đen rgb(0 0 0 / a)').not.toBeNull();
+  const alpha = Number(overlay?.[1]);
+  expect(alpha).toBeGreaterThan(0);
+  expect(contrastRatio(PALETTE[fg], darken(PALETTE[bg], alpha))).toBeGreaterThanOrEqual(4.5);
 });

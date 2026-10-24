@@ -34,8 +34,8 @@ export function LoginPage() {
         </p>
       )}
 
-      {/* Màu Discord (`PALETTE.discord`) không có token CSS nên ghi thẳng; chữ trắng đạt 4.6:1. */}
-      <a href="/auth/login" className="btn w-full max-w-xs bg-[#5865F2] px-6 py-3 text-lg text-white">
+      {/* Màu Discord là token `--color-discord` (= `PALETTE.discord`); chữ trắng đạt 4.6:1, rê chuột 5.1:1. */}
+      <a href="/auth/login" className="btn w-full max-w-xs bg-discord px-6 py-3 text-lg text-white">
         Đăng nhập bằng Discord
       </a>
 

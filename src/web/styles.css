@@ -26,6 +26,8 @@
   --color-duck-soft: #FF8A8F;
   --color-third-soft: #C9A2F2;
   --color-ok: #7CF29A;
+  /* Màu nút "Đăng nhập bằng Discord" (màu thương hiệu Discord); chữ trắng đạt 4.6:1. */
+  --color-discord: #5865F2;
 
   /* Baloo 2 (OFL, đủ dấu tiếng Việt) đóng gói kèm app qua @fontsource-variable/baloo-2, nạp ở main.tsx. */
   --font-sans: 'Baloo 2 Variable', system-ui, sans-serif;
@@ -87,6 +89,11 @@
  * Nút khối kiểu game: viền 3px, viền đáy 6px tạo độ dày. Khi nhấn, viền đáy còn 3px
  * và nút dịch xuống 3px — mép dưới đứng yên nên trông như lún. `disabled` không lún,
  * nền `night-700` chữ `night-300`. Lún là trạng thái tức thời, không có chuyển động.
+ *
+ * Rê chuột thì nền **tối** đi 6% (một lớp đen 6% vẽ trên màu nền, dưới chữ — như
+ * brightness 0.94 nhưng chỉ cho nền). Làm sáng thì chữ trắng trên nền Discord tụt còn
+ * ≈ 4.1:1; dùng `filter` thì chữ cũng tối theo (trắng → #F0F0F0, Discord còn 4.48:1).
+ * Nền tối 6%, chữ giữ nguyên: Discord 5.1:1, `btn-danger` 5.7:1, `btn-primary` 8.8:1.
  */
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-xl border-3 border-night-950 px-4 py-2 text-base leading-tight font-bold select-none;
@@ -94,7 +101,7 @@
 
   @media (hover: hover) {
     &:hover:not(:disabled) {
-      filter: brightness(1.08);
+      background-image: linear-gradient(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.06));
     }
   }
 

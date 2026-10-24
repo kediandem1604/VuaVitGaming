@@ -27,12 +27,13 @@ export const PALETTE = {
   'duck-soft': '#FF8A8F',
   'third-soft': '#C9A2F2',
   ok: '#7CF29A',
-  // Màu vẽ nhân vật (spec §4.1) và màu nút Discord — chỉ dùng trong TS/SVG, không có token CSS.
+  // Màu nút Discord ở trang Đăng nhập — có token CSS `--color-discord` (lớp `bg-discord`).
+  discord: '#5865F2',
+  // Màu vẽ nhân vật (spec §4.1) — chỉ dùng trong TS/SVG, không có token CSS.
   ink: '#231A3A',
   beak: '#FF9F1C',
   wing: '#E6E2F0',
   white: '#FFFFFF',
-  discord: '#5865F2',
 } as const;
 
 export type PaletteToken = keyof typeof PALETTE;
