@@ -42,7 +42,11 @@ test('a tie shows every winner with their vote count', () => {
   expect(within(award as HTMLElement).getByText('Ngỗng Một')).toBeInTheDocument();
   expect(within(award as HTMLElement).getByText('Vịt Hai')).toBeInTheDocument();
   expect(within(award as HTMLElement).getAllByText('3 phiếu')).toHaveLength(2);
-  expect(within(award as HTMLElement).getByRole('img', { name: 'Ngỗng Một' })).toBeInTheDocument();
+  // Avatar người thắng chỉ trang trí (tên đã viết bên cạnh): ảnh alt rỗng, chữ cái đầu aria-hidden.
+  expect(within(award as HTMLElement).queryByRole('img', { name: 'Ngỗng Một' })).toBeNull();
+  expect((award as HTMLElement).querySelector('img')).toHaveAttribute('alt', '');
+  expect(within(award as HTMLElement).queryByRole('img', { name: 'Vịt Hai' })).toBeNull();
+  expect(within(award as HTMLElement).getByText('V')).toHaveAttribute('aria-hidden', 'true');
 });
 
 test('a category nobody voted in says so', () => {

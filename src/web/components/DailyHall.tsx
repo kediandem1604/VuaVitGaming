@@ -58,7 +58,8 @@ function Award({ award }: { award: HallAwardDto }) {
         <ul className="flex min-w-0 flex-col gap-1.5">
           {award.winners.map((winner) => (
             <li key={winner.memberId} className="flex min-w-0 items-center gap-2">
-              <Avatar name={winner.displayName} url={winner.avatarUrl} label={winner.displayName} className="size-8 text-sm" />
+              {/* Avatar chỉ trang trí: tên đã viết ngay bên cạnh, có nhãn thì trình đọc màn hình đọc tên hai lần. */}
+              <Avatar name={winner.displayName} url={winner.avatarUrl} className="size-8 text-sm" />
               <span className="min-w-0 flex-1 truncate font-bold text-gold">{winner.displayName}</span>
               <span className="shrink-0 text-sm text-night-300 tabular-nums">{winner.voteCount} phiếu</span>
             </li>
