@@ -23,7 +23,7 @@
 - Giữ nguyên chữ, nhãn `aria-*`, vai trò ARIA mà test hiện có dựa vào, trừ chỗ task ghi rõ là đổi.
 - Không cuộn ngang ở 320px trên mọi trang.
 - Dependency mới chỉ có `@fontsource-variable/baloo-2` và `lucide-react` (đặt trong `dependencies`).
-- Docker: ảnh `postgres:16-alpine`; cổng chỉ mở trên `127.0.0.1`; chuỗi kết nối giữ nguyên `postgresql://ggd:ggd@localhost:54329/ggd_dev` (dev) và `…:54330/ggd_test` (test).
+- Docker: ảnh `postgres:16-alpine`; cổng chỉ mở trên loopback, cả `127.0.0.1` và `[::1]` (Prisma trên Windows phân giải `localhost` thành ::1 trước — ruling R4); chuỗi kết nối giữ nguyên `postgresql://ggd:ggd@localhost:54329/ggd_dev` (dev) và `…:54330/ggd_test` (test).
 - File LF. Commit message tiếng Anh dạng `feat:/fix:/test:/docs:/chore:`, kết thúc bằng `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Chỉ commit trên nhánh `feat/ui-sanh-dem`, không push.
 
 ## Review Focus

@@ -194,18 +194,19 @@ Mọi trang giữ nguyên dữ liệu, hành vi, đường dẫn, nhãn truy c�
 | `app` | build từ `Dockerfile` | 3000 | Thuộc profile `app` (không tự chạy). Đọc `.env`, `DATABASE_URL` trỏ vào `db:5432`, chờ `db` khoẻ mới chạy |
 
 - Cổng và chuỗi kết nối giữ đúng như hiện tại, nên `.env` và `tests/helpers/setup.ts` không phải đổi URL.
-- Cổng chỉ mở trên `127.0.0.1`, không mở ra mạng ngoài.
+- Cổng chỉ mở trên địa chỉ loopback, cả `127.0.0.1` và `[::1]`, không mở ra mạng ngoài (phải có `[::1]` vì Prisma trên Windows phân giải `localhost` thành ::1 trước và chờ khoảng 2 giây mỗi kết nối nếu ::1 bị từ chối).
+- Tên dự án compose cố định `name: ggd-hub` (không theo tên thư mục), để mọi bản checkout trên máy dùng chung một bộ container và không tranh cổng.
 
 ### 7.2 Lệnh npm
 
-- `npm run db:start` → `docker compose up -d --wait db`.
+- `npm run db:start` → `docker compose up -d --wait --wait-timeout 120 db`.
 - `npm run db:stop` → `docker compose stop db db-test`.
 - `npm run db:start:embedded` → script PostgreSQL nhúng hiện tại (phương án dự phòng).
 - `npm run app:docker` → `docker compose --profile app up --build app` (chạy thử bản production trên máy).
 
 ### 7.3 Test
 
-- `tests/helpers/global-setup.ts`: mặc định chạy `docker compose up -d --wait db-test` rồi `prisma migrate deploy` như hiện tại. Không dừng container khi xong (lượt sau nhanh hơn; `resetDb` vẫn xoá dữ liệu giữa các test).
+- `tests/helpers/global-setup.ts`: mặc định chạy `docker compose up -d --wait --wait-timeout 120 db-test` (Docker treo thì dừng sau 120 giây kèm hướng dẫn, không treo `npm test`) rồi `prisma migrate deploy` như hiện tại. Không dừng container khi xong (lượt sau nhanh hơn; `resetDb` vẫn xoá dữ liệu giữa các test).
 - Biến môi trường `GGD_TEST_DB=embedded` → dùng PostgreSQL nhúng như hiện tại.
 - Docker chưa chạy → dừng với thông báo tiếng Việt rõ ràng: bật Docker Desktop, hoặc chạy lại với `GGD_TEST_DB=embedded`.
 - CI (GitHub Actions) dùng Docker (máy CI có sẵn Docker), giữ bước `docker build .`.
