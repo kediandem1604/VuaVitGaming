@@ -67,6 +67,10 @@ test('header nav, bottom bar and content padding switch at the same breakpoint',
   const name = screen.getByText(me.displayName);
   expect(name.className).toMatch(/\bmax-w-\d+\b/);
   expect(name.className).toMatch(/\btruncate\b/);
+  // Ở màn hình chỉ còn avatar (dưới sm, từ lg) tên vẫn trong cây truy cập: sr-only, không display:none.
+  expect(name.className).toMatch(/(^|\s)sr-only\b/);
+  expect(name.className).toMatch(/\blg:sr-only\b/);
+  expect(name.className).not.toMatch(/(^|\s)(lg:)?hidden\b/);
 });
 
 test('navigation uses drawn icons, not emoji', () => {

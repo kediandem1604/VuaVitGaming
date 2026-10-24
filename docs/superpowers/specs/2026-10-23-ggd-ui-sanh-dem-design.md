@@ -142,7 +142,7 @@ Mỗi role được gán một **bộ đồ** (kit) vẽ chồng lên dáng chun
 - Nền `night-950` mờ 90% + làm mờ phía sau, dính đầu trang.
 - Trái: logo + chữ "GGD Hub" vàng viền tối.
 - Giữa (từ `lg` trở lên): các mục điều hướng dạng viên thuốc; mục đang mở nền `gold` chữ `gold-ink`, mục khác chữ `night-200`.
-- Phải: chip người dùng (avatar + tên, cắt "…" ở 128px) và nút "Đăng xuất" kiểu `btn-secondary` cỡ nhỏ.
+- Phải: chip người dùng (avatar + tên, cắt "…" ở 128px) và nút "Đăng xuất" kiểu `btn-secondary` cỡ nhỏ. Từ `lg` trở lên chip chỉ hiện avatar, vì bảy mục điều hướng dạng icon + nhãn đã kín hàng; tên vẫn giữ cho trình đọc màn hình (`sr-only`) và ở `title` của chip. Dưới `sm` cũng chỉ avatar như vậy.
 - Giữ nguyên các mốc màn hình hiện tại (`lg` = 1024px) và các chi tiết chống tràn ngang.
 
 ### 5.2 Thanh dưới cùng (dưới `lg`)

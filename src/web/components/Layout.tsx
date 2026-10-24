@@ -107,13 +107,21 @@ export function Layout({ me, children }: LayoutProps) {
             </nav>
 
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              {/* Chip người dùng; tên hiện từ sm tới dưới lg, cắt bằng "…" ở 128px, không đẩy nút Đăng xuất. */}
+              {/*
+                Chip người dùng; tên hiện từ sm tới dưới lg, cắt bằng "…" ở 128px, không đẩy nút
+                Đăng xuất. Từ lg chỉ còn avatar (bảy mục điều hướng đã kín hàng) và dưới sm cũng
+                vậy, nhưng tên vẫn nằm trong cây truy cập (`sr-only`, không phải `hidden`) và ở
+                `title` của chip. `sm:truncate` đứng sau `sm:not-sr-only` trong CSS nên thắng phần
+                `overflow`/`white-space` mà `not-sr-only` đặt lại.
+              */}
               <span
                 title={me.displayName}
                 className="flex items-center gap-2 rounded-full border-2 border-night-700 bg-night-800 p-0.5 sm:pr-3 lg:pr-0.5"
               >
                 <Avatar name={me.displayName} url={me.avatarUrl} className="size-7 text-xs" />
-                <span className="hidden max-w-32 truncate text-sm font-bold text-white sm:block lg:hidden">{me.displayName}</span>
+                <span className="sr-only max-w-32 text-sm font-bold text-white sm:not-sr-only sm:block sm:truncate lg:sr-only">
+                  {me.displayName}
+                </span>
               </span>
               <button
                 type="button"
