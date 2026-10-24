@@ -10,7 +10,7 @@
     "start": "prisma migrate deploy && node dist/server/seed/run.js && node dist/server/main.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "db:start": "docker compose up -d --wait db",
+    "db:start": "docker compose up -d --wait --wait-timeout 120 db",
     "db:stop": "docker compose stop db db-test",
     "db:start:embedded": "tsx scripts/dev-db.ts",
     "db:migrate": "prisma migrate dev",

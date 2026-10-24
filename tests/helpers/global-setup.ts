@@ -30,16 +30,41 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   return stop;
 }
 
-/** `docker compose up -d --wait db-test` ở gốc repo; lỗi gì cũng kèm hướng dẫn hai lối ra. */
+/** Chờ `db-test` khoẻ tối đa bấy nhiêu giây: Docker treo thì `npm test` dừng kèm hướng dẫn thay vì đứng mãi. */
+const DOCKER_WAIT_SECONDS = 120;
+
+/**
+ * `docker compose up -d --wait --wait-timeout 120 db-test` ở gốc repo; lỗi gì (kể cả hết
+ * thời gian chờ) cũng kèm hướng dẫn hai lối ra.
+ */
 async function startDocker(): Promise<() => Promise<void>> {
   let result: RunResult;
   try {
-    result = await run('docker', ['compose', 'up', '-d', '--wait', 'db-test'], { cwd: REPO_ROOT });
+    result = await run('docker', ['compose', 'up', '-d', '--wait', '--wait-timeout', String(DOCKER_WAIT_SECONDS), 'db-test'], {
+      cwd: REPO_ROOT,
+    });
   } catch (err) {
     throw new Error(dockerHelp(err instanceof Error ? err.message : String(err)));
   }
   if (result.code !== 0) throw new Error(dockerHelp(result.output));
+  await ensureTestPortPublished();
   return async () => {};
+}
+
+/**
+ * Docker có một chỗ lạ (đo trên Docker Desktop, compose v5): container mà lần bật trước hỏng
+ * vì cổng bị chiếm ("port is already allocated") được lần `up` sau bật lên *không mở cổng*
+ * mà vẫn báo khoẻ — test sẽ âm thầm nối vào thứ đang chiếm cổng 54330. Nên kiểm tra cổng đã
+ * mở thật; chưa thì gỡ container hỏng (dữ liệu test nằm trong RAM, không mất gì) để lần sau
+ * được tạo lại, rồi dừng kèm hướng dẫn.
+ */
+async function ensureTestPortPublished(): Promise<void> {
+  const port = await run('docker', ['compose', 'port', 'db-test', '5432'], { cwd: REPO_ROOT });
+  if (port.code === 0 && port.output.includes(`:${TEST_PORT}`)) return;
+  await run('docker', ['compose', 'rm', '--stop', '--force', 'db-test'], { cwd: REPO_ROOT }).catch(() => undefined);
+  throw new Error(
+    dockerHelp(`Container db-test chạy nhưng không mở được cổng ${TEST_PORT} trên máy — cổng đang bị chiếm.\n${port.output}`),
+  );
 }
 
 /** PostgreSQL nhúng (phương án dự phòng); chỉ nạp module khi cần để không kéo embedded-postgres vào nhánh Docker. */

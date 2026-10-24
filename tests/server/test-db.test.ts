@@ -22,3 +22,12 @@ test('docker help tells the user both ways out and keeps the original error', ()
   expect(text).toContain('54330');
   expect(text).toContain('Cannot connect to the Docker daemon');
 });
+
+test('docker help names both likely holders of the test port, in words that fit every OS', () => {
+  const text = dockerHelp('port is already allocated');
+  // Container db-test của bản checkout khác (dự án compose cũ) và PostgreSQL nhúng còn chạy.
+  expect(text).toContain('docker ps');
+  expect(text).toContain('npm run db:stop');
+  expect(text).toMatch(/PostgreSQL nhúng/);
+  expect(text).not.toContain('postgres.exe');
+});

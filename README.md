@@ -260,13 +260,15 @@ Mở Docker Desktop, rồi cần **hai cửa sổ terminal**:
 
 | Cửa sổ | Lệnh | Việc |
 |---|---|---|
-| 1 (một lần) | `npm run db:start` | Bật PostgreSQL dev trong Docker ở `postgresql://ggd:ggd@localhost:54329/ggd_dev` (container `db`, dữ liệu giữ trong volume `ggd-pgdata`). Lệnh trả về ngay khi database sẵn sàng; container chạy nền tới khi `npm run db:stop` hoặc tắt Docker Desktop. Lần đầu tải ảnh `postgres:16-alpine` (~100 MB). |
+| 1 (một lần) | `npm run db:start` | Bật PostgreSQL dev trong Docker ở `postgresql://ggd:ggd@localhost:54329/ggd_dev` (container `db`, dữ liệu giữ trong volume `ggd-pgdata`). Lệnh trả về ngay khi database sẵn sàng (chờ tối đa 120 giây, quá thì báo lỗi); container chạy nền tới khi `npm run db:stop` hoặc tắt Docker Desktop. Lần đầu tải ảnh `postgres:16-alpine` (~100 MB). |
 | 1 (một lần) | `npm run db:migrate` rồi `npm run db:seed` | Tạo bảng, nạp dữ liệu tham chiếu. Chạy lại không sinh trùng. |
 | 1 (tuỳ chọn) | `npm run db:demo` | Nạp **dữ liệu mẫu** để xem giao diện: 12 thành viên `demo-*` (`demo-admin` là admin), buổi chơi hôm nay, một đợt vote đã đóng có kết quả, điểm role đã duyệt cho đủ ba phe. Chạy lại bao nhiêu lần cũng được (dữ liệu mẫu được dọn rồi tạo lại cho đúng ngày hôm nay); từ chối chạy nếu `DATABASE_URL` không trỏ vào `localhost`. |
 | 1 | `npm run dev:server` | API + bot + bộ hẹn giờ ở cổng 3000, tự nạp lại khi sửa code server. |
 | 2 | `npm run dev:web` | Giao diện React (Vite) ở <http://localhost:5173>, có hot reload; `/api` và `/auth` được chuyển tiếp sang cổng 3000. |
 
 Không có Docker: thay `npm run db:start` bằng `npm run db:start:embedded` (PostgreSQL nhúng, cùng chuỗi kết nối) — lệnh này chiếm cửa sổ terminal, `Ctrl+C` để dừng.
+
+Các container thuộc dự án compose tên cố định **`ggd-hub`** (`name:` trong `docker-compose.yml`), nên mọi bản checkout của repo trên máy (kể cả worktree) dùng chung một bộ `db` / `db-test` và một volume dữ liệu dev, không tranh nhau cổng. Máy đã từng chạy bản trước khi có tên này thì container cũ mang tên dự án theo thư mục (vd `goosegooseduck-db-1`): dừng bằng `docker compose -p goosegooseduck stop`, rồi `npm run db:start` và chạy lại bước migration + `db:seed` / `db:demo` ở trên (volume mới bắt đầu trống). Khi không cần nữa, gỡ container cũ bằng `docker compose -p goosegooseduck down` — thêm `-v` chỉ khi không còn cần dữ liệu dev cũ (lệnh đó xoá luôn volume `goosegooseduck_ggd-pgdata`).
 
 Đăng nhập khi chạy ở máy — chọn một trong hai:
 
@@ -405,7 +407,7 @@ Sự cố ở **máy phát triển** (mục 7–8):
 | Thấy gì | Nguyên nhân thường gặp | Làm gì |
 |---|---|---|
 | Docker Desktop (Windows bản Insider) tắt ngay sau khi mở; log Docker có lỗi về file socket `dockerInference` | Tính năng **Docker Model Runner** tạo file socket trong `%LOCALAPPDATA%\Docker\run` và bản Windows này không chấp nhận | **Settings → AI → tắt Docker Model Runner** (dự án không dùng). Vẫn crash thì thoát hẳn Docker Desktop, đổi tên thư mục `%LOCALAPPDATA%\Docker\run` (vd thành `run.cu`) rồi mở lại — Docker tạo lại thư mục sạch |
-| `npm test` dừng với `Không bật được PostgreSQL test bằng Docker` | Docker Desktop chưa mở, hoặc cổng `54330` đang bị một `postgres.exe` nhúng cũ chiếm | Mở Docker Desktop rồi chạy lại; hoặc tắt `postgres.exe` cũ (Task Manager); hoặc dùng bản nhúng: `GGD_TEST_DB=embedded npm test` (mục 8). Lỗi gốc của Docker nằm cuối thông báo |
-| `npm run db:start` báo cổng `54329` đã bị dùng | PostgreSQL nhúng (`db:start:embedded`) của lần trước còn chạy | Đóng cửa sổ terminal đang chạy nó (hoặc tắt `postgres.exe`) rồi chạy lại |
+| `npm test` dừng với `Không bật được PostgreSQL test bằng Docker` | Docker Desktop chưa mở hoặc treo quá 120 giây; hoặc cổng `54330` đang bị chiếm — bởi container `db-test` của một bản checkout khác còn dùng dự án compose cũ (tên theo thư mục), hoặc bởi PostgreSQL nhúng của lần chạy trước | Mở Docker Desktop rồi chạy lại. Cổng bị chiếm: `docker ps` để xem container nào giữ `54330`, rồi `npm run db:stop` ở bản checkout đó (hoặc `docker stop <tên>`); PostgreSQL nhúng thì đóng terminal đang chạy nó (Windows: tắt `postgres.exe` trong Task Manager). Hoặc dùng bản nhúng: `GGD_TEST_DB=embedded npm test` (mục 8). Lỗi gốc của Docker nằm cuối thông báo |
+| `npm run db:start` báo cổng `54329` đã bị dùng | Container `db` của dự án compose cũ (mục 7), hoặc PostgreSQL nhúng (`db:start:embedded`) của lần trước còn chạy | `docker compose -p goosegooseduck stop` (thay bằng tên dự án cũ thấy trong `docker ps`); PostgreSQL nhúng thì đóng cửa sổ terminal đang chạy nó (hoặc tắt `postgres.exe`) rồi chạy lại |
 
 Trước khi mời cả hội, **bắt buộc** chạy hết **`docs/manual-test-checklist.md`** trên một server Discord thử — phần Discord/đăng nhập thật chưa từng được chạy trước đó.

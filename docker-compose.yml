@@ -9,6 +9,11 @@
 #            `npm run app:docker`. Đọc biến từ .env (hoặc file ở GGD_ENV_FILE), riêng
 #            DATABASE_URL và PORT được đè để trỏ vào `db` trong mạng compose.
 #
+# Tên dự án compose cố định (`name: ggd-hub`) thay vì theo tên thư mục: mọi bản checkout của
+# repo (kể cả worktree) dùng chung một bộ container `db` / `db-test` và volume dữ liệu dev, nên
+# không có hai dự án tranh nhau cổng 54329/54330. Máy đã chạy bản cũ (dự án theo tên thư mục,
+# vd `goosegooseduck`): xem README mục 7 để dừng và gỡ bộ container cũ.
+#
 # Mọi cổng chỉ mở trên loopback — 127.0.0.1 và [::1] — không lộ ra mạng ngoài. Phải có cả
 # [::1]: Prisma phân giải `localhost` thành ::1 trước; nếu ::1 từ chối kết nối thì engine
 # chờ ~2 giây mới thử 127.0.0.1, và mỗi kết nối mới trong pool đều chịu 2 giây đó (đo trên
@@ -17,6 +22,8 @@
 # Healthcheck nối qua TCP (-h 127.0.0.1): lúc khởi tạo lần đầu, ảnh postgres chạy một server
 # tạm chỉ mở socket Unix; pg_isready qua socket sẽ báo "sẵn sàng" quá sớm rồi server tạm tắt,
 # `--wait` trả về và `prisma migrate deploy` gặp "connection refused".
+
+name: ggd-hub
 
 services:
   db:
