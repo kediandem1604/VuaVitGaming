@@ -138,6 +138,15 @@
   &:focus-visible {
     outline: none;
   }
+
+  /*
+   * Ô bị tắt (vd ô giá trị ở trang Khai điểm khi chưa chọn role): nền lẫn vào panel
+   * `night-800`, chữ `night-300` (6.2:1), giữ viền `night-600` (3.3:1 trên `night-800`) để
+   * vẫn thấy khung ô.
+   */
+  &:disabled {
+    @apply cursor-not-allowed bg-night-800 text-night-300;
+  }
 }
 
 /* Viên thuốc bo tròn hẳn; biến thể phe thêm `bg-goose-strong` / `bg-duck-strong` / `bg-third` (chữ trắng). */

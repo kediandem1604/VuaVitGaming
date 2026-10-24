@@ -93,3 +93,15 @@ test.each<[PaletteToken, PaletteToken]>([
   expect(alpha).toBeGreaterThan(0);
   expect(contrastRatio(PALETTE[fg], darken(PALETTE[bg], alpha))).toBeGreaterThanOrEqual(4.5);
 });
+
+test('a disabled field looks disabled yet keeps readable text and a visible boundary', () => {
+  const field = stylesCss.slice(stylesCss.indexOf('@utility field {'), stylesCss.indexOf('@utility chip'));
+  const disabled = /&:disabled\s*\{([^}]*)\}/.exec(field)?.[1] ?? '';
+  expect(disabled).toMatch(/\bbg-night-800\b/);
+  expect(disabled).toMatch(/\btext-night-300\b/);
+  expect(disabled).toMatch(/\bcursor-not-allowed\b/);
+  // Viền `night-600` của ô (không bị đè khi tắt) vẫn ≥ 3:1 trên nền tắt và trên panel.
+  expect(disabled).not.toMatch(/\bborder-/);
+  expect(contrastRatio(PALETTE['night-300'], PALETTE['night-800'])).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(PALETTE['night-600'], PALETTE['night-800'])).toBeGreaterThanOrEqual(3);
+});
