@@ -7,15 +7,22 @@
  * đã đổi); tải ảnh PNG/JPG/WebP ≤ 1 MB (kiểm tra tại chỗ rồi `PUT` body thô) và xoá
  * ảnh. Thêm role, đổi phe hay đổi ảnh thì mọi nơi vẽ nhân vật (Đại sảnh, xếp hạng) được
  * tải lại.
+ *
+ * Giao diện Sảnh đêm (spec §6 Quản trị): mỗi role một `panel`; role chưa có ảnh hiện nhân
+ * vật vẽ theo bộ đồ (`Character`, không bảng tên) đứng yên — lớp `goose-still` trên danh
+ * sách tắt nhún/chớp vì bảng quản trị ưu tiên dễ đọc; Xoá ảnh là `btn-danger`.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type ChangeEvent, type FormEvent } from 'react';
 import type { Faction, ModeDto, RoleDto } from '../../../shared/api-types';
 import { apiGet, apiPutBlob, apiSend, errorMessage } from '../../api';
+import { Character } from '../../components/Character';
+import { EmptyState } from '../../components/EmptyState';
 import { QueryState } from '../../components/QueryState';
 import { FACTIONS, FACTION_LABEL, isSpecialRole, SPECIAL_LABEL } from '../../lib/factions';
 import { Chip } from './Chip';
+import { Checkbox } from './Controls';
 
 const ALL_ROLES_KEY = ['roles', 'all'] as const;
 const MODES_KEY = ['modes'] as const;
@@ -28,6 +35,14 @@ const IMAGE_MAX_BYTES = 1_048_576;
 const INVALID_IMAGE = 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB';
 const MAX_PER_GAME_MIN = 1;
 const MAX_PER_GAME_MAX = 100;
+
+const H2_CLASS = 'text-xl leading-tight font-extrabold text-white';
+const LABEL_CLASS = 'text-sm font-bold text-night-200';
+const HINT_CLASS = 'text-sm text-night-300';
+const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
+const STATUS_CLASS = 'min-h-5 text-sm font-bold text-ok';
+/** Bề rộng nhân vật trong ô hình (px) — ô `w-18` trừ viền và đệm của `panel-inset`. */
+const FIGURE_SIZE = 60;
 
 interface RolePatch {
   faction?: Faction;
@@ -55,13 +70,15 @@ export function RolesTab() {
             <>
               {groups.map((group) => (
                 <section key={group.key} className="flex flex-col gap-3">
-                  <h2 className="text-lg font-semibold">
+                  <h2 className={H2_CLASS}>
                     {group.label} ({group.roles.length})
                   </h2>
                   {group.roles.length === 0 ? (
-                    <p className="text-slate-600 dark:text-slate-400">Chưa có role nào</p>
+                    <EmptyState>
+                      <p>Chưa có role nào</p>
+                    </EmptyState>
                   ) : (
-                    <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    <ul className="goose-still grid grid-cols-1 gap-3 lg:grid-cols-2">
                       {group.roles.map((role) => (
                         <li key={role.id} className="flex">
                           <RoleEditor role={role} />
@@ -186,15 +203,13 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
   const error = localError ?? (create.isError ? errorMessage(create.error) : null);
 
   return (
-    <section className="card flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Thêm role</h2>
-      <p className="text-sm text-slate-600 dark:text-slate-400">
-        Khi game ra role mới. Role mới bật ngay và đứng cuối phe của nó; ảnh tải lên sau khi tạo.
-      </p>
+    <section className="panel flex flex-col gap-3">
+      <h2 className={H2_CLASS}>Thêm role</h2>
+      <p className={HINT_CLASS}>Khi game ra role mới. Role mới bật ngay và đứng cuối phe của nó; ảnh tải lên sau khi tạo.</p>
       <form noValidate aria-label="Thêm role" onSubmit={submit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {CREATE_TEXT_FIELDS.map(({ field, label, max, hint }) => (
           <div key={field} className="flex min-w-0 flex-col gap-1">
-            <label htmlFor={`${id}-${field}`} className="text-sm font-medium">
+            <label htmlFor={`${id}-${field}`} className={LABEL_CLASS}>
               {label}
             </label>
             <input
@@ -207,14 +222,14 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
               onChange={(e) => update({ [field]: e.target.value })}
             />
             {hint && (
-              <p id={`${id}-${field}-hint`} className="text-xs text-slate-500 dark:text-slate-400">
+              <p id={`${id}-${field}-hint`} className={HINT_CLASS}>
                 {hint}
               </p>
             )}
           </div>
         ))}
         <div className="flex min-w-0 flex-col gap-1">
-          <label htmlFor={`${id}-faction`} className="text-sm font-medium">
+          <label htmlFor={`${id}-faction`} className={LABEL_CLASS}>
             Phe
           </label>
           <select id={`${id}-faction`} className="field" value={values.faction} onChange={(e) => update({ faction: e.target.value as Faction })}>
@@ -226,7 +241,7 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
           </select>
         </div>
         <div className="flex min-w-0 flex-col gap-1">
-          <label htmlFor={`${id}-max`} className="text-sm font-medium">
+          <label htmlFor={`${id}-max`} className={LABEL_CLASS}>
             Tối đa mỗi trận
           </label>
           <input
@@ -242,7 +257,7 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
           />
         </div>
         <div className="flex min-w-0 flex-col gap-1 sm:col-span-2">
-          <label htmlFor={`${id}-mode`} className="text-sm font-medium">
+          <label htmlFor={`${id}-mode`} className={LABEL_CLASS}>
             Chế độ đặc biệt (không bắt buộc)
           </label>
           <select
@@ -259,7 +274,7 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
               </option>
             ))}
           </select>
-          <p id={`${id}-mode-hint`} className="text-xs text-slate-500 dark:text-slate-400">
+          <p id={`${id}-mode-hint`} className={HINT_CLASS}>
             Chỉ chọn với role riêng của một chế độ chơi; role đó hiện trong nhóm “{SPECIAL_LABEL}”.
           </p>
         </div>
@@ -268,11 +283,11 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
             {create.isPending ? 'Đang thêm…' : 'Thêm role'}
           </button>
           {error && (
-            <p role="alert" className="text-sm text-duck">
+            <p role="alert" className={ERROR_CLASS}>
               {error}
             </p>
           )}
-          <p role="status" aria-live="polite" className="min-h-5 text-sm text-goose">
+          <p role="status" aria-live="polite" className={STATUS_CLASS}>
             {create.isSuccess && `Đã thêm “${create.data.nameVi}”`}
           </p>
         </div>
@@ -376,44 +391,50 @@ function RoleEditor({ role }: { role: RoleDto }) {
   const error = localError ?? (save.isError ? errorMessage(save.error) : null);
 
   return (
-    <section aria-labelledby={`${id}-title`} className="card flex w-full flex-col gap-3">
+    <section aria-labelledby={`${id}-title`} className="panel flex w-full flex-col gap-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h3 id={`${id}-title`} className="font-semibold">
+        <h3 id={`${id}-title`} className="text-lg leading-tight font-extrabold text-white">
           {role.nameVi} ({role.nameEn})
         </h3>
         {!role.active && <Chip tone="duck">Đã tắt</Chip>}
         {role.modeKey && <Chip tone="third">{role.modeKey}</Chip>}
       </div>
 
-      {/* Ảnh */}
+      {/*
+       * Hình: ảnh đã tải (giữ `<img>` riêng vì cần `?v=` chống cache và alt "Ảnh …") hoặc nhân
+       * vật vẽ theo bộ đồ của role — không bảng tên, đứng yên nhờ `goose-still` ở danh sách.
+       */}
       <div className="flex flex-wrap items-center gap-3">
-        {role.hasImage ? (
-          <img
-            src={`/api/roles/${role.id}/image?v=${imageVersion}`}
-            alt={`Ảnh ${role.nameVi}`}
-            className="h-20 w-16 shrink-0 rounded-lg bg-slate-100 object-contain dark:bg-slate-800"
-          />
-        ) : (
-          <span aria-hidden="true" className="flex h-20 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-3xl dark:bg-slate-800">
-            {role.icon}
-          </span>
-        )}
+        <div className="panel-inset flex h-24 w-18 shrink-0 items-center justify-center p-1">
+          {role.hasImage ? (
+            <img src={`/api/roles/${role.id}/image?v=${imageVersion}`} alt={`Ảnh ${role.nameVi}`} className="h-full w-full object-contain object-bottom" />
+          ) : (
+            <Character role={role} holderName="" variant="current" size={FIGURE_SIZE} nameplate={false} />
+          )}
+        </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <label htmlFor={`${id}-image`} className="text-sm font-medium">
+          <label htmlFor={`${id}-image`} className={LABEL_CLASS}>
             Tải ảnh (PNG, JPG hoặc WebP, tối đa 1 MB)
           </label>
-          <input id={`${id}-image`} type="file" accept="image/png,image/jpeg,image/webp" className="text-sm" disabled={busy} onChange={onFile} />
+          <input
+            id={`${id}-image`}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="text-sm text-night-300 file:mr-3 file:rounded-lg file:border-2 file:border-night-950 file:bg-night-700 file:px-3 file:py-1 file:font-bold file:text-white"
+            disabled={busy}
+            onChange={onFile}
+          />
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {role.hasImage && (
-              <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busy} onClick={onRemoveImage}>
+              <button type="button" className="btn-danger px-3 py-1 text-sm" disabled={busy} onClick={onRemoveImage}>
                 {remove.isPending ? 'Đang xoá…' : 'Xoá ảnh'}
               </button>
             )}
-            {upload.isPending && <span className="text-slate-500">Đang tải ảnh…</span>}
-            {upload.isSuccess && !imageMessage && <span className="text-goose">Đã tải ảnh</span>}
+            {upload.isPending && <span className="text-night-300">Đang tải ảnh…</span>}
+            {upload.isSuccess && !imageMessage && <span className="font-bold text-ok">Đã tải ảnh</span>}
           </div>
           {imageMessage && (
-            <p role="alert" className="text-sm text-duck">
+            <p role="alert" className={ERROR_CLASS}>
               {imageMessage}
             </p>
           )}
@@ -423,7 +444,7 @@ function RoleEditor({ role }: { role: RoleDto }) {
       {/* Thuộc tính */}
       <form noValidate onSubmit={onSave} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1 sm:col-span-2">
-          <label htmlFor={`${id}-faction`} className="text-sm font-medium">
+          <label htmlFor={`${id}-faction`} className={LABEL_CLASS}>
             Phe
           </label>
           <select id={`${id}-faction`} className="field" value={faction} onChange={(e) => (setFaction(e.target.value as Faction), touch())}>
@@ -435,19 +456,19 @@ function RoleEditor({ role }: { role: RoleDto }) {
           </select>
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor={`${id}-nameVi`} className="text-sm font-medium">
+          <label htmlFor={`${id}-nameVi`} className={LABEL_CLASS}>
             Tên tiếng Việt
           </label>
           <input id={`${id}-nameVi`} type="text" className="field" value={nameVi} onChange={(e) => (setNameVi(e.target.value), touch())} />
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor={`${id}-metric`} className="text-sm font-medium">
+          <label htmlFor={`${id}-metric`} className={LABEL_CLASS}>
             Tên chỉ số
           </label>
           <input id={`${id}-metric`} type="text" className="field" value={metricLabel} onChange={(e) => (setMetricLabel(e.target.value), touch())} />
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor={`${id}-max`} className="text-sm font-medium">
+          <label htmlFor={`${id}-max`} className={LABEL_CLASS}>
             Tối đa mỗi trận
           </label>
           <input
@@ -463,25 +484,24 @@ function RoleEditor({ role }: { role: RoleDto }) {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor={`${id}-icon`} className="text-sm font-medium">
+          <label htmlFor={`${id}-icon`} className={LABEL_CLASS}>
             Biểu tượng
           </label>
           <input id={`${id}-icon`} type="text" className="field" value={icon} onChange={(e) => (setIcon(e.target.value), touch())} />
         </div>
-        <label htmlFor={`${id}-active`} className="flex items-center gap-2 text-sm sm:col-span-2">
-          <input id={`${id}-active`} type="checkbox" className="size-4 accent-goose" checked={active} onChange={(e) => (setActive(e.target.checked), touch())} />
-          Đang bật
-        </label>
+        <Checkbox id={`${id}-active`} checked={active} onChange={(e) => (setActive(e.target.checked), touch())} className="sm:col-span-2">
+          <span className={LABEL_CLASS}>Đang bật</span>
+        </Checkbox>
         <div className="flex flex-col gap-1 sm:col-span-2">
           <button type="submit" className="btn-primary self-start" disabled={save.isPending}>
             {save.isPending ? 'Đang lưu…' : 'Lưu'}
           </button>
           {error && (
-            <p role="alert" className="text-sm text-duck">
+            <p role="alert" className={ERROR_CLASS}>
               {error}
             </p>
           )}
-          <p role="status" aria-live="polite" className="min-h-5 text-sm text-goose">
+          <p role="status" aria-live="polite" className={STATUS_CLASS}>
             {save.isSuccess && 'Đã lưu'}
           </p>
         </div>

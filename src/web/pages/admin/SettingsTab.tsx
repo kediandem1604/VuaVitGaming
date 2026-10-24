@@ -10,6 +10,9 @@
  * chế độ sửa được tên tiếng Việt (spec §6.5: tên Việt chưa xác minh) và bật/tắt (chế độ
  * tắt không hiện trong form tạo buổi / hạng mục / role). Lưu xong thì danh sách chế độ
  * công khai (`['modes']`, các form đó dùng) được tải lại.
+ *
+ * Giao diện Sảnh đêm (spec §6 Quản trị): hai `panel`; mỗi chế độ một dòng `panel-inset`
+ * với công tắc `Switch`.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -18,12 +21,19 @@ import type { AdminModeDto, SettingsDto } from '../../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../../api';
 import { QueryState } from '../../components/QueryState';
 import { Chip } from './Chip';
+import { Switch } from './Controls';
 
 const SETTINGS_KEY = ['admin', 'settings'] as const;
 const ADMIN_MODES_KEY = ['admin', 'modes'] as const;
 /** Danh sách chế độ đang bật cho các form (tạo buổi, hạng mục, thêm role). */
 const PUBLIC_MODES_KEY = ['modes'] as const;
 const MODE_NAME_MAX = 60;
+
+const H2_CLASS = 'text-xl leading-tight font-extrabold text-white';
+const LABEL_CLASS = 'text-sm font-bold text-night-200';
+const HINT_CLASS = 'text-sm text-night-300';
+const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
+const STATUS_CLASS = 'min-h-5 text-sm font-bold text-ok';
 
 interface FieldDef {
   key: keyof SettingsDto;
@@ -50,8 +60,8 @@ export function SettingsTab() {
 
   return (
     <>
-      <section className="card flex max-w-lg flex-col gap-3">
-        <h2 className="text-lg font-semibold">Cài đặt</h2>
+      <section className="panel flex max-w-lg flex-col gap-3">
+        <h2 className={H2_CLASS}>Cài đặt</h2>
         <QueryState query={settings}>
           {(data) => (
             <SettingsForm
@@ -112,7 +122,7 @@ function SettingsForm({ settings, pending, serverError, saved, onChange, onSubmi
     <form noValidate onSubmit={submit} className="flex flex-col gap-4">
       {FIELDS.map((field) => (
         <div key={field.key} className="flex flex-col gap-1">
-          <label htmlFor={`${id}-${field.key}`} className="text-sm font-medium">
+          <label htmlFor={`${id}-${field.key}`} className={LABEL_CLASS}>
             {field.label}
           </label>
           <input
@@ -130,7 +140,7 @@ function SettingsForm({ settings, pending, serverError, saved, onChange, onSubmi
               onChange();
             }}
           />
-          <p className="text-xs text-slate-500 dark:text-slate-400">
+          <p className={HINT_CLASS}>
             {field.hint} ({field.min}–{field.max}).
           </p>
         </div>
@@ -140,11 +150,11 @@ function SettingsForm({ settings, pending, serverError, saved, onChange, onSubmi
           {pending ? 'Đang lưu…' : 'Lưu'}
         </button>
         {error && (
-          <p role="alert" className="text-sm text-duck">
+          <p role="alert" className={ERROR_CLASS}>
             {error}
           </p>
         )}
-        <p role="status" aria-live="polite" className="min-h-5 text-sm text-goose">
+        <p role="status" aria-live="polite" className={STATUS_CLASS}>
           {saved && 'Đã lưu'}
         </p>
       </div>
@@ -161,13 +171,11 @@ function ModesSection() {
   const modes = useQuery({ queryKey: ADMIN_MODES_KEY, queryFn: () => apiGet<AdminModeDto[]>('/api/admin/modes') });
 
   return (
-    <section aria-labelledby={titleId} className="card flex max-w-lg flex-col gap-3">
-      <h2 id={titleId} className="text-lg font-semibold">
+    <section aria-labelledby={titleId} className="panel flex max-w-lg flex-col gap-3">
+      <h2 id={titleId} className={H2_CLASS}>
         Chế độ chơi
       </h2>
-      <p className="text-sm text-slate-600 dark:text-slate-400">
-        Tên tiếng Việt hiện ở buổi chơi, tin Discord và hạng mục. Chế độ tắt không còn trong form tạo buổi; buổi cũ giữ nguyên.
-      </p>
+      <p className={HINT_CLASS}>Tên tiếng Việt hiện ở buổi chơi, tin Discord và hạng mục. Chế độ tắt không còn trong form tạo buổi; buổi cũ giữ nguyên.</p>
       <QueryState query={modes}>
         {(list) => (
           <ul className="flex flex-col gap-3">
@@ -209,31 +217,28 @@ function ModeRow({ mode }: { mode: AdminModeDto }) {
   const renamed = save.isSuccess && save.variables?.nameVi !== undefined;
 
   return (
-    <div role="group" aria-labelledby={`${id}-title`} className="flex flex-col gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+    <div role="group" aria-labelledby={`${id}-title`} className="panel-inset flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span id={`${id}-title`} className="font-semibold">
+        <span id={`${id}-title`} className="font-bold text-white">
           {mode.nameEn}
         </span>
         {!mode.active && <Chip tone="duck">Đã tắt</Chip>}
-        <label htmlFor={`${id}-active`} className="ml-auto flex items-center gap-2 text-sm">
-          <input
-            id={`${id}-active`}
-            type="checkbox"
-            role="switch"
-            className="size-4 accent-goose"
-            checked={mode.active}
-            disabled={save.isPending}
-            onChange={(event) => {
-              setLocalError(null);
-              save.mutate({ active: event.target.checked });
-            }}
-          />
+        <Switch
+          id={`${id}-active`}
+          checked={mode.active}
+          disabled={save.isPending}
+          onChange={(event) => {
+            setLocalError(null);
+            save.mutate({ active: event.target.checked });
+          }}
+          className="ml-auto"
+        >
           Đang bật
-        </label>
+        </Switch>
       </div>
       <form noValidate onSubmit={rename} className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <label htmlFor={`${id}-name`} className="text-sm font-medium">
+          <label htmlFor={`${id}-name`} className={LABEL_CLASS}>
             Tên tiếng Việt
           </label>
           <input
@@ -254,11 +259,11 @@ function ModeRow({ mode }: { mode: AdminModeDto }) {
         </button>
       </form>
       {error && (
-        <p role="alert" className="text-sm text-duck">
+        <p role="alert" className={ERROR_CLASS}>
           {error}
         </p>
       )}
-      <p role="status" aria-live="polite" className="min-h-5 text-sm text-goose">
+      <p role="status" aria-live="polite" className={STATUS_CLASS}>
         {renamed && 'Đã lưu'}
       </p>
     </div>

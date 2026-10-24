@@ -3,14 +3,20 @@
  * bật/ẩn, form thêm và form sửa dùng chung. Phạm vi `mode` cần chế độ chơi; khi đổi
  * phạm vi khỏi `mode`, PATCH gửi kèm `modeId: null` trong cùng một yêu cầu (service
  * kiểm tra quy tắc phạm vi ⇔ chế độ trên dòng đã gộp).
+ *
+ * Giao diện Sảnh đêm (spec §6 Quản trị): form thêm trong `panel`; danh sách kiểu bảng
+ * (một panel, hàng kẻ `night-700`, chữ 14px) với công tắc `Switch` ở cuối mỗi hàng.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
 import type { AwardCategoryDto, CategoryScope, ModeDto } from '../../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../../api';
+import { EmptyState } from '../../components/EmptyState';
 import { QueryState } from '../../components/QueryState';
+import { cx } from '../../lib/cx';
 import { Chip } from './Chip';
+import { Switch } from './Controls';
 
 const CATEGORIES_KEY = ['admin', 'categories'] as const;
 const MODES_KEY = ['modes'] as const;
@@ -19,6 +25,11 @@ const DESCRIPTION_MAX = 200;
 
 const SCOPE_LABEL: Record<CategoryScope, string> = { always: 'Luôn có', mode: 'Theo chế độ', optional: 'Tuỳ chọn' };
 const SCOPES: readonly CategoryScope[] = ['always', 'mode', 'optional'];
+
+const H2_CLASS = 'text-xl leading-tight font-extrabold text-white';
+const LABEL_CLASS = 'text-sm font-bold text-night-200';
+const HINT_CLASS = 'text-sm text-night-300';
+const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
 
 interface CategoryValues {
   name: string;
@@ -54,13 +65,15 @@ export function CategoriesTab() {
     <>
       <QueryState query={modes}>{(modeList) => <CreateCategory modes={modeList} />}</QueryState>
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Hạng mục</h2>
+        <h2 className={H2_CLASS}>Hạng mục</h2>
         <QueryState query={categories}>
           {(list) =>
             list.length === 0 ? (
-              <p className="text-slate-600 dark:text-slate-400">Chưa có hạng mục nào</p>
+              <EmptyState>
+                <p>Chưa có hạng mục nào</p>
+              </EmptyState>
             ) : (
-              <ul className="flex flex-col gap-3">
+              <ul className="panel flex flex-col divide-y divide-night-700 p-0">
                 {list.map((category) => (
                   <CategoryRow key={category.id} category={category} modes={modes.data ?? []} />
                 ))}
@@ -85,8 +98,8 @@ function CreateCategory({ modes }: { modes: ModeDto[] }) {
   });
 
   return (
-    <section className="card flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Thêm hạng mục</h2>
+    <section className="panel flex flex-col gap-3">
+      <h2 className={H2_CLASS}>Thêm hạng mục</h2>
       {/* `key` theo hạng mục vừa tạo: thêm xong thì form dựng lại trống. */}
       <CategoryForm
         key={create.data?.id ?? 'new'}
@@ -133,25 +146,22 @@ function CategoryRow({ category, modes }: { category: AwardCategoryDto; modes: M
   });
 
   return (
-    <li className="card flex flex-col gap-2">
+    <li className="flex flex-col gap-2 px-4 py-3 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-semibold">{category.name}</span>
+        <span className="text-base font-bold text-white">{category.name}</span>
         <Chip tone={category.scope === 'mode' ? 'goose' : category.scope === 'optional' ? 'third' : 'neutral'}>{scopeText(category)}</Chip>
         {!category.active && <Chip tone="duck">Đã ẩn</Chip>}
-        <label htmlFor={switchId} className="ml-auto flex items-center gap-2 text-sm">
-          <input
-            id={switchId}
-            type="checkbox"
-            role="switch"
-            className="size-4 accent-goose"
-            checked={category.active}
-            disabled={patch.isPending}
-            onChange={(event) => patch.mutate({ active: event.target.checked })}
-          />
+        <Switch
+          id={switchId}
+          checked={category.active}
+          disabled={patch.isPending}
+          onChange={(event) => patch.mutate({ active: event.target.checked })}
+          className="ml-auto"
+        >
           Đang bật
-        </label>
+        </Switch>
       </div>
-      {category.description && !editing && <p className="text-sm text-slate-700 dark:text-slate-300">{category.description}</p>}
+      {category.description && !editing && <p className="text-night-200">{category.description}</p>}
 
       {editing ? (
         <CategoryForm
@@ -188,7 +198,7 @@ function CategoryRow({ category, modes }: { category: AwardCategoryDto; modes: M
             Sửa
           </button>
           {patch.isError && (
-            <p role="alert" className="text-sm text-duck">
+            <p role="alert" className={ERROR_CLASS}>
               {errorMessage(patch.error)}
             </p>
           )}
@@ -239,17 +249,17 @@ function CategoryForm({ formLabel, modes, initial, submitLabel, pending, error, 
   return (
     <form noValidate aria-label={formLabel} onSubmit={submit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="flex flex-col gap-1 sm:col-span-2">
-        <label htmlFor={`${id}-name`} className="text-sm font-medium">
+        <label htmlFor={`${id}-name`} className={LABEL_CLASS}>
           Tên hạng mục
         </label>
         <input id={`${id}-name`} type="text" maxLength={NAME_MAX} className="field" value={values.name} onChange={(e) => update({ name: e.target.value })} />
       </div>
       <div className="flex flex-col gap-1 sm:col-span-2">
         <div className="flex items-baseline justify-between gap-2">
-          <label htmlFor={`${id}-description`} className="text-sm font-medium">
+          <label htmlFor={`${id}-description`} className={LABEL_CLASS}>
             Mô tả
           </label>
-          <span className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
+          <span className={cx(HINT_CLASS, 'tabular-nums')}>
             {values.description.length}/{DESCRIPTION_MAX}
           </span>
         </div>
@@ -263,7 +273,7 @@ function CategoryForm({ formLabel, modes, initial, submitLabel, pending, error, 
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor={`${id}-scope`} className="text-sm font-medium">
+        <label htmlFor={`${id}-scope`} className={LABEL_CLASS}>
           Phạm vi
         </label>
         <select id={`${id}-scope`} className="field" value={values.scope} onChange={(e) => update({ scope: e.target.value as CategoryScope })}>
@@ -276,7 +286,7 @@ function CategoryForm({ formLabel, modes, initial, submitLabel, pending, error, 
       </div>
       {values.scope === 'mode' && (
         <div className="flex flex-col gap-1">
-          <label htmlFor={`${id}-mode`} className="text-sm font-medium">
+          <label htmlFor={`${id}-mode`} className={LABEL_CLASS}>
             Chế độ chơi
           </label>
           <select id={`${id}-mode`} className="field" value={values.modeId} onChange={(e) => update({ modeId: e.target.value })}>
@@ -301,12 +311,12 @@ function CategoryForm({ formLabel, modes, initial, submitLabel, pending, error, 
           )}
         </div>
         {shownError && (
-          <p role="alert" className="text-sm text-duck">
+          <p role="alert" className={ERROR_CLASS}>
             {shownError}
           </p>
         )}
         {success && (
-          <p role="status" className="text-sm text-goose">
+          <p role="status" className="text-sm font-bold text-ok">
             {success}
           </p>
         )}

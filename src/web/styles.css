@@ -190,6 +190,16 @@
   }
 }
 
+/*
+ * Bảng quản trị ưu tiên dễ đọc hơn trang trí (spec §6 Quản trị): nhân vật trong danh sách
+ * role đứng yên, không nhún, không chớp. Đặc hiệu hai lớp nên thắng `.goose-idle`/
+ * `.goose-eyes` ở trên dù máy không giảm chuyển động. Viết bằng `:is()` để hai lớp đó vẫn
+ * chỉ được khai báo một lần, trong khối giảm chuyển động (test Character kiểm tra điều này).
+ */
+.goose-still :is(.goose-idle, .goose-eyes) {
+  animation: none;
+}
+
 @keyframes goose-hop {
   0%,
   100% {
