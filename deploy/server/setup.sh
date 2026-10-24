@@ -44,7 +44,7 @@ sudo systemctl enable --now docker
 sudo docker compose version
 
 echo "==> Swap 2 GB"
-if ! swapon --show | grep -q '/swapfile'; then
+if ! sudo swapon --show | grep -q '/swapfile'; then
   sudo fallocate -l 2G /swapfile
   sudo chmod 600 /swapfile
   sudo mkswap /swapfile >/dev/null
