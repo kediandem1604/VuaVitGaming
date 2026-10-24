@@ -173,7 +173,7 @@ Mọi trang giữ nguyên dữ liệu, hành vi, đường dẫn, nhãn truy c�
 - **Hôm nay** (`TodayPage`, `SessionCard`, `DailyHall`):
   - Mỗi buổi là một panel "phòng chờ": giờ bắt đầu lớn, tên chế độ, chip đếm ngược ("còn 2 giờ 15 phút", tính ở trình duyệt từ `startsAt`, cập nhật mỗi phút; khi đã qua giờ thì "Đang chơi"), mã phòng trong chip nổi bật nếu có, ghi chú.
   - **Hàng ghế**: một ô tròn cho mỗi chỗ (`capacity`, tối đa 25), ô có người hiện avatar, ô trống viền nét đứt; dưới là "8/12 ghế đã có người". Ở 320px hàng ghế tự xuống dòng.
-  - Nút "Tham gia" / "Huỷ tham gia" kiểu `btn-primary` / `btn-secondary` to hết chiều ngang; dòng nhỏ "Nhắc qua email và DM trước 15 phút".
+  - Nút "Tham gia" / "Huỷ tham gia" kiểu `btn-primary` / `btn-secondary` to hết chiều ngang; dưới nút là dòng nhắc giờ 14px theo kênh nhắc của chính người đang xem (lấy từ hồ sơ; email chỉ tính khi đã bật và có địa chỉ): "Nhắc trước giờ chơi qua email và Discord", "Nhắc trước giờ chơi qua email" hoặc "Nhắc trước giờ chơi qua Discord"; tắt cả hai thì "Bạn đã tắt nhắc giờ — đổi ở Hồ sơ" (link tới `/ho-so`). Không ghi số phút vì thời gian nhắc trước là cài đặt của admin (`reminderLeadMinutes`). Dòng này ẩn khi buổi đã tới giờ ("Đang chơi") và ở buổi đã huỷ / đã kết thúc.
   - Buổi đã huỷ / đã kết thúc: panel mờ + chip trạng thái.
   - **Sảnh tri ân hôm nay**: panel tiêu đề vàng, mỗi hạng mục một dòng `panel-inset` có icon cúp, tên người thắng, số phiếu.
 - **Đại sảnh** (`HallPage`): tiêu đề chữ nổi, chọn mùa, giữ các tab phe hiện có (Phe Ngỗng / Phe Vịt / Phe thứ 3, thêm "Chế độ đặc biệt" khi có role riêng của chế độ) nhưng vẽ thành chip màu phe, lưới `RoleCard` (2 cột ở 320px, 3 ở 768px, 4–5 ở 1280px).

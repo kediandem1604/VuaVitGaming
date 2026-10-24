@@ -3,7 +3,11 @@
  * lớn chữ nổi, tên chế độ, chip đếm ngược (tính ở trình duyệt từ `startsAt`, nhảy mỗi
  * phút; qua giờ là "Đang chơi"), chip mã phòng màu vàng nếu có, ghi chú; **hàng ghế** một
  * ô tròn cho mỗi chỗ (ô có người là avatar, ô trống viền nét đứt) với dòng
- * "8/12 ghế đã có người"; nút Tham gia / Huỷ tham gia to hết chiều ngang và dòng nhắc.
+ * "8/12 ghế đã có người"; nút Tham gia / Huỷ tham gia to hết chiều ngang và dòng nhắc giờ.
+ *
+ * Dòng nhắc giờ nói đúng kênh của người đang xem (`reminders`, lấy từ hồ sơ — xem
+ * `lib/reminders.ts`), không ghi số phút vì đó là cài đặt của admin; tắt hết thì mời sang
+ * Hồ sơ để bật lại. Dòng này ẩn khi buổi đã tới giờ ("Đang chơi"): lời nhắc đã gửi xong.
  *
  * Buổi đã huỷ / đã kết thúc: chip trạng thái, không nút, không đếm ngược; panel "mờ" bằng
  * cách tối nền và đổi chữ tiêu đề sang `night-300` — không dùng `opacity` vì nó kéo chip
@@ -12,11 +16,13 @@
  * Thẻ không tự gọi API: trang cha truyền `onToggle(going)`, `pending` và `error`.
  */
 
-import { Bell, KeyRound, Play, Timer } from 'lucide-react';
+import { Bell, BellOff, KeyRound, Play, Timer } from 'lucide-react';
+import { Link } from 'react-router';
 import type { SessionDto } from '../../shared/api-types';
 import { useNow } from '../hooks/useNow';
 import { cx } from '../lib/cx';
 import { formatCountdown, formatTime } from '../lib/format';
+import { reminderText, type ReminderChannels } from '../lib/reminders';
 import { Avatar } from './Avatar';
 
 interface SessionCardProps {
@@ -27,6 +33,8 @@ interface SessionCardProps {
   pending: boolean;
   /** Thông báo lỗi của lần bấm gần nhất (vd "Đã đủ người"), hiện ngay dưới nút. */
   error?: string | null;
+  /** Kênh nhắc giờ của người đang xem (`reminderChannels(me)`), cho dòng nhắc dưới nút. */
+  reminders: ReminderChannels;
 }
 
 const STATUS_CHIP: Record<Exclude<SessionDto['status'], 'scheduled'>, { text: string; className: string }> = {
@@ -34,13 +42,15 @@ const STATUS_CHIP: Record<Exclude<SessionDto['status'], 'scheduled'>, { text: st
   ended: { text: 'Đã kết thúc', className: '' },
 };
 
-const REMINDER_TEXT = 'Nhắc qua email và DM trước 15 phút';
-
-export function SessionCard({ session, onToggle, pending, error }: SessionCardProps) {
+export function SessionCard({ session, onToggle, pending, error, reminders }: SessionCardProps) {
   const taken = session.attendees.length;
   const full = taken >= session.capacity;
   const going = session.myStatus === 'going';
   const open = session.status === 'scheduled';
+  // Một đồng hồ cho cả thẻ: chip đếm ngược và dòng nhắc giờ đổi cùng một lần vẽ khi tới giờ.
+  const now = useNow();
+  const countdown = formatCountdown(session.startsAt, now);
+  const live = countdown === 'Đang chơi';
 
   return (
     <article
@@ -58,7 +68,7 @@ export function SessionCard({ session, onToggle, pending, error }: SessionCardPr
         <span className={cx('text-lg leading-tight font-bold', open ? 'text-white' : 'text-night-300')}>{session.modeName}</span>
         <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">
           {session.status === 'scheduled' ? (
-            <CountdownChip startsAt={session.startsAt} />
+            <CountdownChip text={countdown} live={live} />
           ) : (
             <span className={cx('chip', STATUS_CHIP[session.status].className)}>{STATUS_CHIP[session.status].text}</span>
           )}
@@ -83,10 +93,7 @@ export function SessionCard({ session, onToggle, pending, error }: SessionCardPr
               {error}
             </p>
           )}
-          <p className="flex items-center justify-center gap-1 text-xs text-night-300">
-            <Bell aria-hidden="true" className="size-3.5 shrink-0" />
-            {REMINDER_TEXT}
-          </p>
+          {!live && <ReminderLine channels={reminders} />}
         </div>
       )}
     </article>
@@ -94,15 +101,40 @@ export function SessionCard({ session, onToggle, pending, error }: SessionCardPr
 }
 
 /** Chip đếm ngược: xanh `ok` khi còn chờ (có đồng hồ), nền xanh khi đã tới giờ ("Đang chơi"). */
-function CountdownChip({ startsAt }: { startsAt: string }) {
-  const now = useNow();
-  const text = formatCountdown(startsAt, now);
-  const live = text === 'Đang chơi';
+function CountdownChip({ text, live }: { text: string; live: boolean }) {
   return (
     <span className={cx('chip', live ? 'bg-ok text-night-950' : 'text-ok')}>
       {live ? <Play aria-hidden="true" className="size-4 shrink-0" /> : <Timer aria-hidden="true" className="size-4 shrink-0" />}
       {text}
     </span>
+  );
+}
+
+/**
+ * Dòng nhắc giờ 14px dưới nút: kênh nhắc của người đang xem, hoặc — khi đã tắt cả hai — lời
+ * mời sang Hồ sơ bật lại (link gạch chân vàng: không chỉ khác chữ quanh nó bằng màu).
+ */
+function ReminderLine({ channels }: { channels: ReminderChannels }) {
+  const text = reminderText(channels);
+  return (
+    <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-sm text-night-300">
+      {text ? (
+        <>
+          <Bell aria-hidden="true" className="size-4 shrink-0" />
+          {text}
+        </>
+      ) : (
+        <>
+          <BellOff aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Bạn đã tắt nhắc giờ — đổi ở{' '}
+            <Link to="/ho-so" className="font-bold text-gold underline underline-offset-2">
+              Hồ sơ
+            </Link>
+          </span>
+        </>
+      )}
+    </p>
   );
 }
 

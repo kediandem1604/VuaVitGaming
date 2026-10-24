@@ -4,6 +4,8 @@
  * rồi Sảnh tri ân hôm nay (trống thì Sảnh tri ân gần nhất — xem `HallSection`). "Hôm nay"
  * là của server (ngày VN): hai API đều gọi không kèm `date`.
  *
+ * Dòng nhắc giờ trên mỗi thẻ lấy kênh nhắc từ hồ sơ người đang đăng nhập (`useCurrentMember`).
+ *
  * Điểm danh: không cập nhật lạc quan — sức chứa do server quyết — mà thay đúng
  * buổi đó trong cache bằng DTO trả về; lỗi thì hiện thông báo ngay dưới thẻ và tải
  * lại danh sách để thẻ phản ánh trạng thái thật (đã đủ người, đã huỷ…).
@@ -17,7 +19,9 @@ import { DailyHall } from '../components/DailyHall';
 import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
 import { SessionCard } from '../components/SessionCard';
+import { useCurrentMember } from '../hooks/useMe';
 import { formatDayLabel, formatDayMonth } from '../lib/format';
+import { reminderChannels, type ReminderChannels } from '../lib/reminders';
 
 export const SESSIONS_TODAY_KEY = ['sessions', 'today'] as const;
 export const HALL_TODAY_KEY = ['mvp', 'day', 'today'] as const;
@@ -27,6 +31,7 @@ const MVP_DATES_KEY = ['mvp', 'dates'] as const;
 export function TodayPage() {
   const sessions = useQuery({ queryKey: SESSIONS_TODAY_KEY, queryFn: () => apiGet<SessionDto[]>('/api/sessions') });
   const hall = useQuery({ queryKey: HALL_TODAY_KEY, queryFn: () => apiGet<HallOfDayDto>('/api/mvp/day') });
+  const reminders = reminderChannels(useCurrentMember());
 
   // Ngày của server khi đã có; trước đó tạm dùng giờ máy (chỉ lệch khi đồng hồ máy sai quanh nửa đêm).
   const dayLabel = formatDayLabel(hall.data?.date ?? new Date());
@@ -57,7 +62,7 @@ export function TodayPage() {
               // Hai cột từ `lg`; `items-start` để thẻ ngắn (đã huỷ) không bị kéo cao bằng thẻ bên cạnh.
               <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
                 {sortByStart(list).map((session) => (
-                  <TodaySession key={session.id} session={session} />
+                  <TodaySession key={session.id} session={session} reminders={reminders} />
                 ))}
               </div>
             )
@@ -109,7 +114,7 @@ function HallSection({ hall }: { hall: UseQueryResult<HallOfDayDto> }) {
 }
 
 /** Một thẻ buổi chơi kèm mutation điểm danh riêng, nên `pending`/lỗi là của đúng thẻ đó. */
-function TodaySession({ session }: { session: SessionDto }) {
+function TodaySession({ session, reminders }: { session: SessionDto; reminders: ReminderChannels }) {
   const queryClient = useQueryClient();
   const attendance = useMutation({
     mutationFn: (going: boolean) => apiSend<SessionDto>('POST', `/api/sessions/${session.id}/attendance`, { going }),
@@ -127,6 +132,7 @@ function TodaySession({ session }: { session: SessionDto }) {
       pending={attendance.isPending}
       error={attendance.isError ? errorMessage(attendance.error) : null}
       onToggle={(going) => attendance.mutate(going)}
+      reminders={reminders}
     />
   );
 }

@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { HallOfDayDto, SessionAttendeeDto, SessionDto } from '../../src/shared/api-types';
+import type { HallOfDayDto, MeDto, SessionAttendeeDto, SessionDto } from '../../src/shared/api-types';
 import { TodayPage } from '../../src/web/pages/TodayPage';
 
 const me: SessionAttendeeDto = { memberId: 9, displayName: 'Tôi', avatarUrl: null };
@@ -49,12 +49,28 @@ function stubFetch(routes: Record<string, Handler>) {
   return fetchMock;
 }
 
-const renderPage = () => {
+/** Người đang đăng nhập (Outlet context như trong App): nhắc qua cả email và Discord. */
+const member: MeDto = {
+  id: 9,
+  memberCode: 'GGD-0009',
+  displayName: 'Tôi',
+  avatarUrl: null,
+  email: 'toi@example.com',
+  notifyEmail: true,
+  notifyDm: true,
+  accessLevel: 'member',
+};
+
+const renderPage = (me: MeDto = member) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <TodayPage />
+        <Routes>
+          <Route element={<Outlet context={me} />}>
+            <Route path="/" element={<TodayPage />} />
+          </Route>
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -84,6 +100,23 @@ test('shows the day label, distinct attendee count, ordered sessions and empty h
   expect(screen.getByRole('heading', { level: 2, name: 'Sảnh tri ân hôm nay' })).toBeInTheDocument();
   expect(screen.getByText('Chưa có kết quả vote hôm nay')).toBeInTheDocument();
   expect(screen.getByText('Đã huỷ')).toBeInTheDocument();
+});
+
+test("each upcoming card's reminder line follows the signed-in member's own channels", async () => {
+  // Buổi còn xa trong tương lai: chưa tới giờ nên dòng nhắc còn hiện.
+  const upcoming: SessionDto = { ...base, id: 5, startsAt: '2099-01-01T12:00:00.000Z', attendees: [] };
+  stubFetch({
+    'GET /api/sessions': () => json(200, [upcoming]),
+    'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
+  });
+  // Đã bật email nhưng chưa có địa chỉ → chỉ còn Discord.
+  renderPage({ ...member, email: null });
+  expect(await screen.findByText('Nhắc trước giờ chơi qua Discord')).toBeInTheDocument();
+  cleanup();
+
+  renderPage({ ...member, notifyEmail: false, notifyDm: false });
+  expect(await screen.findByRole('link', { name: 'Hồ sơ' })).toHaveAttribute('href', '/ho-so');
 });
 
 test('an empty day says there are no sessions yet', async () => {
