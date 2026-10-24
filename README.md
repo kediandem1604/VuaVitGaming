@@ -293,7 +293,7 @@ Mỗi lần đẩy commit lên nhánh đã chọn, Render tự build và deploy 
 
 ## 6C. Phương án khác: máy chủ Ubuntu riêng (Google Cloud hoặc AWS Lightsail)
 
-Một máy chủ ảo Ubuntu 24.04 chạy mọi thứ bằng Docker Compose (thư mục `deploy/server/`):
+Một máy chủ ảo Linux (Debian 13 hoặc Ubuntu 24.04) chạy mọi thứ bằng Docker Compose (thư mục `deploy/server/`):
 
 - **Caddy** — nhận HTTPS ở cổng 443, tự xin và gia hạn chứng chỉ miễn phí. Địa chỉ web mặc định dạng `https://34-82-10-20.sslip.io` (IP tĩnh của máy, không cần mua tên miền).
 - **Ứng dụng** — build từ `Dockerfile`, mỗi lần khởi động tự migrate và nạp dữ liệu tham chiếu.
@@ -320,7 +320,7 @@ Khác Railway/Render, máy chủ này **bạn tự quản**: cập nhật code b
    - **Name:** `ggd-hub`.
    - **Region:** `us-west1 (Oregon)`; **Zone:** để mặc định.
    - **Machine configuration:** series **E2** → machine type **`e2-micro`** (đúng loại này mới miễn phí).
-   - **OS and storage** (*Boot disk*) → **Change** → **Operating system:** *Ubuntu* → **Version:** *Ubuntu 24.04 LTS* (bản **x86/64**, không chọn bản *Minimal*) → **Boot disk type:** **Standard persistent disk** → **Size:** **30 GB** → **Select**. Phải đổi khỏi loại *Balanced* mặc định: chỉ ổ *Standard* tới 30 GB mới miễn phí.
+   - **OS and storage** (*Boot disk*) → **Change** → hệ điều hành để mặc định **Debian 13** hoặc chọn **Ubuntu 24.04 LTS** (bản **x86/64**, không chọn bản *Minimal*) — cả hai đều chạy được → **Boot disk type:** **Standard persistent disk** → **Size:** **30 GB** → **Select**. Phải đổi khỏi loại *Balanced* mặc định: chỉ ổ *Standard* tới 30 GB mới miễn phí.
    - **Networking** → **Firewall:** tick **Allow HTTP traffic** và **Allow HTTPS traffic**.
    - Bấm **Create**.
 5. **IP tĩnh:** menu ☰ → **VPC network** → **IP addresses** → dòng địa chỉ *External* của `ggd-hub` → **⋮** → **Promote to static IP address** → tên `ggd-hub-ip` → **Reserve**. Làm **trước** mục 6C.3, vì địa chỉ web được tạo từ IP này. Giá giữ nguyên (~3,6 USD/tháng khi gắn vào máy). Nếu sau này **xoá máy**, nhớ **Release** luôn IP tĩnh — IP giữ mà không gắn vào máy bị tính giá cao hơn.

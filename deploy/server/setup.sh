@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Chuẩn bị một máy Ubuntu 24.04 mới (Google Cloud, AWS Lightsail…) cho GGD Hub (README mục 6C).
+# Chuẩn bị một máy Debian 13 / Ubuntu 24.04 mới (Google Cloud, AWS Lightsail…) cho GGD Hub
+# (README mục 6C).
 # Chạy một lần, trong thư mục repo vừa clone:
 #
 #   bash deploy/server/setup.sh
 #
-# Làm gì: cài Docker + Compose, tạo 2 GB swap (máy 1 GB RAM build ảnh Docker cần thêm bộ nhớ),
+# Làm gì: cài Docker + Compose (kho chính thức của Docker), tạo 2 GB swap (máy 1 GB RAM build ảnh Docker cần thêm bộ nhớ),
 # tạo deploy/server/.env từ .env.example và tự điền SITE_ADDRESS (theo IP công khai của máy),
 # mật khẩu database và SESSION_SECRET ngẫu nhiên. Chạy lại an toàn: không ghi đè .env đã có.
 set -euo pipefail
@@ -13,9 +14,34 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="$here/.env"
 
 echo "==> Cài Docker và Docker Compose"
-sudo apt-get update -y
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose-v2 openssl curl
+# Dùng kho chính thức của Docker (download.docker.com) — cùng một cách cho Debian (ảnh mặc
+# định của Google Cloud) và Ubuntu (Lightsail); gói docker của từng bản Linux đặt tên Compose
+# khác nhau (Ubuntu: docker-compose-v2, Debian: không có).
+. /etc/os-release
+case "${ID:-}" in
+  debian | ubuntu) ;;
+  *)
+    echo "Script này chỉ hỗ trợ Debian hoặc Ubuntu (máy đang chạy: ${PRETTY_NAME:-không rõ})." >&2
+    exit 1
+    ;;
+esac
+if ! sudo docker compose version >/dev/null 2>&1; then
+  sudo apt-get update -y
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl openssl
+  sudo install -m 0755 -d /etc/apt/keyrings
+  sudo curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc
+  sudo chmod a+r /etc/apt/keyrings/docker.asc
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$ID $VERSION_CODENAME stable" |
+    sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+  sudo apt-get update -y
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+else
+  echo "    đã có, bỏ qua"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssl curl >/dev/null
+fi
 sudo systemctl enable --now docker
+sudo docker compose version
 
 echo "==> Swap 2 GB"
 if ! swapon --show | grep -q '/swapfile'; then
