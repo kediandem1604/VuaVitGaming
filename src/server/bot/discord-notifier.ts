@@ -84,7 +84,11 @@ export class DiscordJsNotifier implements DiscordNotifier {
     await channel.send(text);
   }
 
-  /** Giới hạn tải lên theo `premiumTier` của server (đọc từ cache khi bot đã sẵn sàng). */
+  /**
+   * Giới hạn tải lên theo `premiumTier` của server. `guilds.fetch` trả bản trong cache của
+   * discord.js (có từ lúc đăng nhập, cập nhật theo sự kiện GUILD_UPDATE khi cấp boost đổi) — không
+   * gọi mạng mỗi lần, nên route tải highlight hỏi được ngay ở cổng; chỉ gọi REST khi cache chưa có.
+   */
   async highlightUploadLimit(): Promise<number> {
     const guild = await this.client.guilds.fetch(this.config.discord.guildId);
     const boosted = guild.premiumTier === GuildPremiumTier.Tier2 || guild.premiumTier === GuildPremiumTier.Tier3;

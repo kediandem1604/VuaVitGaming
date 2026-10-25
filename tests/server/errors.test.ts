@@ -43,6 +43,7 @@ test('table spot checks', () => {
   });
   expect(appError('HIGHLIGHT_TOO_LARGE')).toMatchObject({ status: 400, message: 'Highlight quá lớn' });
   expect(appError('HIGHLIGHT_TOO_LARGE', 'Highlight tối đa 10 MB').message).toBe('Highlight tối đa 10 MB');
+  expect(appError('HIGHLIGHT_BUSY')).toMatchObject({ status: 503, message: 'Máy chủ đang bận tải highlight khác, thử lại sau' });
   expect(appError('DISCORD_UNAVAILABLE')).toMatchObject({
     status: 503,
     message: 'Không đăng được highlight lên Discord, thử lại sau',

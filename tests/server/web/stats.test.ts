@@ -1,3 +1,6 @@
+import { once } from 'node:events';
+import { connect, type AddressInfo, type Socket } from 'node:net';
+import { Readable } from 'node:stream';
 import type { Member, Role } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -85,12 +88,75 @@ function freshIp(): string {
   return `198.51.100.${ipCounter}`;
 }
 
+/**
+ * PUT highlight mà body không bao giờ tới (luồng không kết thúc), chỉ có header `Content-Length`:
+ * request chỉ có trả lời nếu route trả lời TRƯỚC khi đọc body — đọc body thì test treo (hết giờ).
+ */
+const putHighlightBodyless = (id: number, sid: string, contentLength: number) =>
+  app.inject({
+    method: 'PUT',
+    url: `/api/reports/${id}/highlight`,
+    cookies: { ggd_sid: sid },
+    headers: { 'content-type': 'video/mp4', 'content-length': String(contentLength) },
+    payload: new Readable({ read() {} }),
+    remoteAddress: freshIp(),
+  });
+
+/**
+ * Giữ mọi lần đăng highlight ở bước "đang tải lên Discord" tới khi test thả (`onPostHighlight`
+ * trả promise chưa xong) — để có các lần tải lên đang chạy cùng lúc mà không cần chờ giờ.
+ */
+function holdHighlightPosts() {
+  const held: (() => void)[] = [];
+  const waiters: { count: number; resolve: () => void }[] = [];
+  notifier.onPostHighlight = () =>
+    new Promise<void>((resolve) => {
+      held.push(resolve);
+      for (const waiter of waiters) if (held.length >= waiter.count) waiter.resolve();
+    });
+  return {
+    /** Chờ tới khi đã có tổng cộng `count` lần đăng vào tới Discord giả (kể cả lần đã thả). */
+    reached: (count: number) =>
+      new Promise<void>((resolve) => {
+        if (held.length >= count) resolve();
+        else waiters.push({ count, resolve });
+      }),
+    /** Thả lần đăng thứ `index` (từ 0). */
+    release: (index: number) => held[index]?.(),
+    releaseAll: () => held.forEach((resolve) => resolve()),
+    /** Thả hết và thôi giữ: các lần đăng sau chạy thẳng. */
+    stop: () => {
+      notifier.onPostHighlight = undefined;
+      held.forEach((resolve) => resolve());
+    },
+  };
+}
+
+/** Cho app lắng nghe cổng thật (một lần mỗi test) — để thử client ngắt kết nối giữa chừng. */
+async function listenPort(): Promise<number> {
+  if (!app.server.listening) await app.listen({ port: 0, host: '127.0.0.1' });
+  return (app.server.address() as AddressInfo).port;
+}
+
+/** Kết nối TCP thật, gửi đầu yêu cầu PUT highlight (body gửi sau bằng `socket.write`). */
+async function rawHighlightRequest(id: number, sid: string, contentLength: number): Promise<Socket> {
+  const socket = connect(await listenPort(), '127.0.0.1');
+  socket.on('error', () => {}); // server đóng/reset kết nối sau khi test tự ngắt: không phải lỗi của test
+  await once(socket, 'connect');
+  socket.write(
+    `PUT /api/reports/${id}/highlight HTTP/1.1\r\nHost: localhost\r\nCookie: ggd_sid=${encodeURIComponent(sid)}\r\n` +
+      `Content-Type: video/mp4\r\nContent-Length: ${contentLength}\r\n\r\n`,
+  );
+  return socket;
+}
+
 const errorBody = (code: string, message: string) => ({ error: { code, message } });
 const FORBIDDEN = errorBody('FORBIDDEN', 'Bạn không có quyền làm việc này');
 const INVALID = errorBody('VALIDATION', 'Dữ liệu không hợp lệ');
 const UNAUTHENTICATED = errorBody('UNAUTHENTICATED', 'Bạn cần đăng nhập');
 const UNSUPPORTED_MEDIA_TYPE = errorBody('UNSUPPORTED_MEDIA_TYPE', 'Chỉ nhận dữ liệu JSON');
 const INVALID_HIGHLIGHT = errorBody('INVALID_HIGHLIGHT', 'Highlight phải là video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF');
+const HIGHLIGHT_BUSY = errorBody('HIGHLIGHT_BUSY', 'Máy chủ đang bận tải highlight khác, thử lại sau');
 
 const MIB = 1024 * 1024;
 /** `bodyLimit` của route highlight: 50 MiB + 64 KiB. */
@@ -595,10 +661,20 @@ test('a body over the route limit → 400 HIGHLIGHT_TOO_LARGE', async () => {
   const { sid } = await memberWithSid();
   const r = await submit(sid, 5);
 
-  // Vượt bodyLimit của route (50 MiB + 64 KiB) → Fastify chặn trước handler, vẫn là lỗi của app chứ không phải 413 chung.
-  const huge = await putHighlight(r.id, sid, mp4(HIGHLIGHT_BODY_LIMIT + 1));
+  // Vượt bodyLimit của route (50 MiB + 64 KiB) mà không khai Content-Length (gửi chunked) → Fastify
+  // chặn trong lúc đọc body, vẫn là lỗi của app chứ không phải 413 chung (câu dự phòng).
+  const huge = await app.inject({
+    method: 'PUT',
+    url: `/api/reports/${r.id}/highlight`,
+    cookies: { ggd_sid: sid },
+    headers: { 'content-type': 'video/mp4', 'transfer-encoding': 'chunked' },
+    payload: Readable.from([mp4(HIGHLIGHT_BODY_LIMIT + 1)]),
+    remoteAddress: freshIp(),
+  });
   expect(huge.statusCode).toBe(400);
   expect(huge.json()).toEqual(errorBody('HIGHLIGHT_TOO_LARGE', 'Highlight quá lớn'));
+  // Có Content-Length thì route chặn sớm với câu theo giới hạn hiện hành.
+  expect((await putHighlight(r.id, sid, mp4(HIGHLIGHT_BODY_LIMIT + 1))).json()).toEqual(errorBody('HIGHLIGHT_TOO_LARGE', 'Highlight tối đa 10 MB'));
 
   // Đúng bodyLimit thì tới service: server chưa boost → "tối đa 10 MB"; đúng giới hạn hiện hành thì nhận.
   const atLimit = await putHighlight(r.id, sid, mp4(HIGHLIGHT_BODY_LIMIT));
@@ -676,4 +752,115 @@ test('highlight uploads have their own rate-limit bucket: 6 per 10 minutes per I
   expect((await app.inject({ url: '/api/reports/highlight-config', cookies: { ggd_sid: sid }, remoteAddress: ip })).statusCode).toBe(200);
   expect((await app.inject({ url: '/api/reports/mine', cookies: { ggd_sid: sid }, remoteAddress: ip })).statusCode).toBe(200);
   expect((await putHighlight(r.id, sid, mp4(), 'video/mp4', '203.0.113.8')).statusCode).toBe(200);
+});
+
+// ---------------------------------------------------------------------------
+// Highlight: giới hạn bộ nhớ (số lần tải cùng lúc, chặn sớm theo Content-Length)
+// ---------------------------------------------------------------------------
+
+test('at most two highlight uploads run at once: a third → 503 HIGHLIGHT_BUSY; a finished upload frees its slot', async () => {
+  const { sid } = await memberWithSid();
+  const r = await submit(sid, 5);
+  const posts = holdHighlightPosts();
+
+  const first = putHighlight(r.id, sid, mp4());
+  const second = putHighlight(r.id, sid, mp4());
+  await posts.reached(2);
+
+  const third = await putHighlight(r.id, sid, mp4());
+  expect(third.statusCode).toBe(503);
+  expect(third.json()).toEqual(HIGHLIGHT_BUSY);
+  // Người lạ không bao giờ tới bước lấy chỗ: vẫn 401 dù đang đầy.
+  const anon = await putHighlight(r.id, undefined, mp4());
+  expect(anon.statusCode).toBe(401);
+  expect(anon.json()).toEqual(UNAUTHENTICATED);
+  expect(notifier.highlights).toHaveLength(2);
+
+  // Một lần xong → chỗ được trả: lần tải mới vào được tới Discord, lần sau nữa lại bận.
+  posts.release(0);
+  expect((await first).statusCode).toBe(200);
+  const fourth = putHighlight(r.id, sid, mp4());
+  await posts.reached(3);
+  expect((await putHighlight(r.id, sid, mp4())).json()).toEqual(HIGHLIGHT_BUSY);
+
+  posts.stop();
+  expect((await second).statusCode).toBe(200);
+  expect((await fourth).statusCode).toBe(200);
+  expect(notifier.highlights).toHaveLength(3);
+  // Lỗi (file giả) cũng trả chỗ: hai lần tải lỗi liền nhau rồi vẫn tải được.
+  expect((await putHighlight(r.id, sid, 'hello')).json()).toEqual(INVALID_HIGHLIGHT);
+  expect((await putHighlight(r.id, sid, 'hello')).json()).toEqual(INVALID_HIGHLIGHT);
+  expect((await putHighlight(r.id, sid, mp4())).statusCode).toBe(200);
+});
+
+test('a declared Content-Length over the current limit (+64 KiB) → HIGHLIGHT_TOO_LARGE before the body is read', async () => {
+  const { sid } = await memberWithSid();
+  const r = await submit(sid, 5);
+
+  const early = await putHighlightBodyless(r.id, sid, 10 * MIB + 64 * 1024 + 1);
+  expect(early.statusCode).toBe(400);
+  expect(early.json()).toEqual(errorBody('HIGHLIGHT_TOO_LARGE', 'Highlight tối đa 10 MB'));
+
+  // Server được boost cấp 2: chặn sớm theo giới hạn 50 MB.
+  notifier.uploadLimit = 50 * MIB;
+  const boosted = await putHighlightBodyless(r.id, sid, 50 * MIB + 64 * 1024 + 1);
+  expect(boosted.json()).toEqual(errorBody('HIGHLIGHT_TOO_LARGE', 'Highlight tối đa 50 MB'));
+
+  expect(notifier.highlights).toEqual([]);
+  expect(await reportRow(r.id)).toMatchObject({ highlightChannelId: null, highlightMessageId: null });
+});
+
+test('feature off → HIGHLIGHT_DISABLED before the body is read', async () => {
+  const { sid } = await memberWithSid();
+  const r = await submit(sid, 5);
+  ctx.config.discord.highlightChannelId = null;
+
+  const off = await putHighlightBodyless(r.id, sid, 64);
+  expect(off.statusCode).toBe(409);
+  expect(off.json()).toEqual(errorBody('HIGHLIGHT_DISABLED', 'Chưa bật tính năng highlight'));
+  expect(notifier.highlights).toEqual([]);
+});
+
+test('a client that disconnects mid-upload gives its slot back; one that leaves during the Discord post holds it until the post ends', async () => {
+  const { sid } = await memberWithSid();
+  const r = await submit(sid, 5);
+  const posts = holdHighlightPosts();
+  // Cổng của route hỏi giới hạn tải lên trước khi lấy chỗ: đếm số lần gọi để biết một request đã qua cổng.
+  const limitCalls = vi.spyOn(notifier, 'highlightUploadLimit');
+  const slotFree = () =>
+    vi.waitFor(async () => expect((await putHighlight(r.id, sid, 'hello')).json()).toEqual(INVALID_HIGHLIGHT), { timeout: 3000, interval: 20 });
+
+  // Một lần tải giữ chỗ thứ nhất suốt test.
+  const held = putHighlight(r.id, sid, mp4());
+  await posts.reached(1);
+
+  // (a) Ngắt khi body mới gửi một phần: chỗ thứ hai được trả.
+  const callsBefore = limitCalls.mock.calls.length;
+  const partial = await rawHighlightRequest(r.id, sid, 1000);
+  partial.write(mp4()); // 64 trên 1000 byte đã khai
+  await vi.waitFor(() => expect(limitCalls.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 3000, interval: 10 });
+  expect((await putHighlight(r.id, sid, mp4())).json()).toEqual(HIGHLIGHT_BUSY);
+  partial.destroy();
+  await slotFree();
+
+  // (b) Gửi đủ body rồi ngắt khi bot đang đăng lên Discord: file vẫn nằm trong bộ nhớ nên chỗ còn giữ…
+  const file = mp4();
+  const whole = await rawHighlightRequest(r.id, sid, file.length);
+  whole.write(file);
+  await posts.reached(2);
+  whole.destroy();
+  await once(whole, 'close');
+  expect((await putHighlight(r.id, sid, mp4())).json()).toEqual(HIGHLIGHT_BUSY);
+  // …tới khi lần đăng đó xong (dù không còn ai nhận phản hồi).
+  posts.release(1);
+  await slotFree();
+
+  // Mỗi chỗ trả đúng một lần: thả lần đầu, rồi lại đúng hai lần tải chạy cùng lúc, lần thứ ba bận.
+  posts.release(0);
+  expect((await held).statusCode).toBe(200);
+  const again = [putHighlight(r.id, sid, mp4()), putHighlight(r.id, sid, mp4())];
+  await posts.reached(4);
+  expect((await putHighlight(r.id, sid, mp4())).json()).toEqual(HIGHLIGHT_BUSY);
+  posts.releaseAll();
+  for (const res of await Promise.all(again)) expect(res.statusCode).toBe(200);
 });

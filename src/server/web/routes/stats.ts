@@ -9,10 +9,10 @@
  * service báo với thông báo riêng.
  */
 
-import type { FastifyError, FastifyInstance } from 'fastify';
+import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { HallDto, HeldRoleDto, HighlightConfigDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../shared/api-types.js';
-import { HIGHLIGHT_CONTENT_TYPES } from '../../../shared/highlight.js';
+import { HIGHLIGHT_CONTENT_TYPES, highlightLimitMessage } from '../../../shared/highlight.js';
 import { appError } from '../../lib/errors.js';
 import { seasonIdOf, toVnDate } from '../../lib/time.js';
 import { listSeasons } from '../../modules/seasons/service.js';
@@ -38,11 +38,20 @@ import { SEASON_ID, VN_DATE, idParams, int32Id } from '../schemas.js';
 export const HIGHLIGHT_TYPES: readonly string[] = HIGHLIGHT_CONTENT_TYPES;
 /** Mẫu route tải highlight — guard JSON trong app.ts so đúng mẫu này (route đã khớp) để cho body thô đi qua. */
 export const HIGHLIGHT_UPLOAD_ROUTE = '/api/reports/:id/highlight';
+/** Phần dư trên giới hạn dung lượng để body đúng bằng giới hạn vẫn qua cửa (service kiểm chính xác). */
+const HIGHLIGHT_LENGTH_SLACK = 64 * 1024;
 /**
- * Trần của app là 50 MiB (spec highlight §5); thêm 64 KiB để body đúng 50 MiB qua được —
- * service kiểm giới hạn hiện hành của server Discord (10 hay 50 MiB) và báo "Highlight tối đa N MB".
+ * Trần của app là 50 MiB (spec highlight §5) cộng phần dư — chặn cuối cùng khi request không khai
+ * `Content-Length` (gửi chunked). Có khai thì cổng của route chặn sớm hơn theo giới hạn hiện hành
+ * của server Discord (10 hay 50 MiB); service kiểm lại và báo "Highlight tối đa N MB".
  */
-const HIGHLIGHT_BODY_LIMIT = 50 * 1024 * 1024 + 64 * 1024; // 52 494 336
+const HIGHLIGHT_BODY_LIMIT = 50 * 1024 * 1024 + HIGHLIGHT_LENGTH_SLACK; // 52 494 336
+/**
+ * Số lần tải highlight chạy cùng lúc trên cả máy chủ (mọi thành viên, mọi IP): mỗi lần giữ cả
+ * file trong bộ nhớ — gấp 2–3 lần dung lượng khi Fastify ghép body và discord.js chép lại — suốt
+ * lượt gửi lên Discord, trên máy 1 GB RAM (Render: 512 MB).
+ */
+const HIGHLIGHT_MAX_IN_FLIGHT = 2;
 /**
  * Bucket giới hạn tốc độ riêng: mỗi lần tải lên giữ tới 50 MiB trong bộ nhớ máy chủ 1 GB, nên
  * chặt hơn hẳn 120/phút chung; tách bucket để người tải highlight không làm các route /api
@@ -113,21 +122,44 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/reports/highlight-config', { preHandler: requireMember }, async (): Promise<HighlightConfigDto> => highlightConfig(app.ctx));
 
+  const uploads = uploadSlots(HIGHLIGHT_MAX_IN_FLIGHT);
+
+  /**
+   * Cổng của route tải highlight, chạy ở onRequest sau `requireMember` — TRƯỚC khi đọc body:
+   * tính năng tắt → `HIGHLIGHT_DISABLED`; `Content-Length` khai lớn hơn giới hạn hiện hành (+ phần
+   * dư) → `HIGHLIGHT_TOO_LARGE` với câu của service; rồi lấy một chỗ tải lên, hết chỗ →
+   * `HIGHLIGHT_BUSY`. Không hỏi được giới hạn (bot sập) thì cho qua để service trả lời như cũ.
+   */
+  const highlightUploadGate = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const config = await highlightConfig(app.ctx).catch(() => null);
+    if (config !== null) {
+      if (!config.enabled) throw appError('HIGHLIGHT_DISABLED');
+      const declared = declaredLength(request);
+      if (declared !== null && declared > config.maxBytes + HIGHLIGHT_LENGTH_SLACK) {
+        throw appError('HIGHLIGHT_TOO_LARGE', highlightLimitMessage(config.maxBytes));
+      }
+    }
+    if (!uploads.acquire(request, reply)) throw appError('HIGHLIGHT_BUSY');
+  };
+
   app.put(
     HIGHLIGHT_UPLOAD_ROUTE,
     {
-      // Kiểm đăng nhập ở onRequest — TRƯỚC khi đọc body — để người lạ không bắt máy chủ giữ
-      // tới 50 MiB trong bộ nhớ rồi mới nhận 401 (các route JSON kiểm ở preHandler vì body nhỏ).
-      onRequest: requireMember,
+      // Kiểm đăng nhập rồi qua cổng ở onRequest — TRƯỚC khi đọc body — để người lạ, file khai quá
+      // cỡ hay lúc đã đủ người đang tải không bắt máy chủ giữ tới 50 MiB rồi mới bị từ chối (các
+      // route JSON kiểm ở preHandler vì body nhỏ). Giới hạn tốc độ của plugin chạy sau hai hook này.
+      onRequest: [requireMember, highlightUploadGate],
       errorHandler: highlightUploadErrorHandler,
       config: { rateLimit: HIGHLIGHT_RATE_LIMIT },
     },
-    async (request): Promise<ReportDto> => {
-      const { id } = idParams.parse(request.params);
-      // Body không phải buffer (vd gửi JSON) → cùng lỗi với file không nhận diện được.
-      if (!Buffer.isBuffer(request.body)) throw appError('INVALID_HIGHLIGHT');
-      return attachHighlight(app.ctx, currentMember(request).id, id, { data: request.body });
-    },
+    async (request): Promise<ReportDto> =>
+      // File nằm trong bộ nhớ tới khi handler xong (cả lượt gửi lên Discord): chỗ giữ tới lúc đó.
+      uploads.hold(request, async () => {
+        const { id } = idParams.parse(request.params);
+        // Body không phải buffer (vd gửi JSON) → cùng lỗi với file không nhận diện được.
+        if (!Buffer.isBuffer(request.body)) throw appError('INVALID_HIGHLIGHT');
+        return attachHighlight(app.ctx, currentMember(request).id, id, { data: request.body });
+      }),
   );
 
   // --- Duyệt (mod/admin) ---
@@ -171,4 +203,71 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
 function highlightUploadErrorHandler(err: FastifyError): never {
   if (err.code === 'FST_ERR_CTP_BODY_TOO_LARGE') throw appError('HIGHLIGHT_TOO_LARGE');
   throw err;
+}
+
+/** `Content-Length` khai trong request; không khai (gửi chunked) hay không phải số → null. */
+function declaredLength(request: FastifyRequest): number | null {
+  const header = request.headers['content-length'];
+  return header !== undefined && /^\d+$/.test(header) ? Number(header) : null;
+}
+
+interface UploadSlot {
+  /** Kết nối của request đã đóng (trả lời xong, hoặc client đã ngắt). */
+  closed: boolean;
+  /** Handler đang chạy — đang giữ file trong bộ nhớ, chờ Discord. */
+  working: boolean;
+  released: boolean;
+}
+
+/**
+ * Đếm số lần tải lên đang giữ bộ nhớ, tối đa `max`. Một chỗ lấy ở cổng của route và trả ĐÚNG MỘT
+ * LẦN khi cả hai điều đã xong: kết nối đã đóng và handler (nếu đã vào) đã chạy xong.
+ *
+ * "Kết nối đã đóng" lấy từ sự kiện `close` của response — Node bắn nó trên mọi đường: trả lời
+ * xong (sau onResponse), lỗi trả từ hook, client ngắt giữa lúc gửi body hay sau khi đã gửi đủ.
+ * Không dựa vào onResponse/onRequestAbort: client ngắt sau khi gửi đủ body (đang chờ Discord) thì
+ * Fastify không gọi hook nào trong hai hook đó, và chỗ sẽ mất tới khi khởi động lại. Còn đợi
+ * handler xong vì lúc client bỏ đi, file vẫn nằm trong bộ nhớ tới khi lượt gửi Discord kết thúc.
+ */
+function uploadSlots(max: number) {
+  let inFlight = 0;
+  const slots = new WeakMap<FastifyRequest, UploadSlot>();
+
+  const releaseIfDone = (slot: UploadSlot): void => {
+    if (slot.released || !slot.closed || slot.working) return;
+    slot.released = true;
+    inFlight -= 1;
+  };
+
+  return {
+    /** Lấy một chỗ cho request; đã đủ `max` → false (không lấy gì). */
+    acquire(request: FastifyRequest, reply: FastifyReply): boolean {
+      if (inFlight >= max) return false;
+      inFlight += 1;
+      const slot: UploadSlot = { closed: false, working: false, released: false };
+      slots.set(request, slot);
+      const onClose = (): void => {
+        slot.closed = true;
+        releaseIfDone(slot);
+      };
+      // Client bỏ đi ngay lúc đang kiểm đăng nhập: `close` đã bắn trước khi tới đây.
+      if (reply.raw.destroyed) onClose();
+      else reply.raw.once('close', onClose);
+      return true;
+    },
+
+    /** Chạy handler của request; chỗ của nó không được trả trước khi `work` xong. */
+    async hold<T>(request: FastifyRequest, work: () => Promise<T>): Promise<T> {
+      const slot = slots.get(request);
+      if (slot) slot.working = true;
+      try {
+        return await work();
+      } finally {
+        if (slot) {
+          slot.working = false;
+          releaseIfDone(slot);
+        }
+      }
+    },
+  };
 }

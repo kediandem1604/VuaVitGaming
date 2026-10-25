@@ -29,6 +29,7 @@ export type ErrorCode =
   | 'HIGHLIGHT_DISABLED'
   | 'INVALID_HIGHLIGHT'
   | 'HIGHLIGHT_TOO_LARGE'
+  | 'HIGHLIGHT_BUSY'
   | 'DISCORD_UNAVAILABLE';
 
 const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
@@ -57,6 +58,8 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   INVALID_HIGHLIGHT: { status: 400, message: INVALID_HIGHLIGHT_MESSAGE },
   // Nơi ném thường ghi rõ giới hạn hiện hành (`highlightLimitMessage`); đây là câu dự phòng.
   HIGHLIGHT_TOO_LARGE: { status: 400, message: 'Highlight quá lớn' },
+  // Đã đủ số lần tải highlight chạy cùng lúc (giới hạn bộ nhớ của máy chủ).
+  HIGHLIGHT_BUSY: { status: 503, message: 'Máy chủ đang bận tải highlight khác, thử lại sau' },
   DISCORD_UNAVAILABLE: { status: 503, message: 'Không đăng được highlight lên Discord, thử lại sau' },
 };
 
