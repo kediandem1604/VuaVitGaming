@@ -25,6 +25,7 @@ let notifier: FakeNotifier;
 let setNow: (iso: string) => void;
 let app: FastifyInstance;
 let swordsman: Role;
+let ipCounter = 0;
 
 beforeEach(async () => {
   await resetDb();
@@ -32,6 +33,7 @@ beforeEach(async () => {
   app = await buildApp(ctx, { oauth });
   await app.ready();
   swordsman = await roleByKey(testDb, 'swordsman');
+  ipCounter = 0;
 });
 
 afterEach(async () => {
@@ -63,9 +65,49 @@ const send = (method: 'POST' | 'PATCH', url: string, sid: string | undefined, pa
 const post = (url: string, sid: string | undefined, payload?: unknown) => send('POST', url, sid, payload);
 const patch = (url: string, sid: string | undefined, payload?: unknown) => send('PATCH', url, sid, payload);
 
+/**
+ * PUT highlight thô với content-type `type` (mặc định video/mp4). Mỗi lần gọi từ một IP khác
+ * để các test nghiệp vụ không đụng giới hạn 6 lần / 10 phút của route; test giới hạn tốc độ
+ * truyền `remoteAddress` cố định.
+ */
+const putHighlight = (id: number | string, sid: string | undefined, body: Buffer | string, type = 'video/mp4', remoteAddress = freshIp()) =>
+  app.inject({
+    method: 'PUT',
+    url: `/api/reports/${id}/highlight`,
+    cookies: sid ? { ggd_sid: sid } : {},
+    headers: { 'content-type': type },
+    payload: body,
+    remoteAddress,
+  });
+
+function freshIp(): string {
+  ipCounter += 1;
+  return `198.51.100.${ipCounter}`;
+}
+
 const errorBody = (code: string, message: string) => ({ error: { code, message } });
 const FORBIDDEN = errorBody('FORBIDDEN', 'Bạn không có quyền làm việc này');
 const INVALID = errorBody('VALIDATION', 'Dữ liệu không hợp lệ');
+const UNAUTHENTICATED = errorBody('UNAUTHENTICATED', 'Bạn cần đăng nhập');
+const UNSUPPORTED_MEDIA_TYPE = errorBody('UNSUPPORTED_MEDIA_TYPE', 'Chỉ nhận dữ liệu JSON');
+const INVALID_HIGHLIGHT = errorBody('INVALID_HIGHLIGHT', 'Highlight phải là video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF');
+
+const MIB = 1024 * 1024;
+/** `bodyLimit` của route highlight: 50 MiB + 64 KiB. */
+const HIGHLIGHT_BODY_LIMIT = 52_494_336;
+
+/** MP4 tối thiểu: 4 byte kích thước, `ftyp` ở byte 4, brand `isom` ở byte 8; phần còn lại là 0. */
+function mp4(size = 64): Buffer {
+  const buf = Buffer.alloc(size);
+  buf.writeUInt32BE(Math.min(size, 0xffffffff), 0);
+  buf.write('ftypisom', 4, 'latin1');
+  return buf;
+}
+const pngFile = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+
+/** Link tới tin Discord chứa highlight (guild của `testConfig` là `test-guild`). */
+const jumpLink = (channelId: string, messageId: string) => `https://discord.com/channels/test-guild/${channelId}/${messageId}`;
+const silenceConsoleError = () => vi.spyOn(console, 'error').mockImplementation(() => {});
 
 /** Khai Kiếm sĩ `value` mạng ngày 22/10 qua API; trả về DTO đã tạo. */
 async function submit(sid: string, value: number, extra: Record<string, unknown> = {}): Promise<ReportDto> {
@@ -107,13 +149,16 @@ test('every stats route needs a login', async () => {
     () => get(`/api/leaderboard?roleId=${swordsman.id}`),
     () => get('/api/hall'),
     () => get('/api/seasons'),
+    () => get('/api/reports/highlight-config'),
+    () => putHighlight(1, undefined, mp4()),
   ];
   for (const call of calls) {
     const res = await call();
     expect(res.statusCode).toBe(401);
-    expect(res.json()).toEqual(errorBody('UNAUTHENTICATED', 'Bạn cần đăng nhập'));
+    expect(res.json()).toEqual(UNAUTHENTICATED);
   }
   expect(await testDb.statReport.count()).toBe(0);
+  expect(notifier.highlights).toEqual([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -419,4 +464,216 @@ test('seasons list the current season plus every known one, newest first', async
     { id: '2026-09', closed: false },
     { id: '2026-08', closed: true },
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// Highlight kèm lần khai
+// ---------------------------------------------------------------------------
+
+test('highlight-config requires login and reports enabled/maxBytes', async () => {
+  const { sid } = await memberWithSid();
+  const anon = await get('/api/reports/highlight-config');
+  expect(anon.statusCode).toBe(401);
+  expect(anon.json()).toEqual(UNAUTHENTICATED);
+
+  const res = await get('/api/reports/highlight-config', sid);
+  expect(res.statusCode).toBe(200);
+  expect(res.json()).toEqual({ enabled: true, maxBytes: 10 * MIB });
+
+  // Theo giới hạn hiện hành của server Discord (boost cấp 2).
+  notifier.uploadLimit = 50 * MIB;
+  expect((await get('/api/reports/highlight-config', sid)).json()).toEqual({ enabled: true, maxBytes: 50 * MIB });
+
+  // Bot sập → 503 với thông báo của service; tắt tính năng → trả "tắt" mà không hỏi Discord.
+  silenceConsoleError();
+  notifier.down = true;
+  const down = await get('/api/reports/highlight-config', sid);
+  expect(down.statusCode).toBe(503);
+  expect(down.json()).toEqual(errorBody('DISCORD_UNAVAILABLE', 'Không đăng được highlight lên Discord, thử lại sau'));
+  ctx.config.discord.highlightChannelId = null;
+  const off = await get('/api/reports/highlight-config', sid);
+  expect(off.statusCode).toBe(200);
+  expect(off.json()).toEqual({ enabled: false, maxBytes: 0 });
+});
+
+test('PUT highlight with video/mp4 body stores it and returns highlightUrl', async () => {
+  const { sid } = await memberWithSid({ displayName: 'An' });
+  const r = await submit(sid, 5);
+  const file = mp4();
+
+  const res = await putHighlight(r.id, sid, file);
+  expect(res.statusCode, res.body).toBe(200);
+  expect(notifier.highlights).toHaveLength(1);
+  const posted = notifier.highlights[0]!;
+  expect(posted).toMatchObject({ memberName: 'An', roleLabel: '⚔️ Kiếm sĩ', fileName: `highlight-${r.id}.mp4`, channelId: 'ch-highlight' });
+  expect(posted.data.equals(file)).toBe(true);
+  const url = jumpLink(posted.channelId, posted.messageId);
+  expect(res.json<ReportDto>()).toEqual({ ...r, highlightUrl: url });
+  expect(await reportRow(r.id)).toMatchObject({ highlightChannelId: posted.channelId, highlightMessageId: posted.messageId, status: 'pending' });
+  expect((await get('/api/reports/mine', sid)).json<ReportDto[]>()[0]).toMatchObject({ id: r.id, highlightUrl: url });
+
+  // Mọi content-type trong danh sách đều qua; đổi highlight → tin cũ bị xoá.
+  for (const type of ['video/webm', 'video/quicktime', 'image/png', 'image/jpeg', 'image/gif']) {
+    const again = await putHighlight(r.id, sid, file, type);
+    expect(again.statusCode, type).toBe(200);
+  }
+  expect(notifier.highlights).toHaveLength(6);
+  expect(notifier.deletedMessages).toHaveLength(5);
+  expect(notifier.deletedMessages[0]).toEqual({ channelId: posted.channelId, messageId: posted.messageId });
+
+  // Loại thật theo nội dung, không theo header: gửi PNG với content-type video/mp4 → tên file .png.
+  const asPng = await putHighlight(r.id, sid, pngFile, 'video/mp4');
+  expect(asPng.statusCode).toBe(200);
+  const latest = notifier.highlights.at(-1)!;
+  expect(latest).toMatchObject({ fileName: `highlight-${r.id}.png` });
+  expect(asPng.json<ReportDto>().highlightUrl).toBe(jumpLink(latest.channelId, latest.messageId));
+  expect(await reportRow(r.id)).toMatchObject({ highlightChannelId: latest.channelId, highlightMessageId: latest.messageId });
+});
+
+test('PUT highlight with application/pdf or text/plain → 415; JSON or a fake file → INVALID_HIGHLIGHT', async () => {
+  const { sid } = await memberWithSid();
+  const r = await submit(sid, 5);
+
+  for (const type of ['application/pdf', 'text/plain', 'image/webp', 'image/svg+xml', 'video/x-matroska', 'application/octet-stream']) {
+    const res = await putHighlight(r.id, sid, mp4(), type);
+    expect(res.statusCode, type).toBe(415);
+    expect(res.json(), type).toEqual(UNSUPPORTED_MEDIA_TYPE);
+  }
+  // Thiếu content-type → 415 như mọi route ghi.
+  const noType = await app.inject({ method: 'PUT', url: `/api/reports/${r.id}/highlight`, cookies: { ggd_sid: sid }, payload: mp4() });
+  expect(noType.statusCode).toBe(415);
+  expect(noType.json()).toEqual(UNSUPPORTED_MEDIA_TYPE);
+
+  // Guard cho JSON qua nhưng body không phải file → cùng lỗi với file giả; nội dung lạ → lỗi của service.
+  const json = await putHighlight(r.id, sid, '{"a":1}', 'application/json');
+  expect(json.statusCode).toBe(400);
+  expect(json.json()).toEqual(INVALID_HIGHLIGHT);
+  const fake = await putHighlight(r.id, sid, 'hello', 'video/mp4');
+  expect(fake.statusCode).toBe(400);
+  expect(fake.json()).toEqual(INVALID_HIGHLIGHT);
+  const pdf = await putHighlight(r.id, sid, '%PDF-1.4', 'image/png');
+  expect(pdf.statusCode).toBe(400);
+  expect(pdf.json()).toEqual(INVALID_HIGHLIGHT);
+  expect((await putHighlight(r.id, sid, Buffer.alloc(0))).json()).toEqual(INVALID_HIGHLIGHT);
+
+  expect(notifier.highlights).toEqual([]);
+  expect(await reportRow(r.id)).toMatchObject({ highlightChannelId: null, highlightMessageId: null });
+});
+
+test('a raw body to any other /api route is still rejected (415)', async () => {
+  const { sid } = await memberWithSid();
+  const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
+  const r = await submit(sid, 5);
+  const raw = (method: 'POST' | 'PATCH' | 'PUT', url: string, who: string, type = 'video/mp4') =>
+    app.inject({ method, url, cookies: { ggd_sid: who }, headers: { 'content-type': type }, payload: mp4() });
+
+  const calls: [method: 'POST' | 'PATCH' | 'PUT', url: string, who: string][] = [
+    ['PUT', `/api/reports/${r.id}`, sid], // không có route PUT ở đây
+    ['PATCH', `/api/reports/${r.id}`, sid],
+    ['POST', '/api/reports', sid],
+    ['POST', `/api/admin/reports/${r.id}/review`, adminSid],
+    ['PUT', `/api/admin/roles/${swordsman.id}/image`, adminSid], // route ảnh role chỉ nhận ảnh của nó
+    ['POST', `/api/reports/${r.id}/highlight`, sid], // sai phương thức
+    ['PUT', `/api/reports/${r.id}/highlight/extra`, sid],
+  ];
+  for (const [method, url, who] of calls) {
+    const res = await raw(method, url, who);
+    expect(res.statusCode, `${method} ${url}`).toBe(415);
+    expect(res.json(), `${method} ${url}`).toEqual(UNSUPPORTED_MEDIA_TYPE);
+  }
+  // Ngược lại, content-type ảnh role (webp) không mở được route highlight.
+  const webp = await putHighlight(r.id, sid, mp4(), 'image/webp');
+  expect(webp.statusCode).toBe(415);
+
+  expect(await reportRow(r.id)).toMatchObject({ value: 5, status: 'pending', highlightChannelId: null });
+  expect(await roleByKey(testDb, 'swordsman')).toMatchObject({ image: null, imageMime: null });
+  expect(await testDb.statReport.count()).toBe(1);
+  expect(notifier.highlights).toEqual([]);
+});
+
+test('a body over the route limit → 400 HIGHLIGHT_TOO_LARGE', async () => {
+  const { sid } = await memberWithSid();
+  const r = await submit(sid, 5);
+
+  // Vượt bodyLimit của route (50 MiB + 64 KiB) → Fastify chặn trước handler, vẫn là lỗi của app chứ không phải 413 chung.
+  const huge = await putHighlight(r.id, sid, mp4(HIGHLIGHT_BODY_LIMIT + 1));
+  expect(huge.statusCode).toBe(400);
+  expect(huge.json()).toEqual(errorBody('HIGHLIGHT_TOO_LARGE', 'Highlight quá lớn'));
+
+  // Đúng bodyLimit thì tới service: server chưa boost → "tối đa 10 MB"; đúng giới hạn hiện hành thì nhận.
+  const atLimit = await putHighlight(r.id, sid, mp4(HIGHLIGHT_BODY_LIMIT));
+  expect(atLimit.statusCode).toBe(400);
+  expect(atLimit.json()).toEqual(errorBody('HIGHLIGHT_TOO_LARGE', 'Highlight tối đa 10 MB'));
+  expect(notifier.highlights).toEqual([]);
+  expect((await putHighlight(r.id, sid, mp4(10 * MIB))).statusCode).toBe(200);
+
+  notifier.uploadLimit = 50 * MIB;
+  expect((await putHighlight(r.id, sid, mp4(50 * MIB + 1))).json()).toEqual(errorBody('HIGHLIGHT_TOO_LARGE', 'Highlight tối đa 50 MB'));
+  expect((await putHighlight(r.id, sid, mp4(50 * MIB))).statusCode).toBe(200);
+  expect(notifier.highlights).toHaveLength(2);
+  expect(notifier.highlights[1]?.data.length).toBe(50 * MIB);
+});
+
+test("not logged in → 401; another member's report → 404; processed, disabled or Discord down → service errors", async () => {
+  const { sid } = await memberWithSid();
+  const { sid: otherSid } = await memberWithSid({ displayName: 'Bình' });
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
+  const r = await submit(sid, 5);
+
+  const anon = await putHighlight(r.id, undefined, mp4());
+  expect(anon.statusCode).toBe(401);
+  expect(anon.json()).toEqual(UNAUTHENTICATED);
+
+  // Của người khác → như không có (mod cũng không thêm hộ); id lạ → 404; id hỏng → 400.
+  const foreign = await putHighlight(r.id, otherSid, mp4());
+  expect(foreign.statusCode).toBe(404);
+  expect(foreign.json()).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
+  expect((await putHighlight(r.id, modSid, mp4())).statusCode).toBe(404);
+  expect((await putHighlight(999, sid, mp4())).statusCode).toBe(404);
+  for (const id of ['abc', '0', '-1', '1.5']) {
+    const bad = await putHighlight(id, sid, mp4());
+    expect(bad.statusCode, id).toBe(400);
+    expect(bad.json(), id).toEqual(INVALID);
+  }
+
+  expect((await review(modSid, r.id, { approve: true })).statusCode).toBe(204);
+  const processed = await putHighlight(r.id, sid, mp4());
+  expect(processed.statusCode).toBe(409);
+  expect(processed.json()).toEqual(errorBody('NOT_PENDING', 'Lần khai này đã được xử lý'));
+
+  const r2 = await submit(sid, 4);
+  silenceConsoleError();
+  notifier.down = true;
+  const down = await putHighlight(r2.id, sid, mp4());
+  expect(down.statusCode).toBe(503);
+  expect(down.json()).toEqual(errorBody('DISCORD_UNAVAILABLE', 'Không đăng được highlight lên Discord, thử lại sau'));
+  notifier.down = false;
+
+  ctx.config.discord.highlightChannelId = null;
+  const off = await putHighlight(r2.id, sid, mp4());
+  expect(off.statusCode).toBe(409);
+  expect(off.json()).toEqual(errorBody('HIGHLIGHT_DISABLED', 'Chưa bật tính năng highlight'));
+
+  expect(notifier.highlights).toEqual([]);
+  expect(await reportRow(r.id)).toMatchObject({ status: 'approved', highlightChannelId: null, highlightMessageId: null });
+  expect(await reportRow(r2.id)).toMatchObject({ highlightChannelId: null, highlightMessageId: null });
+});
+
+test('highlight uploads have their own rate-limit bucket: 6 per 10 minutes per IP', async () => {
+  const { sid } = await memberWithSid();
+  const r = await submit(sid, 5);
+  const ip = '203.0.113.7';
+
+  for (let i = 0; i < 6; i += 1) {
+    expect((await putHighlight(r.id, sid, mp4(), 'video/mp4', ip)).statusCode, `lần ${i + 1}`).toBe(200);
+  }
+  const limited = await putHighlight(r.id, sid, mp4(), 'video/mp4', ip);
+  expect(limited.statusCode).toBe(429);
+  expect(limited.json()).toEqual(errorBody('RATE_LIMITED', 'Bạn thao tác quá nhanh, thử lại sau'));
+  expect(notifier.highlights).toHaveLength(6);
+
+  // Bucket riêng: route khác từ IP đó vẫn chạy (chưa đụng 120/phút chung); IP khác vẫn tải được.
+  expect((await app.inject({ url: '/api/reports/highlight-config', cookies: { ggd_sid: sid }, remoteAddress: ip })).statusCode).toBe(200);
+  expect((await app.inject({ url: '/api/reports/mine', cookies: { ggd_sid: sid }, remoteAddress: ip })).statusCode).toBe(200);
+  expect((await putHighlight(r.id, sid, mp4(), 'video/mp4', '203.0.113.8')).statusCode).toBe(200);
 });

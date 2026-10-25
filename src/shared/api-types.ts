@@ -153,6 +153,16 @@ export interface ReportDto {
 }
 
 /**
+ * Cấu hình highlight cho form Khai điểm (`GET /api/reports/highlight-config`): tính năng tắt
+ * → `{ enabled: false, maxBytes: 0 }`; bật → `maxBytes` là giới hạn tải lên hiện hành (byte)
+ * của server Discord theo cấp boost.
+ */
+export interface HighlightConfigDto {
+  enabled: boolean;
+  maxBytes: number;
+}
+
+/**
  * Một dòng bảng xếp hạng của một role trong một mùa. Hạng 1..n liên tiếp (không đồng
  * hạng); `lastApprovedAt` ISO 8601 (UTC) là lần duyệt gần nhất của người đó ở role này
  * trong mùa — mốc dùng để phân hoà điểm (ai đạt mức điểm đó trước xếp trên).

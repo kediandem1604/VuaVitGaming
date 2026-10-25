@@ -1,16 +1,21 @@
 /**
- * Khai điểm, duyệt, bảng xếp hạng, Đại sảnh hoá thân và mùa qua HTTP (spec §4.6, §4.7).
- * Cùng gọi một service với lệnh slash nên khai trên web hay `/baocao` cho kết quả như
- * nhau. Thân ghi là JSON `.strict()`; mùa trong query là `YYYY-MM`, mặc định mùa hiện
- * tại theo giờ VN. Chỉ kiểm tra DẠNG ở đây — quy tắc nghiệp vụ (cửa sổ 3 ngày, giới hạn
- * của role, mùa đã chốt, ai được duyệt…) do service báo với thông báo riêng.
+ * Khai điểm, duyệt, bảng xếp hạng, Đại sảnh hoá thân và mùa qua HTTP (spec §4.6, §4.7);
+ * highlight kèm lần khai (spec highlight §8). Cùng gọi một service với lệnh slash nên khai
+ * trên web hay `/baocao` cho kết quả như nhau. Thân ghi là JSON `.strict()`, trừ highlight
+ * gửi lên dưới dạng body thô với content-type video/ảnh (guard JSON trong app.ts đã cho qua
+ * đúng route này; parser buffer chỉ đăng ký trong plugin này). Mùa trong query là `YYYY-MM`,
+ * mặc định mùa hiện tại theo giờ VN. Chỉ kiểm tra DẠNG ở đây — quy tắc nghiệp vụ (cửa sổ
+ * 3 ngày, giới hạn của role, mùa đã chốt, ai được duyệt, loại và dung lượng file…) do
+ * service báo với thông báo riêng.
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { HallDto, HeldRoleDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../shared/api-types.js';
+import type { HallDto, HeldRoleDto, HighlightConfigDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../shared/api-types.js';
+import { appError } from '../../lib/errors.js';
 import { seasonIdOf, toVnDate } from '../../lib/time.js';
 import { listSeasons } from '../../modules/seasons/service.js';
+import { attachHighlight, highlightConfig } from '../../modules/stats/highlight.js';
 import { getHall, getHeldRoles, getRoleLeaderboard } from '../../modules/stats/leaderboard.js';
 import type { LeaderboardRow } from '../../modules/stats/leaderboard.js';
 import {
@@ -23,6 +28,25 @@ import {
 } from '../../modules/stats/reports.js';
 import { currentMember, requireMember, requireMod } from '../auth-plugin.js';
 import { SEASON_ID, VN_DATE, idParams, int32Id } from '../schemas.js';
+
+/**
+ * Content-type được nhận ở `PUT /api/reports/:id/highlight` (guard JSON trong app.ts dùng cùng
+ * danh sách). Chỉ để qua cửa: loại thật của file do service nhận diện theo nội dung.
+ */
+export const HIGHLIGHT_TYPES: readonly string[] = ['video/mp4', 'video/webm', 'video/quicktime', 'image/png', 'image/jpeg', 'image/gif'];
+/** Mẫu route tải highlight — guard JSON trong app.ts so đúng mẫu này (route đã khớp) để cho body thô đi qua. */
+export const HIGHLIGHT_UPLOAD_ROUTE = '/api/reports/:id/highlight';
+/**
+ * Trần của app là 50 MiB (spec highlight §5); thêm 64 KiB để body đúng 50 MiB qua được —
+ * service kiểm giới hạn hiện hành của server Discord (10 hay 50 MiB) và báo "Highlight tối đa N MB".
+ */
+const HIGHLIGHT_BODY_LIMIT = 50 * 1024 * 1024 + 64 * 1024; // 52 494 336
+/**
+ * Bucket giới hạn tốc độ riêng: mỗi lần tải lên giữ tới 50 MiB trong bộ nhớ máy chủ 1 GB, nên
+ * chặt hơn hẳn 120/phút chung; tách bucket để người tải highlight không làm các route /api
+ * khác của cùng IP (nhiều người sau một NAT) bị chặn. Thân lỗi 429 vẫn là của app.
+ */
+const HIGHLIGHT_RATE_LIMIT = { max: 6, timeWindow: '10 minutes' };
 
 const reportBody = z
   .object({
@@ -57,6 +81,7 @@ function toLeaderboardRowDto(r: LeaderboardRow): LeaderboardRowDto {
 
 export async function statsRoutes(app: FastifyInstance): Promise<void> {
   const currentSeason = (): string => seasonIdOf(toVnDate(app.ctx.now()));
+  app.addContentTypeParser([...HIGHLIGHT_TYPES], { parseAs: 'buffer', bodyLimit: HIGHLIGHT_BODY_LIMIT }, (_request, body, done) => done(null, body));
 
   // --- Khai điểm của tôi ---
 
@@ -80,6 +105,27 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/me/titles', { preHandler: requireMember }, async (request): Promise<HeldRoleDto[]> =>
     getHeldRoles(app.ctx, currentMember(request).id, currentSeason()),
+  );
+
+  // --- Highlight kèm lần khai ---
+
+  app.get('/api/reports/highlight-config', { preHandler: requireMember }, async (): Promise<HighlightConfigDto> => highlightConfig(app.ctx));
+
+  app.put(
+    HIGHLIGHT_UPLOAD_ROUTE,
+    {
+      // Kiểm đăng nhập ở onRequest — TRƯỚC khi đọc body — để người lạ không bắt máy chủ giữ
+      // tới 50 MiB trong bộ nhớ rồi mới nhận 401 (các route JSON kiểm ở preHandler vì body nhỏ).
+      onRequest: requireMember,
+      errorHandler: highlightUploadErrorHandler,
+      config: { rateLimit: HIGHLIGHT_RATE_LIMIT },
+    },
+    async (request): Promise<ReportDto> => {
+      const { id } = idParams.parse(request.params);
+      // Body không phải buffer (vd gửi JSON) → cùng lỗi với file không nhận diện được.
+      if (!Buffer.isBuffer(request.body)) throw appError('INVALID_HIGHLIGHT');
+      return attachHighlight(app.ctx, currentMember(request).id, id, { data: request.body });
+    },
   );
 
   // --- Duyệt (mod/admin) ---
@@ -112,4 +158,15 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/api/seasons', { preHandler: requireMember }, async (): Promise<SeasonDto[]> => listSeasons(app.ctx));
+}
+
+/**
+ * Body vượt `bodyLimit` → Fastify ném 413 trước khi vào handler; với highlight thì đó là
+ * "file quá lớn" (400 HIGHLIGHT_TOO_LARGE, câu dự phòng "Highlight quá lớn" vì chưa hỏi được
+ * giới hạn hiện hành — body đã vượt cả trần 50 MiB của app). Ném tiếp để handler lỗi chung
+ * của app định dạng phản hồi (Fastify chuyển lỗi ném từ đây lên handler cha).
+ */
+function highlightUploadErrorHandler(err: FastifyError): never {
+  if (err.code === 'FST_ERR_CTP_BODY_TOO_LARGE') throw appError('HIGHLIGHT_TOO_LARGE');
+  throw err;
 }

@@ -502,6 +502,16 @@ test('JSON guard: DELETE without a body may omit content-type; role image upload
   expect((await app.inject({ method: 'PUT', url: '/api/admin/roles/12/other', headers: { 'content-type': 'image/png' } })).statusCode).toBe(415);
   expect((await app.inject({ method: 'POST', url: '/api/admin/roles/12/image', headers: { 'content-type': 'image/png' } })).statusCode).toBe(415);
 
+  // Route highlight nhận video/ảnh của nó (401 vì chưa đăng nhập); mỗi route chỉ mở đúng danh sách của mình.
+  for (const type of ['video/mp4', 'video/webm', 'video/quicktime', 'image/png', 'image/jpeg', 'image/gif']) {
+    const res = await app.inject({ method: 'PUT', url: '/api/reports/12/highlight', headers: { 'content-type': type } });
+    expect(res.statusCode, type).toBe(401);
+  }
+  expect((await app.inject({ method: 'PUT', url: '/api/reports/12/highlight', headers: { 'content-type': 'image/webp' } })).statusCode).toBe(415);
+  expect((await app.inject({ method: 'PUT', url: '/api/admin/roles/12/image', headers: { 'content-type': 'video/mp4' } })).statusCode).toBe(415);
+  expect((await app.inject({ method: 'POST', url: '/api/reports/12/highlight', headers: { 'content-type': 'video/mp4' } })).statusCode).toBe(415);
+  expect((await app.inject({ method: 'PUT', url: '/api/reports/12/highlight/x', headers: { 'content-type': 'video/mp4' } })).statusCode).toBe(415);
+
   // Ngoài /api không áp dụng guard.
   expect((await app.inject({ method: 'POST', url: '/auth/logout', headers: { 'content-type': 'text/plain' }, payload: 'x' })).statusCode).toBe(204);
 });
@@ -523,9 +533,11 @@ test('JSON guard: a percent-encoded /api path is guarded like the route the rout
   }
   expect((await getMe(sid)).json()).toMatchObject({ notifyDm: true });
 
-  // Ngoại lệ ảnh vẫn theo route thật: mã hoá đường dẫn không làm mất ngoại lệ, cũng không mở thêm.
+  // Ngoại lệ ảnh/highlight vẫn theo route thật: mã hoá đường dẫn không làm mất ngoại lệ, cũng không mở thêm.
   expect((await app.inject({ method: 'PUT', url: '/api/admin/roles/12/%69mage', headers: { 'content-type': 'image/png' } })).statusCode).toBe(401);
+  expect((await app.inject({ method: 'PUT', url: '/api/reports/12/%68ighlight', headers: { 'content-type': 'video/mp4' } })).statusCode).toBe(401);
   expect((await app.inject({ method: 'PUT', url: '/%61pi/admin/roles/12/image', headers: textPlain, payload: 'x' })).statusCode).toBe(415);
+  expect((await app.inject({ method: 'PUT', url: '/%61pi/reports/12/highlight', headers: textPlain, payload: 'x' })).statusCode).toBe(415);
   expect((await app.inject({ method: 'PUT', url: '/%61pi/admin/roles/12/other', headers: { 'content-type': 'image/png' } })).statusCode).toBe(415);
 });
 

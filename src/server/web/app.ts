@@ -26,7 +26,7 @@ import { meRoutes } from './routes/me.js';
 import { mvpRoutes } from './routes/mvp.js';
 import { ROLE_IMAGE_TYPES, ROLE_IMAGE_UPLOAD_ROUTE, roleRoutes } from './routes/roles.js';
 import { sessionRoutes } from './routes/sessions.js';
-import { statsRoutes } from './routes/stats.js';
+import { HIGHLIGHT_TYPES, HIGHLIGHT_UPLOAD_ROUTE, statsRoutes } from './routes/stats.js';
 
 export interface AppDeps {
   oauth: OAuthClient;
@@ -192,11 +192,19 @@ function sendNotFound(request: FastifyRequest, reply: FastifyReply, serveWeb: bo
 // ---------------------------------------------------------------------------
 
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
-const IMAGE_TYPES = new Set(ROLE_IMAGE_TYPES);
+/**
+ * Route PUT nhận body thô (file) và đúng các content-type được nhận ở đó — ngoại lệ duy nhất
+ * của guard JSON; mỗi route chỉ mở danh sách của mình (ảnh role không mở route highlight và ngược lại).
+ */
+const RAW_UPLOAD_ROUTES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [ROLE_IMAGE_UPLOAD_ROUTE, new Set(ROLE_IMAGE_TYPES)],
+  [HIGHLIGHT_UPLOAD_ROUTE, new Set(HIGHLIGHT_TYPES)],
+]);
 
 /**
  * Thao tác ghi dưới /api phải gửi `application/json` (chống CSRF kiểu form, cùng
- * với cookie sameSite=lax). Ngoại lệ: `PUT /api/admin/roles/:id/image` nhận ảnh;
+ * với cookie sameSite=lax). Ngoại lệ: hai route tải file thô (`PUT /api/admin/roles/:id/image`
+ * nhận ảnh, `PUT /api/reports/:id/highlight` nhận video/ảnh) với content-type của route đó;
  * DELETE không có body được bỏ content-type. Xét theo route đã khớp (`routePath`),
  * nên đường dẫn mã hoá % (`/%61pi/me`) bị chặn y như đường dẫn thường.
  */
@@ -208,9 +216,7 @@ async function jsonGuard(request: FastifyRequest, reply: FastifyReply): Promise<
   const type = mediaTypeOf(request.headers['content-type']);
   if (type === 'application/json') return undefined;
   if (type === undefined && request.method === 'DELETE') return undefined;
-  if (request.method === 'PUT' && type !== undefined && IMAGE_TYPES.has(type) && path === ROLE_IMAGE_UPLOAD_ROUTE) {
-    return undefined;
-  }
+  if (request.method === 'PUT' && type !== undefined && RAW_UPLOAD_ROUTES.get(path)?.has(type) === true) return undefined;
   return reply.code(415).send(errorBody('UNSUPPORTED_MEDIA_TYPE', 'Chỉ nhận dữ liệu JSON'));
 }
 
