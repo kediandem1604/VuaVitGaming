@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Để bot tự tạo nhóm kênh "GGD Hub" (lịch-chơi, vote-mvp, thông-báo, highlight) trên server
-# Discord và ghi ID bốn kênh vào deploy/server/.env (README mục 6C.3). Chạy lại an toàn: kênh
-# cùng tên được dùng lại (máy đã có ba kênh đầu chỉ được thêm #highlight). Cuối cùng in danh
-# sách role của server kèm ID để điền role admin/mod.
+# Discord và ghi ID bốn kênh vào deploy/server/.env (README mục 6C.3). Chạy lại an toàn: ID
+# kênh đã có trong .env được giữ nguyên (kể cả khi kênh/nhóm đã đổi tên), kênh cùng tên được
+# dùng lại (máy đã có ba kênh đầu chỉ được thêm #highlight). Cuối cùng in danh sách role của
+# server kèm ID để điền role admin/mod.
 #
 #   bash deploy/server/discord-setup.sh
 #
@@ -31,6 +32,9 @@ sudo docker compose build app
 
 echo "==> Bot tạo kênh"
 out="$(sudo docker compose run --rm --no-deps -T app node dist/server/tools/setup-discord.js)"
+
+# .env sửa tay có thể thiếu xuống dòng cuối: thêm trước khi nối dòng mới, kẻo dính vào dòng cuối.
+[ -n "$(tail -c1 "$env_file")" ] && echo >>"$env_file"
 
 written=0
 while IFS= read -r line; do

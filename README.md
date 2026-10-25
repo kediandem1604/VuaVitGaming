@@ -376,7 +376,7 @@ Tiếp theo: mục 6C.3.
    bash deploy/server/discord-setup.sh
    ```
 
-   Script build ảnh ứng dụng (lần đầu lâu, `update.sh` dùng lại), rồi bot tạo nhóm kênh **GGD Hub** gồm `#lịch-chơi`, `#vote-mvp`, `#thông-báo`, `#highlight` — thành viên xem được nhưng không nhắn, chỉ bot đăng tin (nút Tham gia và menu vote vẫn bấm được; `#highlight` nhận video/ảnh thành viên kèm khi khai điểm) — và **tự ghi bốn ID kênh vào `.env`**. Chạy lại không tạo trùng (kênh cùng tên được dùng lại); đổi tên kênh trong Discord sau đó không ảnh hưởng gì. Cuối cùng script in danh sách role của server kèm ID: chép ID role admin/mod vào `DISCORD_ADMIN_ROLE_IDS` và `DISCORD_MOD_ROLE_IDS` (`nano deploy/server/.env`).
+   Script build ảnh ứng dụng (lần đầu lâu, `update.sh` dùng lại), rồi bot tạo nhóm kênh **GGD Hub** gồm `#lịch-chơi`, `#vote-mvp`, `#thông-báo`, `#highlight` — thành viên xem được nhưng không nhắn, chỉ bot đăng tin (nút Tham gia và menu vote vẫn bấm được; `#highlight` nhận video/ảnh thành viên kèm khi khai điểm) — và **tự ghi bốn ID kênh vào `.env`**. Chạy lại không tạo trùng: kênh đã có ID trong `.env` được giữ nguyên, kênh cùng tên được dùng lại; đổi tên kênh hay nhóm trong Discord sau đó không ảnh hưởng gì. Cuối cùng script in danh sách role của server kèm ID: chép ID role admin/mod vào `DISCORD_ADMIN_ROLE_IDS` và `DISCORD_MOD_ROLE_IDS` (`nano deploy/server/.env`).
 
 4. **Chạy:**
 
@@ -393,7 +393,7 @@ Tiếp theo: mục 6C.3.
 Mọi lệnh chạy trong terminal SSH của máy, từ thư mục `~/ggd-hub`.
 
 - **Cập nhật lên code mới nhất** của nhánh: `bash deploy/server/update.sh` (dữ liệu và chứng chỉ không mất).
-- **Thêm kênh `#highlight` cho máy đã chạy bản cũ** (chỉ có ba kênh): Server Settings → Roles → role của bot → bật **Attach Files** (hoặc mời lại bot bằng link thứ hai ở mục 2.2), rồi chạy lần lượt `git pull`, `bash deploy/server/discord-setup.sh` (ba kênh cũ giữ nguyên, chỉ tạo thêm `#highlight` và ghi ID vào `.env`), `bash deploy/server/update.sh`. Không muốn dùng highlight thì chỉ cần `update.sh` như thường — biến `DISCORD_HIGHLIGHT_CHANNEL_ID` không bắt buộc.
+- **Thêm kênh `#highlight` cho máy đã chạy bản cũ** (chỉ có ba kênh): trước khi chạy lại script, Server Settings → Roles → role của bot → bật **Manage Channels** (nếu đã tắt sau lần tạo kênh đầu — chạy xong lại tắt được) và **Attach Files** (hoặc mời lại bot bằng link thứ hai ở mục 2.2). Rồi chạy lần lượt `git pull`, `bash deploy/server/discord-setup.sh`, `bash deploy/server/update.sh`. Script giữ nguyên ID ba kênh đang có trong `.env` (kể cả khi đã đổi tên kênh hay nhóm, hoặc ID tự điền tay), chỉ tạo thêm `#highlight` và ghi ID của nó vào `.env`. Không muốn dùng highlight thì chỉ cần `update.sh` như thường — biến `DISCORD_HIGHLIGHT_CHANNEL_ID` không bắt buộc.
 - **Xem log ứng dụng:** `cd deploy/server && sudo docker compose logs -f app` (`Ctrl+C` để thoát).
 - **Trạng thái:** `cd deploy/server && sudo docker compose ps`.
 - **Dung lượng ổ đĩa:** `df -h /` — ảnh Docker cũ được dọn sau mỗi lần cập nhật; log mỗi dịch vụ giới hạn 30 MB.

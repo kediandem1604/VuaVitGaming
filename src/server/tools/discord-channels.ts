@@ -1,8 +1,15 @@
 /**
  * Kế hoạch tạo kênh Discord cho GGD Hub (dùng bởi `setup-discord.ts`): một nhóm kênh
  * "GGD Hub" với bốn kênh bot đăng tin — lịch chơi, vote MVP, thông báo, highlight. Chạy lại
- * an toàn: kênh/nhóm đã có (cùng tên) được dùng lại, chỉ tạo phần còn thiếu (máy chủ đã có ba
- * kênh đầu từ bản trước chỉ được thêm `#highlight`).
+ * an toàn, theo thứ tự ưu tiên cho từng kênh:
+ *
+ * 1. ID đã có trong `.env` mà vẫn là kênh văn bản của server → giữ nguyên, kể cả khi admin đã
+ *    đổi tên kênh hay nhóm, hoặc tự điền ID một kênh khác (dùng chung một kênh cho cả ba…).
+ * 2. Không thì tìm kênh cùng tên trong nhóm, 3. không có nữa thì tạo.
+ *
+ * Kênh tạo mới vào nhóm chứa kênh giữ được đầu tiên (nhóm đã đổi tên vẫn là nhóm của hội);
+ * không kênh nào giữ được nằm trong nhóm thì tìm/tạo nhóm "GGD Hub" theo tên — chỉ khi thật sự
+ * có kênh cần tìm hay tạo. Máy chủ đã có ba kênh đầu từ bản trước chỉ được thêm `#highlight`.
  *
  * Tách khỏi discord.js qua `ChannelAdmin` để test được bằng bản giả.
  */
@@ -46,8 +53,13 @@ export const CHANNELS: readonly ChannelPlan[] = [
   },
 ];
 
+/** ID kênh đã biết (đọc từ `.env`) theo tên biến; thiếu hoặc trống = chưa biết. */
+export type KnownChannelIds = Partial<Record<ChannelPlan['envKey'], string>>;
+
 /** Thao tác tối thiểu trên server Discord mà kế hoạch cần. */
 export interface ChannelAdmin {
+  /** Kênh văn bản `id` của server này (kèm nhóm chứa nó); không còn, khác server hay không phải kênh văn bản → null. */
+  textChannelById(id: string): Promise<{ id: string; parentId: string | null } | null>;
   findCategory(name: string): Promise<string | null>;
   createCategory(name: string): Promise<string>;
   findTextChannel(name: string, categoryId: string): Promise<string | null>;
@@ -57,25 +69,54 @@ export interface ChannelAdmin {
 export interface EnsuredChannel extends ChannelPlan {
   id: string;
   created: boolean;
+  /** Giữ theo ID đã có trong `.env` (không tra tên, không đụng quyền kênh). */
+  keptById: boolean;
 }
 
 export interface EnsureResult {
-  categoryId: string;
+  /** Nhóm chứa kênh tìm/tạo theo tên; `null` khi cả bốn kênh đều giữ theo ID (không cần nhóm). */
+  categoryId: string | null;
   categoryCreated: boolean;
   channels: EnsuredChannel[];
 }
 
-export async function ensureChannels(admin: ChannelAdmin): Promise<EnsureResult> {
-  const existingCategory = await admin.findCategory(CATEGORY_NAME);
-  const categoryId = existingCategory ?? (await admin.createCategory(CATEGORY_NAME));
+export async function ensureChannels(admin: ChannelAdmin, known: KnownChannelIds = {}): Promise<EnsureResult> {
+  // 1. Kênh có ID trong .env còn tồn tại → giữ (Map giữ thứ tự kế hoạch: "kênh giữ được đầu tiên").
+  const kept = new Map<ChannelPlan['envKey'], { id: string; parentId: string | null }>();
+  for (const plan of CHANNELS) {
+    const id = known[plan.envKey]?.trim();
+    if (!id) continue;
+    const channel = await admin.textChannelById(id);
+    if (channel) kept.set(plan.envKey, channel);
+  }
 
+  // 2. Nhóm cho kênh còn thiếu, chỉ tìm/tạo khi lần đầu cần: nhóm của kênh giữ được đầu tiên,
+  //    không có thì nhóm "GGD Hub" theo tên.
+  let categoryId: string | null = null;
+  let categoryCreated = false;
+  const category = async (): Promise<string> => {
+    if (categoryId !== null) return categoryId;
+    const keptParent = [...kept.values()].find((channel) => channel.parentId !== null)?.parentId ?? null;
+    if (keptParent !== null) return (categoryId = keptParent);
+    const existing = await admin.findCategory(CATEGORY_NAME);
+    categoryCreated = existing === null;
+    return (categoryId = existing ?? (await admin.createCategory(CATEGORY_NAME)));
+  };
+
+  // 3. Từng kênh: giữ theo ID, hoặc tìm theo tên trong nhóm, hoặc tạo.
   const channels: EnsuredChannel[] = [];
   for (const plan of CHANNELS) {
-    const existing = await admin.findTextChannel(plan.name, categoryId);
-    const id = existing ?? (await admin.createTextChannel(plan, categoryId));
-    channels.push({ ...plan, id, created: existing === null });
+    const keptChannel = kept.get(plan.envKey);
+    if (keptChannel) {
+      channels.push({ ...plan, id: keptChannel.id, created: false, keptById: true });
+      continue;
+    }
+    const parent = await category();
+    const existing = await admin.findTextChannel(plan.name, parent);
+    const id = existing ?? (await admin.createTextChannel(plan, parent));
+    channels.push({ ...plan, id, created: existing === null, keptById: false });
   }
-  return { categoryId, categoryCreated: existingCategory === null, channels };
+  return { categoryId, categoryCreated, channels };
 }
 
 /** Dòng `KEY=ID` cho từng kênh — script shell ghi thẳng vào `.env`. */

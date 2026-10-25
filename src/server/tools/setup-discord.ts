@@ -1,10 +1,13 @@
 /**
  * Dùng bot để tạo nhóm kênh "GGD Hub" (lịch chơi, vote MVP, thông báo, highlight) trên server
  * Discord và in ID kênh dạng `KEY=ID` ra stdout; thông báo cho người đọc in ra stderr. Cũng in
- * danh sách role của server kèm ID để chọn role admin/mod. Chạy lại an toàn (dùng lại kênh cùng
- * tên — máy chủ đã có ba kênh đầu chỉ được tạo thêm #highlight).
+ * danh sách role của server kèm ID để chọn role admin/mod. Chạy lại an toàn: ID kênh đã có trong
+ * biến môi trường (`docker compose run` nạp `deploy/server/.env`) mà vẫn là kênh văn bản của
+ * server thì được giữ nguyên dù kênh/nhóm đã đổi tên; còn lại dùng kênh cùng tên hoặc tạo mới
+ * (máy chủ đã có ba kênh đầu chỉ được tạo thêm #highlight).
  *
- * Chỉ cần DISCORD_TOKEN và DISCORD_GUILD_ID. Bot phải có quyền **Manage Channels** và
+ * Cần DISCORD_TOKEN và DISCORD_GUILD_ID; bốn biến DISCORD_*_CHANNEL_ID không bắt buộc (trống =
+ * chưa có). Bot phải có quyền **Manage Channels** và
  * **Attach Files** trên server. Trên máy chủ chạy qua `bash deploy/server/discord-setup.sh`
  * (tự ghi ID vào .env); ở máy: `npx tsx src/server/tools/setup-discord.ts`.
  *
@@ -16,7 +19,7 @@
  */
 
 import { ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, type Guild } from 'discord.js';
-import { ensureChannels, envLines, sameChannelName, type ChannelAdmin } from './discord-channels.js';
+import { CHANNELS, ensureChannels, envLines, sameChannelName, type ChannelAdmin, type KnownChannelIds } from './discord-channels.js';
 
 const log = (line = '') => process.stderr.write(`${line}\n`);
 
@@ -27,9 +30,21 @@ function fail(message: string): never {
   throw new SetupError(message);
 }
 
+/**
+ * Loại kênh giữ được theo ID: kênh văn bản, và kênh thông báo (Announcement) mà admin tự điền —
+ * bot gửi tin, nút và menu vào đó được như kênh văn bản.
+ */
+const KEEPABLE_TYPES: ReadonlySet<ChannelType> = new Set([ChannelType.GuildText, ChannelType.GuildAnnouncement]);
+
 function channelAdmin(guild: Guild, botId: string): ChannelAdmin {
   const all = () => guild.channels.fetch();
   return {
+    // Tra trong danh sách kênh của chính server: ID đã xoá, của server khác hay ID rác đều
+    // không có trong đó → null, không phải bắt lỗi Unknown Channel / kênh khác server.
+    textChannelById: async (id) => {
+      const channel = (await all()).get(id);
+      return channel && KEEPABLE_TYPES.has(channel.type) ? { id: channel.id, parentId: channel.parentId } : null;
+    },
     findCategory: async (name) =>
       (await all()).find((c) => c?.type === ChannelType.GuildCategory && sameChannelName(c.name, name))?.id ?? null,
     createCategory: async (name) => (await guild.channels.create({ name, type: ChannelType.GuildCategory })).id,
@@ -64,6 +79,16 @@ function channelAdmin(guild: Guild, botId: string): ChannelAdmin {
         })
       ).id,
   };
+}
+
+/** ID kênh đang có trong biến môi trường (đã cắt khoảng trắng); trống hay không đặt thì bỏ qua. */
+function knownChannelIds(): KnownChannelIds {
+  const known: KnownChannelIds = {};
+  for (const { envKey } of CHANNELS) {
+    const value = process.env[envKey]?.trim();
+    if (value) known[envKey] = value;
+  }
+  return known;
 }
 
 async function main(): Promise<void> {
@@ -107,10 +132,18 @@ async function main(): Promise<void> {
     }
 
     log(`Server: ${guild.name}`);
-    const result = await ensureChannels(channelAdmin(guild, me.id));
-    log(`Nhóm kênh: ${result.categoryCreated ? 'đã tạo' : 'đã có'}`);
+    const known = knownChannelIds();
+    const result = await ensureChannels(channelAdmin(guild, me.id), known);
+    log(`Nhóm kênh: ${result.categoryId === null ? 'không cần (cả bốn kênh giữ theo ID trong .env)' : result.categoryCreated ? 'đã tạo' : 'đã có'}`);
     for (const channel of result.channels) {
-      log(`  #${channel.name}: ${channel.created ? 'đã tạo' : 'đã có'} (${channel.envKey})`);
+      if (channel.keptById) {
+        log(`  #${channel.name} (${channel.envKey}): đã có — giữ kênh ${channel.id} theo ID trong .env`);
+        continue;
+      }
+      // ID trong .env không còn dùng được: báo rõ vì dòng này trong .env sắp bị ghi đè.
+      const stale = known[channel.envKey];
+      if (stale) log(`  ${channel.envKey}=${stale} trong .env không còn là kênh văn bản của server — thay bằng kênh dưới đây`);
+      log(`  #${channel.name} (${channel.envKey}): ${channel.created ? 'đã tạo' : 'đã có'}`);
     }
 
     const roles = [...(await guild.roles.fetch()).values()]
