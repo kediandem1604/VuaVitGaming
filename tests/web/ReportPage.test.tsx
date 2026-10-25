@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { HighlightConfigDto, ReportDto, RoleDto, SessionDto } from '../../src/shared/api-types';
 import { vnTodayIso } from '../../src/web/lib/format';
 import { ReportPage } from '../../src/web/pages/ReportPage';
+import { PENDING_REPORTS_KEY } from '../../src/web/pages/admin/ReviewsTab';
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn' | 'icon' | 'metricLabel' | 'maxPerGame'> & Partial<RoleDto>): RoleDto => ({
   description: '',
@@ -372,7 +373,8 @@ test('submitting with a file creates the report, then uploads the highlight', as
       return upload;
     },
   });
-  renderPage();
+  const queryClient = renderPage();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
   await pickRole('kiem', /Kiếm sĩ/);
   const value = screen.getByRole('spinbutton', { name: 'Số mạng chém' });
   fireEvent.change(value, { target: { value: '5' } });
@@ -394,6 +396,8 @@ test('submitting with a file creates the report, then uploads the highlight', as
   finishUpload(json(200, report({ id: 4, status: 'pending', value: 5, highlightUrl: HIGHLIGHT_URL })));
   expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Gửi khai điểm' })).toBeEnabled();
+  // Mod khai cho chính mình: hàng chờ Duyệt điểm phải thấy link mới.
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: PENDING_REPORTS_KEY });
   // Lần khai mới ở đầu danh sách, đã có link xem highlight.
   const items = screen.getAllByRole('listitem');
   expect(items[0]).toHaveTextContent('5 Số mạng chém');
@@ -423,10 +427,14 @@ test('a too-large file is refused before upload with "Highlight tối đa 10 MB"
   const input = screen.getByLabelText(HIGHLIGHT_LABEL);
 
   fireEvent.change(input, { target: { files: [clip('to.mp4', 'video/mp4', 10 * MIB + 1)] } });
-  expect(await screen.findByRole('alert')).toHaveTextContent('Highlight tối đa 10 MB');
-  // Gửi khi file đang chọn không hợp lệ: không gửi gì cả, kể cả tạo lần khai.
+  const refusal = await screen.findByRole('alert');
+  expect(refusal).toHaveTextContent('Highlight tối đa 10 MB');
+  // Gửi khi file đang chọn không hợp lệ: không gửi gì cả, kể cả tạo lần khai; lời báo được dựng
+  // lại (nút DOM mới) để trình đọc màn hình đọc lại thay vì lặng lẽ bỏ qua cú bấm.
   fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
-  expect(screen.getByRole('alert')).toHaveTextContent('Highlight tối đa 10 MB');
+  const reannounced = screen.getByRole('alert');
+  expect(reannounced).toHaveTextContent('Highlight tối đa 10 MB');
+  expect(reannounced).not.toBe(refusal);
   expect(calls(fetchMock, 'POST')).toHaveLength(0);
 
   // Đúng bằng giới hạn thì nhận.
@@ -435,6 +443,40 @@ test('a too-large file is refused before upload with "Highlight tối đa 10 MB"
   fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
   await waitFor(() => expect(calls(fetchMock, 'PUT')).toHaveLength(1));
   expect(calls(fetchMock, 'POST')).toHaveLength(1);
+});
+
+test('"Bỏ file" drops a refused file so the report can be sent without a highlight', async () => {
+  let posted: unknown = null;
+  const fetchMock = stubFetch({
+    ...baseRoutes,
+    'POST /api/reports': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return json(201, report({ id: 4, status: 'pending', value: 5 }));
+    },
+  });
+  renderPage();
+  await pickRole('kiem', /Kiếm sĩ/);
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '5' } });
+  const input = screen.getByLabelText(HIGHLIGHT_LABEL);
+  // Chưa chọn file: không có gì để bỏ.
+  expect(screen.queryByRole('button', { name: 'Bỏ file' })).not.toBeInTheDocument();
+
+  // File hợp lệ cũng bỏ được (đổi ý không kèm highlight).
+  fireEvent.change(input, { target: { files: [clip()] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Bỏ file' }));
+  expect(screen.queryByRole('button', { name: 'Bỏ file' })).not.toBeInTheDocument();
+
+  // Safari/Firefox giữ file cũ khi huỷ bộ chọn, nên file bị từ chối cần nút Bỏ file để thoát.
+  fireEvent.change(input, { target: { files: [clip('to.mp4', 'video/mp4', 10 * MIB + 1)] } });
+  expect(await screen.findByRole('alert')).toHaveTextContent('Highlight tối đa 10 MB');
+  fireEvent.click(screen.getByRole('button', { name: 'Bỏ file' }));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Bỏ file' })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
+  expect(posted).toEqual({ roleId: 61, value: 5, playedOn: today });
+  expect(calls(fetchMock, 'PUT')).toHaveLength(0);
 });
 
 test('an unsupported or empty file is refused before upload; a typeless .MOV is accepted by its extension', async () => {
@@ -465,7 +507,8 @@ test('upload failure keeps the report and says "Đã gửi khai điểm, nhưng 
     'PUT /api/reports/4/highlight': () =>
       json(503, { error: { code: 'DISCORD_UNAVAILABLE', message: 'Không đăng được highlight lên Discord, thử lại sau' } }),
   });
-  renderPage();
+  const queryClient = renderPage();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
   await pickRole('kiem', /Kiếm sĩ/);
   const value = screen.getByRole('spinbutton', { name: 'Số mạng chém' });
   fireEvent.change(value, { target: { value: '5' } });
@@ -476,6 +519,8 @@ test('upload failure keeps the report and says "Đã gửi khai điểm, nhưng 
     'Đã gửi khai điểm, nhưng highlight chưa tải lên được: Không đăng được highlight lên Discord, thử lại sau',
   );
   expect(screen.queryByText('Đã gửi, chờ mod duyệt')).not.toBeInTheDocument();
+  // Không có highlight nào lên được thì hàng chờ duyệt không cần tải lại.
+  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: PENDING_REPORTS_KEY });
   // Lần khai vẫn được tạo, vào đầu danh sách với nút thêm highlight sau; form đã được dọn như khi gửi xong.
   const items = screen.getAllByRole('listitem');
   expect(items[0]).toHaveTextContent('5 Số mạng chém');
@@ -500,7 +545,8 @@ test('my reports show "Xem highlight" links and an add/replace button on pending
       return json(200, report({ id: 3, status: 'pending', value: 4, highlightUrl: 'https://discord.com/channels/1/2/5' }));
     },
   });
-  renderPage();
+  const queryClient = renderPage();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
   const items = (await screen.findAllByRole('listitem')) as HTMLElement[];
   expect(items).toHaveLength(4);
   const [withHighlight, pending, approved, rejected] = items as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
@@ -533,6 +579,8 @@ test('my reports show "Xem highlight" links and an add/replace button on pending
   expect(new Headers(uploadInit?.headers).get('content-type')).toBe('video/quicktime');
   expect(within(pending).getByRole('button', { name: 'Đổi highlight' })).toBeInTheDocument();
   expect(within(pending).queryByRole('alert')).not.toBeInTheDocument();
+  // Mod thêm highlight cho lần khai của chính mình: hàng chờ Duyệt điểm phải thấy link mới.
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: PENDING_REPORTS_KEY });
 });
 
 test('a highlight refused from the list shows the message next to that report; a server error refetches the list', async () => {

@@ -32,6 +32,7 @@ import { cx } from '../lib/cx';
 import { FACTION_LABEL } from '../lib/factions';
 import { addDaysIso, formatDateLabel, formatTime, vnTodayIso } from '../lib/format';
 import { HighlightButton, HighlightField, checkHighlight, uploadHighlight, type HighlightUpload } from './ReportHighlight';
+import { PENDING_REPORTS_KEY } from './admin/ReviewsTab';
 
 export const MY_REPORTS_KEY = ['reports', 'mine'] as const;
 const ROLES_KEY = ['roles'] as const;
@@ -100,6 +101,14 @@ function replaceInMine(queryClient: QueryClient, updated: ReportDto) {
   queryClient.setQueryData<ReportDto[]>(MY_REPORTS_KEY, (current) => current?.map((item) => (item.id === updated.id ? updated : item)));
 }
 
+/**
+ * Highlight vừa tải xong: hàng chờ Duyệt điểm (nếu người này là mod, đang mở cùng phiên) phải thấy
+ * link mới của chính lần khai này — cache hàng chờ là của tab admin nên chỉ đánh dấu cũ để tải lại.
+ */
+function refreshReviewQueue(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: PENDING_REPORTS_KEY });
+}
+
 export function ReportPage() {
   const roles = useQuery({ queryKey: ROLES_KEY, queryFn: () => apiGet<RoleDto[]>('/api/roles') });
   const mine = useQuery({ queryKey: MY_REPORTS_KEY, queryFn: () => apiGet<ReportDto[]>('/api/reports/mine?limit=50') });
@@ -166,10 +175,21 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
   const [localError, setLocalError] = useState<string | null>(null);
   /** Đang ở bước tải file (sau khi lần khai đã tạo xong) — để nút gửi nói đúng việc đang làm. */
   const [uploading, setUploading] = useState(false);
+  /**
+   * Số lần bấm Gửi khi file đang chọn bị từ chối: làm `key` của dòng báo để nó được dựng lại
+   * (trình đọc màn hình đọc lại `role="alert"`) dù chữ không đổi — không lặng lẽ bỏ qua cú bấm.
+   */
+  const [refusals, setRefusals] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
 
   /** File đang chọn đã kiểm tra loại và dung lượng; `null` khi không chọn (hoặc ô file không hiện). */
   const chosen = file && highlight ? checkHighlight(file, highlight.maxBytes) : null;
+
+  /** Xoá file khỏi state lẫn ô file (ô file không điều khiển được qua `value`). */
+  const clearFile = () => {
+    setFile(null);
+    if (fileInput.current) fileInput.current.value = '';
+  };
 
   const submit = useMutation({
     mutationFn: async ({ body, highlight: upload }: SubmitInput): Promise<SubmitResult> => {
@@ -185,12 +205,12 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
         setUploading(false);
       }
     },
-    onSuccess: ({ report }) => {
+    onSuccess: ({ report, highlightError }, { highlight: upload }) => {
       queryClient.setQueryData<ReportDto[]>(MY_REPORTS_KEY, (current) => [report, ...(current ?? [])]);
+      if (upload && highlightError === null) refreshReviewQueue(queryClient);
       setValue('');
       setNote('');
-      setFile(null);
-      if (fileInput.current) fileInput.current.value = '';
+      clearFile();
     },
   });
 
@@ -210,8 +230,12 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
       setLocalError(`Hãy nhập ${role.metricLabel}`);
       return;
     }
-    // File sai loại/quá cỡ: lời báo đã hiện sẵn dưới form, không gửi gì cả.
-    if (chosen?.problem) return;
+    // File sai loại/quá cỡ: không gửi gì cả; lời báo đang hiện được dựng lại để đọc lại (xem `refusals`).
+    // Lối ra: nút "Bỏ file" rồi gửi không kèm highlight, hoặc chọn file khác.
+    if (chosen?.problem) {
+      setRefusals((count) => count + 1);
+      return;
+    }
     setLocalError(null);
     const trimmedNote = note.trim();
     submit.mutate({
@@ -301,8 +325,13 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
           id={ids.highlight}
           ref={fileInput}
           maxBytes={highlight.maxBytes}
+          hasFile={file !== null}
           onChange={(next) => {
             setFile(next);
+            touch();
+          }}
+          onClear={() => {
+            clearFile();
             touch();
           }}
         />
@@ -313,7 +342,7 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
           {uploading ? 'Đang tải highlight…' : submit.isPending ? 'Đang gửi…' : 'Gửi khai điểm'}
         </button>
         {error && (
-          <p role="alert" className="text-sm font-bold text-duck-soft">
+          <p key={refusals} role="alert" className="text-sm font-bold text-duck-soft">
             {error}
           </p>
         )}
@@ -616,7 +645,10 @@ function ReportItem({ report, highlight }: ReportItemProps) {
                 <HighlightButton
                   report={report}
                   maxBytes={highlight.maxBytes}
-                  onUploaded={(updated) => replaceInMine(queryClient, updated)}
+                  onUploaded={(updated) => {
+                    replaceInMine(queryClient, updated);
+                    refreshReviewQueue(queryClient);
+                  }}
                   // Lần khai có thể vừa được duyệt/từ chối: tải lại để thấy trạng thái thật.
                   onFailed={() => void queryClient.invalidateQueries({ queryKey: MY_REPORTS_KEY })}
                 />

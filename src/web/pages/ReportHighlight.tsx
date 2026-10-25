@@ -63,13 +63,21 @@ export function uploadHighlight(reportId: number, { file, contentType }: Highlig
 interface HighlightFieldProps {
   id: string;
   maxBytes: number;
+  /** Đang có file trong ô (hợp lệ hay không): hiện nút "Bỏ file". */
+  hasFile: boolean;
   onChange: (file: File | null) => void;
-  /** Để form xoá file đã chọn sau khi gửi xong (ô file không điều khiển được qua `value`). */
+  /** Người dùng bấm "Bỏ file": form xoá file khỏi state (và ô file qua `ref`). */
+  onClear: () => void;
+  /** Để form xoá file đã chọn sau khi gửi xong hoặc bấm "Bỏ file" (ô file không điều khiển được qua `value`). */
   ref?: Ref<HTMLInputElement>;
 }
 
-/** Ô "Highlight (không bắt buộc)" + dòng giới hạn; việc kiểm tra file do form làm (`checkHighlight`). */
-export function HighlightField({ id, maxBytes, onChange, ref }: HighlightFieldProps) {
+/**
+ * Ô "Highlight (không bắt buộc)" + dòng giới hạn; việc kiểm tra file do form làm (`checkHighlight`).
+ * Có file thì thêm nút "Bỏ file": Safari và Firefox giữ nguyên file cũ khi huỷ bộ chọn (không bắn
+ * `change`), nên file bị từ chối (vd quá cỡ) cần một lối ra để vẫn gửi được khai điểm không kèm highlight.
+ */
+export function HighlightField({ id, maxBytes, hasFile, onChange, onClear, ref }: HighlightFieldProps) {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className={LABEL_CLASS}>
@@ -83,6 +91,11 @@ export function HighlightField({ id, maxBytes, onChange, ref }: HighlightFieldPr
         className={FILE_INPUT_CLASS}
         onChange={(event) => onChange(event.target.files?.[0] ?? null)}
       />
+      {hasFile && (
+        <button type="button" className="btn-secondary self-start px-3 py-1 text-sm" onClick={onClear}>
+          Bỏ file
+        </button>
+      )}
       <p className={HINT_CLASS}>Video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF — tối đa {mibLabel(maxBytes)}</p>
     </div>
   );
