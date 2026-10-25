@@ -41,17 +41,18 @@ function fakeAdmin(initial: FakeChannel[] = []) {
   return { admin, created };
 }
 
-test('an empty server gets the category and all three channels inside it', async () => {
+test('an empty server gets the category and all four channels inside it', async () => {
   const { admin, created } = fakeAdmin();
   const result = await ensureChannels(admin);
 
-  expect(created).toEqual([CATEGORY_NAME, 'lịch-chơi', 'vote-mvp', 'thông-báo']);
+  expect(created).toEqual([CATEGORY_NAME, 'lịch-chơi', 'vote-mvp', 'thông-báo', 'highlight']);
   expect(result.categoryCreated).toBe(true);
   expect(result.channels.every((c) => c.created)).toBe(true);
   expect(envLines(result)).toEqual([
     'DISCORD_SCHEDULE_CHANNEL_ID=901',
     'DISCORD_VOTE_CHANNEL_ID=902',
     'DISCORD_ANNOUNCE_CHANNEL_ID=903',
+    'DISCORD_HIGHLIGHT_CHANNEL_ID=904',
   ]);
 });
 
@@ -68,7 +69,7 @@ test('running again reuses everything and creates nothing', async () => {
   expect(envLines(second)).toEqual(envLines(first));
 });
 
-test('only the missing channel is created; names match regardless of case', async () => {
+test('only the missing channels are created; names match regardless of case', async () => {
   const { admin, created } = fakeAdmin([
     { id: '10', name: 'ggd hub', kind: 'category', parentId: null },
     { id: '11', name: 'LỊCH-CHƠI', kind: 'text', parentId: '10' },
@@ -78,19 +79,47 @@ test('only the missing channel is created; names match regardless of case', asyn
   ]);
   const result = await ensureChannels(admin);
 
-  expect(created).toEqual(['vote-mvp']);
+  expect(created).toEqual(['vote-mvp', 'highlight']);
   expect(result.categoryId).toBe('10');
   expect(envLines(result)).toEqual([
     'DISCORD_SCHEDULE_CHANNEL_ID=11',
     expect.stringMatching(/^DISCORD_VOTE_CHANNEL_ID=9\d\d$/),
     'DISCORD_ANNOUNCE_CHANNEL_ID=12',
+    expect.stringMatching(/^DISCORD_HIGHLIGHT_CHANNEL_ID=9\d\d$/),
   ]);
 });
 
-test('the plan covers exactly the three channel variables the app needs', () => {
+test('a server set up before #highlight existed gets only that channel added', async () => {
+  // Máy chủ đang chạy bản cũ: đã có nhóm và ba kênh đầu, chạy lại script chỉ thêm #highlight.
+  const { admin, created } = fakeAdmin([
+    { id: '10', name: 'GGD Hub', kind: 'category', parentId: null },
+    { id: '11', name: 'lịch-chơi', kind: 'text', parentId: '10' },
+    { id: '12', name: 'vote-mvp', kind: 'text', parentId: '10' },
+    { id: '13', name: 'thông-báo', kind: 'text', parentId: '10' },
+  ]);
+  const result = await ensureChannels(admin);
+
+  expect(created).toEqual(['highlight']);
+  expect(result.categoryCreated).toBe(false);
+  expect(result.channels.map((c) => c.created)).toEqual([false, false, false, true]);
+  expect(envLines(result)).toEqual([
+    'DISCORD_SCHEDULE_CHANNEL_ID=11',
+    'DISCORD_VOTE_CHANNEL_ID=12',
+    'DISCORD_ANNOUNCE_CHANNEL_ID=13',
+    'DISCORD_HIGHLIGHT_CHANNEL_ID=900',
+  ]);
+});
+
+test('the plan covers exactly the four channel variables the app needs', () => {
   expect(CHANNELS.map((c) => c.envKey)).toEqual([
     'DISCORD_SCHEDULE_CHANNEL_ID',
     'DISCORD_VOTE_CHANNEL_ID',
     'DISCORD_ANNOUNCE_CHANNEL_ID',
+    'DISCORD_HIGHLIGHT_CHANNEL_ID',
   ]);
+});
+
+test('only #highlight grants the bot Attach Files', () => {
+  expect(CHANNELS.filter((c) => c.botAttachFiles).map((c) => c.envKey)).toEqual(['DISCORD_HIGHLIGHT_CHANNEL_ID']);
+  expect(CHANNELS.find((c) => c.envKey === 'DISCORD_HIGHLIGHT_CHANNEL_ID')?.name).toBe('highlight');
 });

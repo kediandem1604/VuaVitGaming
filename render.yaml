@@ -42,6 +42,9 @@ services:
         sync: false
       - key: DISCORD_ANNOUNCE_CHANNEL_ID
         sync: false
+      # Không bắt buộc: để trống = tắt kèm highlight khi khai điểm.
+      - key: DISCORD_HIGHLIGHT_CHANNEL_ID
+        sync: false
       - key: DISCORD_ADMIN_ROLE_IDS
         sync: false
       - key: DISCORD_MOD_ROLE_IDS

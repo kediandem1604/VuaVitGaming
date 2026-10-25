@@ -1,7 +1,8 @@
 /**
  * Kế hoạch tạo kênh Discord cho GGD Hub (dùng bởi `setup-discord.ts`): một nhóm kênh
- * "GGD Hub" với ba kênh bot đăng tin — lịch chơi, vote MVP, thông báo. Chạy lại an toàn:
- * kênh/nhóm đã có (cùng tên) được dùng lại, chỉ tạo phần còn thiếu.
+ * "GGD Hub" với bốn kênh bot đăng tin — lịch chơi, vote MVP, thông báo, highlight. Chạy lại
+ * an toàn: kênh/nhóm đã có (cùng tên) được dùng lại, chỉ tạo phần còn thiếu (máy chủ đã có ba
+ * kênh đầu từ bản trước chỉ được thêm `#highlight`).
  *
  * Tách khỏi discord.js qua `ChannelAdmin` để test được bằng bản giả.
  */
@@ -10,9 +11,15 @@ export const CATEGORY_NAME = 'GGD Hub';
 
 export interface ChannelPlan {
   /** Tên biến môi trường nhận ID kênh. */
-  envKey: 'DISCORD_SCHEDULE_CHANNEL_ID' | 'DISCORD_VOTE_CHANNEL_ID' | 'DISCORD_ANNOUNCE_CHANNEL_ID';
+  envKey:
+    | 'DISCORD_SCHEDULE_CHANNEL_ID'
+    | 'DISCORD_VOTE_CHANNEL_ID'
+    | 'DISCORD_ANNOUNCE_CHANNEL_ID'
+    | 'DISCORD_HIGHLIGHT_CHANNEL_ID';
   name: string;
   topic: string;
+  /** Bot được cấp thêm Attach Files trong kênh (đăng file highlight). */
+  botAttachFiles?: boolean;
 }
 
 export const CHANNELS: readonly ChannelPlan[] = [
@@ -30,6 +37,12 @@ export const CHANNELS: readonly ChannelPlan[] = [
     envKey: 'DISCORD_ANNOUNCE_CHANNEL_ID',
     name: 'thông-báo',
     topic: 'Kết quả tri ân, đổi người hoá thân, tổng kết mùa.',
+  },
+  {
+    envKey: 'DISCORD_HIGHLIGHT_CHANNEL_ID',
+    name: 'highlight',
+    topic: 'Highlight người chơi gửi kèm khi khai điểm.',
+    botAttachFiles: true,
   },
 ];
 

@@ -1,15 +1,18 @@
 /**
- * Dùng bot để tạo nhóm kênh "GGD Hub" (lịch chơi, vote MVP, thông báo) trên server Discord
- * và in ID kênh dạng `KEY=ID` ra stdout; thông báo cho người đọc in ra stderr. Cũng in danh
- * sách role của server kèm ID để chọn role admin/mod. Chạy lại an toàn (dùng lại kênh cùng tên).
+ * Dùng bot để tạo nhóm kênh "GGD Hub" (lịch chơi, vote MVP, thông báo, highlight) trên server
+ * Discord và in ID kênh dạng `KEY=ID` ra stdout; thông báo cho người đọc in ra stderr. Cũng in
+ * danh sách role của server kèm ID để chọn role admin/mod. Chạy lại an toàn (dùng lại kênh cùng
+ * tên — máy chủ đã có ba kênh đầu chỉ được tạo thêm #highlight).
  *
- * Chỉ cần DISCORD_TOKEN và DISCORD_GUILD_ID. Bot phải có quyền **Manage Channels** trên server.
- * Trên máy chủ chạy qua `bash deploy/server/discord-setup.sh` (tự ghi ID vào .env);
- * ở máy: `npx tsx src/server/tools/setup-discord.ts`.
+ * Chỉ cần DISCORD_TOKEN và DISCORD_GUILD_ID. Bot phải có quyền **Manage Channels** và
+ * **Attach Files** trên server. Trên máy chủ chạy qua `bash deploy/server/discord-setup.sh`
+ * (tự ghi ID vào .env); ở máy: `npx tsx src/server/tools/setup-discord.ts`.
  *
  * Quyền của kênh mới: mọi người xem và đọc lịch sử nhưng không nhắn (chỉ bot đăng tin; nút và
- * menu vote vẫn bấm được); bot xem, gửi, nhúng link, đọc lịch sử. Discord chỉ cho bot đặt
- * những quyền chính nó đang có, nên danh sách quyền giữ đúng bộ quyền bot được mời với.
+ * menu vote vẫn bấm được); bot xem, gửi, nhúng link, đọc lịch sử — ở #highlight thêm đính kèm
+ * file. Discord chỉ cho bot đặt những quyền chính nó đang có, nên danh sách quyền giữ đúng bộ
+ * quyền bot được mời với, và Attach Files được kiểm trước khi tạo kênh (thiếu thì tạo #highlight
+ * sẽ lỗi giữa chừng).
  */
 
 import { ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, type Guild } from 'discord.js';
@@ -54,6 +57,7 @@ function channelAdmin(guild: Guild, botId: string): ChannelAdmin {
                 PermissionFlagsBits.SendMessages,
                 PermissionFlagsBits.EmbedLinks,
                 PermissionFlagsBits.ReadMessageHistory,
+                ...(plan.botAttachFiles ? [PermissionFlagsBits.AttachFiles] : []),
               ],
             },
           ],
@@ -91,6 +95,14 @@ async function main(): Promise<void> {
       fail(
         'bot chưa có quyền Manage Channels. Server Settings → Roles → role của bot → bật "Manage Channels"' +
           ' (hoặc mời lại bot bằng link ở README mục 2.2), rồi chạy lại.',
+      );
+    }
+    // Kiểm trước khi tạo kênh: Discord chỉ cho bot cấp trong overwrite những quyền chính nó đang
+    // có, nên thiếu Attach Files thì ba kênh đầu tạo xong còn #highlight lỗi giữa chừng.
+    if (!me.permissions.has(PermissionFlagsBits.AttachFiles)) {
+      fail(
+        'bot chưa có quyền Attach Files (cần cho kênh #highlight). Server Settings → Roles → role của bot' +
+          ' → bật "Attach Files" (hoặc mời lại bot bằng link ở README mục 2.2), rồi chạy lại.',
       );
     }
 
