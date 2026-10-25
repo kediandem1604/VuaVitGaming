@@ -5,13 +5,15 @@
  * Mọi lỗi Discord được ném ra — service coi đó là "đăng bù sau" (cờ `discordDirty`,
  * `resultPending`) hay "thử lại sau" (highlight); riêng "Unknown Message" khi sửa tin
  * thành `MessageGoneError` để service đăng lại (tin buổi) hay bỏ qua (tin vote) thay vì
- * thử sửa mãi. Giới hạn 2000 ký tự của tin văn bản là việc của nơi gọi.
+ * thử sửa mãi, và lỗi đăng highlight không tự hết thành `HighlightChannelError` /
+ * `HighlightRejectedTooLargeError` (service báo đúng lỗi thay vì "thử lại sau"). Giới hạn
+ * 2000 ký tự của tin văn bản là việc của nơi gọi.
  */
 
 import { DiscordAPIError, GuildPremiumTier, RESTJSONErrorCodes, escapeMarkdown } from 'discord.js';
 import type { APIEmbed, Client, SendableChannels } from 'discord.js';
 import type { Config } from '../config.js';
-import { MessageGoneError } from '../ports.js';
+import { HighlightChannelError, HighlightRejectedTooLargeError, MessageGoneError } from '../ports.js';
 import type { DiscordNotifier, HighlightPost, SessionView, VotePrompt } from '../ports.js';
 import { buildSessionMessage, buildVoteMessage } from './embeds.js';
 
@@ -98,19 +100,28 @@ export class DiscordJsNotifier implements DiscordNotifier {
   /**
    * Đăng file kèm dòng `🎬 Highlight — **Tên** · {icon} {role} · {giá trị} {chỉ số} · {dd/mm/yyyy}`
    * vào kênh highlight. Tên người được escape Markdown; không ping ai dù tên có dạng @mention.
-   * Chưa cấu hình kênh (tính năng tắt — service đã chặn trước) → ném lỗi.
+   * Lỗi chỉ admin sửa được — chưa cấu hình kênh (service đã chặn trước), kênh mất / không gửi tin
+   * được, bot thiếu quyền (50013, 50001, 10003) → `HighlightChannelError`; Discord chê file quá lớn
+   * (40005, hay 413 không kèm mã) → `HighlightRejectedTooLargeError`; lỗi khác ném nguyên vẹn.
    */
   async postHighlight(post: HighlightPost): Promise<{ channelId: string; messageId: string }> {
     const channelId = this.config.discord.highlightChannelId;
-    if (channelId === null) throw new Error('Chưa cấu hình kênh highlight (DISCORD_HIGHLIGHT_CHANNEL_ID)');
-    const channel = await this.sendableChannel(channelId, 'highlight');
+    if (channelId === null) throw new HighlightChannelError('Chưa cấu hình kênh highlight (DISCORD_HIGHLIGHT_CHANNEL_ID)');
     const content = `🎬 Highlight — **${escapeMarkdown(post.memberName)}** · ${post.roleLabel} · ${post.valueText} · ${post.playedOnText}`;
-    const message = await channel.send({
-      content,
-      files: [{ attachment: post.data, name: post.fileName }],
-      allowedMentions: { parse: [] },
-    });
-    return { channelId, messageId: message.id };
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !channel.isSendable()) {
+        throw new HighlightChannelError(`Kênh highlight ${channelId} không phải kênh văn bản gửi tin được`);
+      }
+      const message = await channel.send({
+        content,
+        files: [{ attachment: post.data, name: post.fileName }],
+        allowedMentions: { parse: [] },
+      });
+      return { channelId, messageId: message.id };
+    } catch (err) {
+      throw asHighlightError(err, channelId);
+    }
   }
 
   /**
@@ -149,6 +160,26 @@ export class DiscordJsNotifier implements DiscordNotifier {
 /** Lỗi khi sửa tin `messageId`: 10008 Unknown Message → `MessageGoneError` (giữ lỗi gốc ở `cause`); lỗi khác trả về nguyên vẹn. */
 function asMessageGone(err: unknown, messageId: string): unknown {
   return isUnknownMessage(err) ? new MessageGoneError(`Tin Discord ${messageId} không còn tồn tại`, { cause: err }) : err;
+}
+
+/** Mã lỗi Discord khi đăng vào kênh mà thử lại cũng không qua: thiếu quyền, mất quyền xem, kênh đã bị xoá. */
+const HIGHLIGHT_CHANNEL_CODES: ReadonlySet<unknown> = new Set([
+  RESTJSONErrorCodes.MissingPermissions,
+  RESTJSONErrorCodes.MissingAccess,
+  RESTJSONErrorCodes.UnknownChannel,
+]);
+
+/** Lỗi khi đăng highlight → lỗi có kiểu của cổng (giữ lỗi gốc ở `cause`); lỗi khác trả về nguyên vẹn. */
+function asHighlightError(err: unknown, channelId: string): unknown {
+  if (!(err instanceof DiscordAPIError)) return err;
+  if (HIGHLIGHT_CHANNEL_CODES.has(err.code)) {
+    return new HighlightChannelError(`Bot không đăng được vào kênh highlight ${channelId}: ${err.message}`, { cause: err });
+  }
+  // 413 mà thân lỗi không phải JSON (trang lỗi của proxy) thì discord.js không có mã.
+  if (err.code === RESTJSONErrorCodes.RequestEntityTooLarge || err.status === 413) {
+    return new HighlightRejectedTooLargeError(`Discord từ chối file highlight vì quá lớn: ${err.message}`, { cause: err });
+  }
+  return err;
 }
 
 function isUnknownMessage(err: unknown): boolean {

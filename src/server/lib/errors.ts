@@ -30,6 +30,7 @@ export type ErrorCode =
   | 'INVALID_HIGHLIGHT'
   | 'HIGHLIGHT_TOO_LARGE'
   | 'HIGHLIGHT_BUSY'
+  | 'HIGHLIGHT_CHANNEL_UNAVAILABLE'
   | 'DISCORD_UNAVAILABLE';
 
 const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
@@ -60,6 +61,11 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   HIGHLIGHT_TOO_LARGE: { status: 400, message: 'Highlight quá lớn' },
   // Đã đủ số lần tải highlight chạy cùng lúc (giới hạn bộ nhớ của máy chủ).
   HIGHLIGHT_BUSY: { status: 503, message: 'Máy chủ đang bận tải highlight khác, thử lại sau' },
+  // Lỗi chỉ admin sửa được (quyền của bot, kênh bị xoá) — không bảo người dùng thử lại.
+  HIGHLIGHT_CHANNEL_UNAVAILABLE: {
+    status: 503,
+    message: 'Bot không đăng được vào kênh #highlight (thiếu quyền hoặc kênh đã bị xoá) — báo admin',
+  },
   DISCORD_UNAVAILABLE: { status: 503, message: 'Không đăng được highlight lên Discord, thử lại sau' },
 };
 

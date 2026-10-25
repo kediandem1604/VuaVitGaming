@@ -34,7 +34,12 @@ export interface BotOptions {
 
 export function createBot(getCtx: () => Ctx, config: Config, opts: BotOptions = {}): Bot {
   const exit = opts.exit ?? ((code: number) => process.exit(code));
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+    // Mặc định 15 giây mỗi lần gọi REST tính cả lúc tải file lên: highlight 50 MiB qua mạng chậm bị
+    // cắt và gửi lại, tổng cộng tới 4 lần (mỗi lần giữ cả file trong bộ nhớ) — cho hẳn 2 phút.
+    rest: { timeout: 120_000 },
+  });
   const { guildId, token } = config.discord;
 
   const handlers = memberEventHandlers(getCtx);

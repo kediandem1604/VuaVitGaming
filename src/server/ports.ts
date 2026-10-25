@@ -56,7 +56,11 @@ export interface DiscordNotifier {
   announce(text: string): Promise<void>;
   /** Số byte tối đa một file tải lên server Discord theo cấp boost (10 MiB; cấp 2–3: 50 MiB). */
   highlightUploadLimit(): Promise<number>;
-  /** Đăng highlight vào kênh `#highlight`; trả về vị trí tin để dựng link và xoá về sau. */
+  /**
+   * Đăng highlight vào kênh `#highlight`; trả về vị trí tin để dựng link và xoá về sau. Lỗi
+   * không tự hết khi thử lại → `HighlightChannelError` (kênh) hay `HighlightRejectedTooLargeError`
+   * (file); lỗi khác (mạng, Discord sập) ném nguyên vẹn.
+   */
   postHighlight(post: HighlightPost): Promise<{ channelId: string; messageId: string }>;
   /** Xoá một tin; tin (hoặc kênh) đã mất thì coi như xong, lỗi khác ném ra. */
   deleteMessage(channelId: string, messageId: string): Promise<void>;
@@ -70,6 +74,26 @@ export class MessageGoneError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'MessageGoneError';
+  }
+}
+
+/**
+ * Bot không đăng được vào kênh highlight vì lỗi chỉ admin sửa được: thiếu quyền (Discord 50013
+ * Missing Permissions, 50001 Missing Access), kênh đã bị xoá (10003 Unknown Channel), kênh không
+ * gửi tin được hay chưa cấu hình. Lỗi Discord gốc (nếu có) giữ ở `cause`.
+ */
+export class HighlightChannelError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'HighlightChannelError';
+  }
+}
+
+/** Discord từ chối file highlight vì quá lớn (40005 Request entity too large); lỗi gốc ở `cause`. */
+export class HighlightRejectedTooLargeError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'HighlightRejectedTooLargeError';
   }
 }
 

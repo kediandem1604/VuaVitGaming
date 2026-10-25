@@ -4,7 +4,7 @@ import { expect, test } from 'vitest';
 import { DiscordJsNotifier } from '../../../src/server/bot/discord-notifier.js';
 import { buildSessionMessage, buildVoteMessage } from '../../../src/server/bot/embeds.js';
 import type { Config } from '../../../src/server/config.js';
-import { MessageGoneError } from '../../../src/server/ports.js';
+import { HighlightChannelError, HighlightRejectedTooLargeError, MessageGoneError } from '../../../src/server/ports.js';
 import type { HighlightPost, SessionView, VotePrompt } from '../../../src/server/ports.js';
 import { testConfig } from '../../helpers/ctx.js';
 
@@ -277,12 +277,63 @@ test('postHighlight sends the file with the caption line (name escaped, no menti
 test('postHighlight fails when the channel is not configured, missing or not a text channel', async () => {
   const off = new DiscordJsNotifier(fakeClient({}).client, withHighlight(null));
   await expect(off.postHighlight(post)).rejects.toThrow(/highlight/);
+  await expect(off.postHighlight(post)).rejects.toBeInstanceOf(HighlightChannelError);
 
   const missing = new DiscordJsNotifier(fakeClient({}).client, withHighlight('ch-highlight'));
   await expect(missing.postHighlight(post)).rejects.toThrow('ch-highlight');
+  await expect(missing.postHighlight(post)).rejects.toBeInstanceOf(HighlightChannelError);
 
   const voice = new DiscordJsNotifier(fakeClient({ 'ch-highlight': { isSendable: () => false } }).client, withHighlight('ch-highlight'));
   await expect(voice.postHighlight(post)).rejects.toThrow('ch-highlight');
+  await expect(voice.postHighlight(post)).rejects.toBeInstanceOf(HighlightChannelError);
+});
+
+test('postHighlight maps permanent Discord refusals to typed errors and passes the rest through', async () => {
+  let failure: unknown;
+  const channel = {
+    isSendable: () => true,
+    send: async () => {
+      throw failure;
+    },
+  };
+  const f = fakeClient({ 'ch-highlight': channel });
+  const n = new DiscordJsNotifier(f.client, withHighlight('ch-highlight'));
+  const outcome = () => n.postHighlight(post).then(
+    () => null,
+    (err: unknown) => err,
+  );
+
+  // Thiếu quyền (Attach Files / Send Messages), mất quyền xem, kênh đã bị xoá → lỗi kênh, giữ lỗi gốc ở `cause`.
+  for (const [code, status, message] of [
+    [RESTJSONErrorCodes.MissingPermissions, 403, 'Missing Permissions'],
+    [RESTJSONErrorCodes.MissingAccess, 403, 'Missing Access'],
+    [RESTJSONErrorCodes.UnknownChannel, 404, 'Unknown Channel'],
+  ] as const) {
+    failure = discordError(code, status, message);
+    const err = await outcome();
+    expect(err, message).toBeInstanceOf(HighlightChannelError);
+    expect((err as Error).cause, message).toBe(failure);
+  }
+  // Kênh lấy không được (bị xoá) ngay ở bước tìm kênh → cũng là lỗi kênh.
+  const gone = discordError(RESTJSONErrorCodes.UnknownChannel, 404, 'Unknown Channel');
+  const g = fakeClient({});
+  g.client.channels.fetch = (async () => {
+    throw gone;
+  }) as never;
+  await expect(new DiscordJsNotifier(g.client, withHighlight('ch-highlight')).postHighlight(post)).rejects.toBeInstanceOf(HighlightChannelError);
+
+  // File quá lớn: mã 40005, hay 413 mà thân lỗi không có mã.
+  failure = discordError(RESTJSONErrorCodes.RequestEntityTooLarge, 413, 'Request entity too large');
+  expect(await outcome()).toBeInstanceOf(HighlightRejectedTooLargeError);
+  // Thân lỗi không phải JSON (trang 413 của proxy): discord.js giữ thân thô, không có mã.
+  failure = new DiscordAPIError(new ArrayBuffer(0) as never, undefined as never, 413, 'POST', url, {});
+  expect(await outcome()).toBeInstanceOf(HighlightRejectedTooLargeError);
+
+  // Lỗi khác (mạng, giới hạn tốc độ, Discord 5xx…) ném nguyên vẹn → service báo "thử lại sau".
+  failure = new Error('mạng rớt');
+  expect(await outcome()).toBe(failure);
+  failure = discordError(RESTJSONErrorCodes.UnknownMessage, 404, 'Unknown Message');
+  expect(await outcome()).toBe(failure);
 });
 
 test('highlightUploadLimit follows the guild boost tier: 10 MiB up to tier 1, 50 MiB from tier 2', async () => {

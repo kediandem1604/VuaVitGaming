@@ -2,6 +2,7 @@ import type { Member, Role } from '@prisma/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../src/server/ctx.js';
 import { attachHighlight, detectHighlightKind, highlightConfig } from '../../src/server/modules/stats/highlight.js';
+import { HighlightChannelError, HighlightRejectedTooLargeError } from '../../src/server/ports.js';
 import {
   listMyReports,
   listPendingReports,
@@ -176,6 +177,33 @@ test('Discord down → DISCORD_UNAVAILABLE and nothing is saved', async () => {
   expect(notifier.highlights).toEqual([]);
   expect(await reportRow(r.id)).toMatchObject({ highlightChannelId: null, highlightMessageId: null, status: 'pending' });
   expect((await listMyReports(ctx, member.id))[0]).toMatchObject({ id: r.id, highlightUrl: null });
+});
+
+test('Discord refusing for good does not say "thử lại sau": channel problem or file too large; nothing is saved', async () => {
+  silenceConsoleError();
+  const r = await submit();
+
+  // Bot thiếu quyền / kênh đã bị xoá: thử lại cũng vậy — báo admin.
+  notifier.failPostWith = new HighlightChannelError('FakeNotifier: Missing Permissions');
+  await expect(attach(r.id, mp4())).rejects.toMatchObject({
+    code: 'HIGHLIGHT_CHANNEL_UNAVAILABLE',
+    status: 503,
+    message: 'Bot không đăng được vào kênh #highlight (thiếu quyền hoặc kênh đã bị xoá) — báo admin',
+  });
+
+  // Discord chê file quá lớn: câu theo giới hạn hiện hành, như khi app tự chặn.
+  notifier.failPostWith = new HighlightRejectedTooLargeError('FakeNotifier: Request entity too large');
+  await expect(attach(r.id, mp4())).rejects.toMatchObject({ code: 'HIGHLIGHT_TOO_LARGE', status: 400, message: 'Highlight tối đa 10 MB' });
+  notifier.uploadLimit = 50 * MIB;
+  await expect(attach(r.id, mp4())).rejects.toMatchObject({ code: 'HIGHLIGHT_TOO_LARGE', message: 'Highlight tối đa 50 MB' });
+
+  // Lỗi khác (mạng, Discord sập) vẫn là "thử lại sau".
+  notifier.failPostWith = new Error('FakeNotifier: mạng rớt');
+  await expect(attach(r.id, mp4())).rejects.toMatchObject({ code: 'DISCORD_UNAVAILABLE', status: 503 });
+
+  expect(notifier.highlights).toEqual([]);
+  expect(notifier.deletedMessages).toEqual([]);
+  expect(await reportRow(r.id)).toMatchObject({ highlightChannelId: null, highlightMessageId: null, status: 'pending' });
 });
 
 test('replacing a highlight deletes the old Discord message', async () => {

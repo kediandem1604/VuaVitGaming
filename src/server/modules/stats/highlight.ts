@@ -19,6 +19,7 @@ import { highlightLimitMessage } from '../../../shared/highlight.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dbToDateOnly } from '../../lib/time.js';
+import { HighlightChannelError, HighlightRejectedTooLargeError } from '../../ports.js';
 import type { HighlightPost } from '../../ports.js';
 import { getReportDto, isId } from './reports.js';
 
@@ -61,7 +62,10 @@ export async function highlightConfig(ctx: Ctx): Promise<{ enabled: boolean; max
  * Thêm hoặc đổi highlight cho lần khai `reportId` của `memberId`; trả về DTO mới (có
  * `highlightUrl`). Lỗi theo thứ tự ở đầu file: `HIGHLIGHT_DISABLED`, `NOT_FOUND` (không có
  * hoặc của người khác — không lộ lần khai người khác), `NOT_PENDING`, `INVALID_HIGHLIGHT`,
- * `HIGHLIGHT_TOO_LARGE` ("Highlight tối đa N MB" theo giới hạn hiện hành), `DISCORD_UNAVAILABLE`.
+ * `HIGHLIGHT_TOO_LARGE` ("Highlight tối đa N MB" theo giới hạn hiện hành — app tự chặn, hoặc
+ * Discord chê file quá lớn), rồi lỗi khi đăng: bot thiếu quyền / kênh đã mất →
+ * `HIGHLIGHT_CHANNEL_UNAVAILABLE` (báo admin), còn lại `DISCORD_UNAVAILABLE` (thử lại sau).
+ * Đăng lỗi thì không ghi gì vào DB.
  */
 export async function attachHighlight(ctx: Ctx, memberId: number, reportId: number, upload: { data: Buffer }): Promise<ReportDto> {
   if (ctx.config.discord.highlightChannelId === null) throw appError('HIGHLIGHT_DISABLED');
@@ -106,6 +110,9 @@ export async function attachHighlight(ctx: Ctx, memberId: number, reportId: numb
     posted = await ctx.notifier.postHighlight(post);
   } catch (err) {
     console.error(`[highlight] Không đăng được highlight của lần khai ${report.id} lên Discord: ${messageOf(err)}`);
+    // Lỗi không tự hết khi thử lại thì không bảo người dùng "thử lại sau".
+    if (err instanceof HighlightChannelError) throw appError('HIGHLIGHT_CHANNEL_UNAVAILABLE');
+    if (err instanceof HighlightRejectedTooLargeError) throw appError('HIGHLIGHT_TOO_LARGE', highlightLimitMessage(maxBytes));
     throw appError('DISCORD_UNAVAILABLE');
   }
 

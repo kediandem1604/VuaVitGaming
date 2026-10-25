@@ -26,7 +26,8 @@ export class FakeMailer implements Mailer {
  * `publishVote` với danh sách ứng viên rỗng ném lỗi (Discord từ chối menu 0 lựa chọn).
  * `updateSession`/`closeVote` với id trong `goneMessageIds` ném `MessageGoneError` (tin đã bị xoá).
  * `postHighlight` đăng vào kênh `highlightChannelId`, gọi `onPostHighlight` (nếu có) ngay trước khi
- * trả kết quả — để test chen một thao tác vào giữa lúc "đang tải lên"; `deleteMessage` chỉ ghi lại.
+ * trả kết quả — để test chen một thao tác vào giữa lúc "đang tải lên"; có `failPostWith` thì ném lỗi
+ * đó mà không đăng gì (Discord từ chối); `deleteMessage` chỉ ghi lại.
  */
 export class FakeNotifier implements DiscordNotifier {
   dms: { discordId: string; text: string }[] = [];
@@ -41,6 +42,7 @@ export class FakeNotifier implements DiscordNotifier {
   uploadLimit = 10 * 1024 * 1024;
   highlightChannelId = 'ch-highlight';
   onPostHighlight?: () => Promise<void>;
+  failPostWith: Error | null = null;
   down = false;
   failDmFor = new Set<string>();
   goneMessageIds = new Set<string>();
@@ -91,6 +93,7 @@ export class FakeNotifier implements DiscordNotifier {
 
   async postHighlight(post: HighlightPost): Promise<{ channelId: string; messageId: string }> {
     this.assertUp();
+    if (this.failPostWith) throw this.failPostWith;
     const location = { channelId: this.highlightChannelId, messageId: this.nextMessageId() };
     this.highlights.push({ ...post, ...location });
     await this.onPostHighlight?.();
