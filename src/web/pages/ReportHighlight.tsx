@@ -9,12 +9,9 @@
 import { useMutation } from '@tanstack/react-query';
 import { useRef, useState, type ChangeEvent, type Ref } from 'react';
 import type { ReportDto } from '../../shared/api-types';
+import { INVALID_HIGHLIGHT_MESSAGE, highlightLimitLabel, highlightLimitMessage } from '../../shared/highlight';
 import { HIGHLIGHT_ACCEPT, apiUpload, errorMessage, highlightContentType } from '../api';
 import { cx } from '../lib/cx';
-
-const MIB = 1024 * 1024;
-/** Cùng câu với lỗi `INVALID_HIGHLIGHT` của server (spec highlight §7.3). */
-const INVALID_HIGHLIGHT = 'Highlight phải là video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF';
 
 const LABEL_CLASS = 'text-sm font-bold text-night-200';
 const HINT_CLASS = 'text-sm text-night-300';
@@ -35,19 +32,15 @@ export interface HighlightUpload {
 /** Kết quả kiểm tra một file: gửi được (`upload`) hoặc câu báo vì sao không (`problem`). */
 export type HighlightCheck = { upload: HighlightUpload; problem: null } | { upload: null; problem: string };
 
-/** Giới hạn dung lượng theo MiB như server báo: 10 MiB → "10 MB". */
-function mibLabel(maxBytes: number): string {
-  return `${Math.floor(maxBytes / MIB)} MB`;
-}
-
 /**
- * Kiểm tra trước khi tải lên: loại ngoài danh sách hay file rỗng → câu §7.3; lớn hơn `maxBytes`
- * (giới hạn hiện hành của server Discord) → "Highlight tối đa N MB". Đúng bằng giới hạn thì được.
+ * Kiểm tra trước khi tải lên, cùng câu với lỗi của server (`src/shared/highlight.ts`): loại ngoài
+ * danh sách hay file rỗng → câu §7.3; lớn hơn `maxBytes` (giới hạn hiện hành của server Discord)
+ * → "Highlight tối đa N MB". Đúng bằng giới hạn thì được.
  */
 export function checkHighlight(file: File, maxBytes: number): HighlightCheck {
   const contentType = highlightContentType(file);
-  if (contentType === null || file.size === 0) return { upload: null, problem: INVALID_HIGHLIGHT };
-  if (file.size > maxBytes) return { upload: null, problem: `Highlight tối đa ${mibLabel(maxBytes)}` };
+  if (contentType === null || file.size === 0) return { upload: null, problem: INVALID_HIGHLIGHT_MESSAGE };
+  if (file.size > maxBytes) return { upload: null, problem: highlightLimitMessage(maxBytes) };
   return { upload: { file, contentType }, problem: null };
 }
 
@@ -96,7 +89,7 @@ export function HighlightField({ id, maxBytes, hasFile, onChange, onClear, ref }
           Bỏ file
         </button>
       )}
-      <p className={HINT_CLASS}>Video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF — tối đa {mibLabel(maxBytes)}</p>
+      <p className={HINT_CLASS}>Video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF — tối đa {highlightLimitLabel(maxBytes)}</p>
     </div>
   );
 }

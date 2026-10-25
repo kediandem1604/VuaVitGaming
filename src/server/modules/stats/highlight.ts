@@ -15,6 +15,7 @@
  */
 
 import type { ReportDto } from '../../../shared/api-types.js';
+import { highlightLimitMessage } from '../../../shared/highlight.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dbToDateOnly } from '../../lib/time.js';
@@ -22,8 +23,6 @@ import type { HighlightPost } from '../../ports.js';
 import { getReportDto, isId } from './reports.js';
 
 export type HighlightExt = 'mp4' | 'mov' | 'webm' | 'png' | 'jpg' | 'gif';
-
-const MIB = 1024 * 1024;
 
 // Chữ ký đầu file. MP4 và MOV cùng là ISO BMFF: `ftyp` ở byte 4, brand ở byte 8 — QuickTime
 // dùng brand `qt  `, mọi brand khác (isom, mp42, M4V …) coi là MP4.
@@ -91,7 +90,7 @@ export async function attachHighlight(ctx: Ctx, memberId: number, reportId: numb
 
   const maxBytes = await uploadLimit(ctx);
   if (upload.data.length === 0 || upload.data.length > maxBytes) {
-    throw appError('HIGHLIGHT_TOO_LARGE', `Highlight tối đa ${Math.floor(maxBytes / MIB)} MB`);
+    throw appError('HIGHLIGHT_TOO_LARGE', highlightLimitMessage(maxBytes));
   }
 
   const post: HighlightPost = {

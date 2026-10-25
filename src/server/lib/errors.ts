@@ -3,6 +3,8 @@
  * Thông báo là thứ người dùng thấy (web, Discord) — không bao giờ chứa chi tiết nội bộ.
  */
 
+import { INVALID_HIGHLIGHT_MESSAGE } from '../../shared/highlight.js';
+
 export type ErrorCode =
   | 'NOT_FOUND'
   | 'UNAUTHENTICATED'
@@ -51,8 +53,9 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   REASON_REQUIRED: { status: 400, message: 'Cần ghi lý do từ chối' },
   INVALID_IMAGE: { status: 400, message: 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB' },
   HIGHLIGHT_DISABLED: { status: 409, message: 'Chưa bật tính năng highlight' },
-  INVALID_HIGHLIGHT: { status: 400, message: 'Highlight phải là video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF' },
-  // Nơi ném thường ghi rõ giới hạn hiện hành ("Highlight tối đa N MB"); đây là câu dự phòng.
+  // Cùng câu với kiểm tra trước khi tải lên ở web (`src/shared/highlight.ts`).
+  INVALID_HIGHLIGHT: { status: 400, message: INVALID_HIGHLIGHT_MESSAGE },
+  // Nơi ném thường ghi rõ giới hạn hiện hành (`highlightLimitMessage`); đây là câu dự phòng.
   HIGHLIGHT_TOO_LARGE: { status: 400, message: 'Highlight quá lớn' },
   DISCORD_UNAVAILABLE: { status: 503, message: 'Không đăng được highlight lên Discord, thử lại sau' },
 };
