@@ -1,10 +1,11 @@
-import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
+import { DiscordAPIError, GuildPremiumTier, RESTJSONErrorCodes } from 'discord.js';
 import type { APIEmbed, Client } from 'discord.js';
 import { expect, test } from 'vitest';
 import { DiscordJsNotifier } from '../../../src/server/bot/discord-notifier.js';
 import { buildSessionMessage, buildVoteMessage } from '../../../src/server/bot/embeds.js';
+import type { Config } from '../../../src/server/config.js';
 import { MessageGoneError } from '../../../src/server/ports.js';
-import type { SessionView, VotePrompt } from '../../../src/server/ports.js';
+import type { HighlightPost, SessionView, VotePrompt } from '../../../src/server/ports.js';
 import { testConfig } from '../../helpers/ctx.js';
 
 const view: SessionView = {
@@ -40,6 +41,7 @@ function fakeClient(channels: Record<string, unknown>) {
   const sent: { channelId: string; payload: unknown }[] = [];
   const edited: { channelId: string; messageId: string; payload: unknown }[] = [];
   const fetched: { channelId: string; messageId: string }[] = [];
+  const deleted: { channelId: string; messageId: string }[] = [];
   const sendable = (channelId: string, embeds: APIEmbed[] = []) => ({
     isSendable: () => true,
     send: async (payload: unknown) => {
@@ -55,10 +57,16 @@ function fakeClient(channels: Record<string, unknown>) {
         edited.push({ channelId, messageId, payload });
         return { id: messageId };
       },
+      delete: async (messageId: string) => {
+        deleted.push({ channelId, messageId });
+      },
     },
   });
-  const client = { channels: { fetch: async (id: string) => channels[id] ?? null } } as unknown as Client;
-  return { client, sent, edited, fetched, sendable };
+  const client = {
+    channels: { fetch: async (id: string) => channels[id] ?? null },
+    guilds: { fetch: async (id: string) => ({ id, premiumTier: GuildPremiumTier.None }) },
+  } as unknown as Client;
+  return { client, sent, edited, fetched, deleted, sendable };
 }
 
 const url = 'https://discord.com/api/v10/channels/ch/messages/m-1';
@@ -226,4 +234,116 @@ test('a missing or non-text vote channel is an error (service retries later)', a
 
   const voice = new DiscordJsNotifier(fakeClient({ 'ch-vote': { isSendable: () => false } }).client, testConfig());
   await expect(voice.publishVote(prompt)).rejects.toThrow('ch-vote');
+});
+
+// ---------------------------------------------------------------------------
+// Highlight
+// ---------------------------------------------------------------------------
+
+const post: HighlightPost = {
+  memberName: 'An **Vịt** _bay_',
+  roleLabel: '🦆 Vịt',
+  valueText: '3 Số mạng đã giết',
+  playedOnText: '10/10/2026',
+  fileName: 'highlight-7.mp4',
+  data: Buffer.from('\0\0\0\x18ftypisom', 'latin1'),
+};
+
+/** Cấu hình test có kênh highlight `ch-highlight` (hoặc tắt tính năng với `null`). */
+function withHighlight(channelId: string | null): Config {
+  const config = testConfig();
+  config.discord.highlightChannelId = channelId;
+  return config;
+}
+
+test('postHighlight sends the file with the caption line (name escaped, no mentions) and returns its location', async () => {
+  const f = fakeClient({});
+  const n = new DiscordJsNotifier(f.client, withHighlight('ch-highlight'));
+  f.client.channels.fetch = (async (id: string) => (id === 'ch-highlight' ? f.sendable(id) : null)) as never;
+
+  expect(await n.postHighlight(post)).toEqual({ channelId: 'ch-highlight', messageId: 'm-1' });
+  expect(f.sent).toEqual([
+    {
+      channelId: 'ch-highlight',
+      payload: {
+        content: '🎬 Highlight — **An \\*\\*Vịt\\*\\* \\_bay\\_** · 🦆 Vịt · 3 Số mạng đã giết · 10/10/2026',
+        files: [{ attachment: post.data, name: 'highlight-7.mp4' }],
+        allowedMentions: { parse: [] },
+      },
+    },
+  ]);
+});
+
+test('postHighlight fails when the channel is not configured, missing or not a text channel', async () => {
+  const off = new DiscordJsNotifier(fakeClient({}).client, withHighlight(null));
+  await expect(off.postHighlight(post)).rejects.toThrow(/highlight/);
+
+  const missing = new DiscordJsNotifier(fakeClient({}).client, withHighlight('ch-highlight'));
+  await expect(missing.postHighlight(post)).rejects.toThrow('ch-highlight');
+
+  const voice = new DiscordJsNotifier(fakeClient({ 'ch-highlight': { isSendable: () => false } }).client, withHighlight('ch-highlight'));
+  await expect(voice.postHighlight(post)).rejects.toThrow('ch-highlight');
+});
+
+test('highlightUploadLimit follows the guild boost tier: 10 MiB up to tier 1, 50 MiB from tier 2', async () => {
+  const f = fakeClient({});
+  const n = new DiscordJsNotifier(f.client, testConfig());
+  const guildIds: string[] = [];
+  let tier = GuildPremiumTier.None;
+  f.client.guilds.fetch = (async (id: string) => {
+    guildIds.push(id);
+    return { id, premiumTier: tier };
+  }) as never;
+
+  expect(await n.highlightUploadLimit()).toBe(10_485_760);
+  tier = GuildPremiumTier.Tier1;
+  expect(await n.highlightUploadLimit()).toBe(10_485_760);
+  tier = GuildPremiumTier.Tier2;
+  expect(await n.highlightUploadLimit()).toBe(52_428_800);
+  tier = GuildPremiumTier.Tier3;
+  expect(await n.highlightUploadLimit()).toBe(52_428_800);
+  expect(guildIds).toEqual(['test-guild', 'test-guild', 'test-guild', 'test-guild']);
+
+  const failing = new Error('mạng rớt');
+  f.client.guilds.fetch = (async () => {
+    throw failing;
+  }) as never;
+  await expect(n.highlightUploadLimit()).rejects.toBe(failing);
+});
+
+test('deleteMessage deletes in the given channel, treats a vanished message as done and passes other errors through', async () => {
+  const f = fakeClient({});
+  const n = new DiscordJsNotifier(f.client, withHighlight('ch-highlight'));
+  f.client.channels.fetch = (async (id: string) => (id === 'ch-old' ? f.sendable(id) : null)) as never;
+
+  // Xoá theo kênh được truyền vào (kênh highlight cũ), không phải kênh đang cấu hình.
+  await n.deleteMessage('ch-old', 'm-3');
+  expect(f.deleted).toEqual([{ channelId: 'ch-old', messageId: 'm-3' }]);
+
+  let failure: unknown;
+  const channel = {
+    isSendable: () => true,
+    messages: {
+      delete: async () => {
+        throw failure;
+      },
+    },
+  };
+  f.client.channels.fetch = (async (id: string) => (id === 'ch-old' ? channel : null)) as never;
+
+  // Tin đã bị xoá tay: coi như xong.
+  failure = discordError(RESTJSONErrorCodes.UnknownMessage, 404, 'Unknown Message');
+  await expect(n.deleteMessage('ch-old', 'm-3')).resolves.toBeUndefined();
+
+  // Lỗi khác (thiếu quyền, mạng): ném nguyên vẹn — nơi gọi quyết định ghi log.
+  failure = discordError(RESTJSONErrorCodes.MissingPermissions, 403, 'Missing Permissions');
+  await expect(n.deleteMessage('ch-old', 'm-3')).rejects.toBe(failure);
+  failure = new Error('mạng rớt');
+  await expect(n.deleteMessage('ch-old', 'm-3')).rejects.toBe(failure);
+
+  // Kênh không còn: tin cũng không còn → coi như xong.
+  f.client.channels.fetch = (async () => {
+    throw discordError(RESTJSONErrorCodes.UnknownChannel, 404, 'Unknown Channel');
+  }) as never;
+  await expect(n.deleteMessage('ch-gone', 'm-3')).resolves.toBeUndefined();
 });

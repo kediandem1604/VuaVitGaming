@@ -23,6 +23,7 @@ export function testConfig(): Config {
       scheduleChannelId: 'ch-schedule',
       voteChannelId: 'ch-vote',
       announceChannelId: 'ch-announce',
+      highlightChannelId: 'ch-highlight',
       adminRoleIds: ['r-admin'],
       modRoleIds: ['r-mod'],
     },

@@ -36,4 +36,15 @@ test('table spot checks', () => {
     status: 400,
     message: 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB',
   });
+  expect(appError('HIGHLIGHT_DISABLED')).toMatchObject({ status: 409, message: 'Chưa bật tính năng highlight' });
+  expect(appError('INVALID_HIGHLIGHT')).toMatchObject({
+    status: 400,
+    message: 'Highlight phải là video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF',
+  });
+  expect(appError('HIGHLIGHT_TOO_LARGE')).toMatchObject({ status: 400, message: 'Highlight quá lớn' });
+  expect(appError('HIGHLIGHT_TOO_LARGE', 'Highlight tối đa 10 MB').message).toBe('Highlight tối đa 10 MB');
+  expect(appError('DISCORD_UNAVAILABLE')).toMatchObject({
+    status: 503,
+    message: 'Không đăng được highlight lên Discord, thử lại sau',
+  });
 });

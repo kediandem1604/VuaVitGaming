@@ -359,13 +359,16 @@ const REPORT_SELECT = {
   status: true,
   rejectReason: true,
   createdAt: true,
+  highlightChannelId: true,
+  highlightMessageId: true,
   member: { select: { id: true, displayName: true } },
   role: { select: { id: true, nameVi: true, icon: true, metricLabel: true } },
 } satisfies Prisma.StatReportSelect;
 
 type ReportRow = Prisma.StatReportGetPayload<{ select: typeof REPORT_SELECT }>;
 
-function toReportDto(r: ReportRow): ReportDto {
+/** DTO của một dòng; `guildId` để dựng link tới tin Discord chứa highlight (hai cột phải cùng có). */
+function toReportDto(r: ReportRow, guildId: string): ReportDto {
   return {
     id: r.id,
     member: { id: r.member.id, displayName: r.member.displayName },
@@ -377,6 +380,10 @@ function toReportDto(r: ReportRow): ReportDto {
     status: r.status,
     rejectReason: r.rejectReason,
     createdAt: r.createdAt.toISOString(),
+    highlightUrl:
+      r.highlightChannelId !== null && r.highlightMessageId !== null
+        ? `https://discord.com/channels/${guildId}/${r.highlightChannelId}/${r.highlightMessageId}`
+        : null,
   };
 }
 
@@ -384,7 +391,7 @@ function toReportDto(r: ReportRow): ReportDto {
 export async function getReportDto(ctx: Ctx, reportId: number): Promise<ReportDto> {
   const row = isId(reportId) ? await ctx.db.statReport.findUnique({ where: { id: reportId }, select: REPORT_SELECT }) : null;
   if (!row) throw appError('NOT_FOUND');
-  return toReportDto(row);
+  return toReportDto(row, ctx.config.discord.guildId);
 }
 
 /** Lần khai của một người, mới nhất trước; `limit` mặc định 50, tối đa 100 (lớn hơn bị cắt). */
@@ -396,7 +403,7 @@ export async function listMyReports(ctx: Ctx, memberId: number, limit = 50): Pro
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: Math.min(limit, LIST_MAX),
   });
-  return rows.map(toReportDto);
+  return rows.map((r) => toReportDto(r, ctx.config.discord.guildId));
 }
 
 /** Hàng chờ duyệt của mọi người, cũ nhất trước. */
@@ -406,13 +413,13 @@ export async function listPendingReports(ctx: Ctx): Promise<ReportDto[]> {
     select: REPORT_SELECT,
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
-  return rows.map(toReportDto);
+  return rows.map((r) => toReportDto(r, ctx.config.discord.guildId));
 }
 
 // ---------------------------------------------------------------------------
 
 /** Id hợp lệ để tra DB; id lạ (lẻ, âm, quá int32) coi như không có. */
-function isId(n: number): boolean {
+export function isId(n: number): boolean {
   return Number.isInteger(n) && n >= 1 && n <= INT32_MAX;
 }
 

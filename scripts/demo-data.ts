@@ -155,6 +155,13 @@ class SilentNotifier implements DiscordNotifier {
   }
   async closeVote(): Promise<void> {}
   async announce(): Promise<void> {}
+  async highlightUploadLimit(): Promise<number> {
+    return 10 * 1024 * 1024;
+  }
+  async postHighlight(): Promise<{ channelId: string; messageId: string }> {
+    return { channelId: 'demo-highlight', messageId: this.nextId() };
+  }
+  async deleteMessage(): Promise<void> {}
 
   private nextId(): string {
     this.counter += 1;

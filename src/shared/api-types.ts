@@ -136,6 +136,7 @@ export type ReportStatus = 'pending' | 'approved' | 'rejected';
 /**
  * Một lần khai điểm (lịch sử của tôi, hàng chờ duyệt). `playedOn` dạng `YYYY-MM-DD`
  * (ngày VN), `createdAt` ISO 8601 (UTC). `rejectReason` chỉ có khi `status = 'rejected'`.
+ * `highlightUrl` là link tới tin Discord chứa highlight (mở tab mới), `null` khi chưa kèm.
  */
 export interface ReportDto {
   id: number;
@@ -148,6 +149,7 @@ export interface ReportDto {
   status: ReportStatus;
   rejectReason: string | null;
   createdAt: string;
+  highlightUrl: string | null;
 }
 
 /**

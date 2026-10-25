@@ -110,6 +110,13 @@ test('PUBLIC_URL is normalised without trailing slashes', () => {
   });
 });
 
+test('DISCORD_HIGHLIGHT_CHANNEL_ID is optional: unset or blank → null, otherwise the id', () => {
+  expect(loadConfig(base).discord.highlightChannelId).toBeNull();
+  expect(loadConfig({ ...base, DISCORD_HIGHLIGHT_CHANNEL_ID: '' }).discord.highlightChannelId).toBeNull();
+  expect(loadConfig({ ...base, DISCORD_HIGHLIGHT_CHANNEL_ID: '   ' }).discord.highlightChannelId).toBeNull();
+  expect(loadConfig({ ...base, DISCORD_HIGHLIGHT_CHANNEL_ID: '4' }).discord.highlightChannelId).toBe('4');
+});
+
 test('on Render, a missing PUBLIC_URL falls back to RENDER_EXTERNAL_URL', () => {
   const onRender = { ...base, RENDER_EXTERNAL_URL: 'https://ggd-hub.onrender.com' };
   expect(loadConfig({ ...onRender, PUBLIC_URL: undefined }).publicUrl).toBe('https://ggd-hub.onrender.com');

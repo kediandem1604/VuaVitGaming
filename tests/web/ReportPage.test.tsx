@@ -45,6 +45,7 @@ const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id' | 'status'>): Re
   note: null,
   rejectReason: null,
   createdAt: '2026-10-22T13:00:00.000Z',
+  highlightUrl: null,
   ...over,
 });
 

@@ -82,6 +82,8 @@ test('submit stores a pending report with the clock time and ensures the season'
     reviewedAt: null,
     rejectReason: null,
     createdAt: new Date(NOW), // từ đồng hồ của ctx, không phải giờ thật
+    highlightChannelId: null,
+    highlightMessageId: null,
   });
   expect(await reportRow(r.id)).toEqual(r);
 
@@ -563,6 +565,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       status: 'pending',
       rejectReason: null,
       createdAt: '2026-10-10T05:00:01.000Z',
+      highlightUrl: null,
     },
     {
       id: r2.id,
@@ -575,6 +578,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       status: 'pending',
       rejectReason: null,
       createdAt: '2026-10-10T05:00:01.000Z',
+      highlightUrl: null,
     },
     {
       id: r1.id,
@@ -587,6 +591,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       status: 'rejected',
       rejectReason: 'Thiếu ảnh',
       createdAt: '2026-10-10T05:00:00.000Z',
+      highlightUrl: null,
     },
   ];
   expect(list).toEqual(expected);
@@ -643,6 +648,7 @@ test('listPendingReports: oldest first across members, pending only', async () =
       status: 'pending',
       rejectReason: null,
       createdAt: '2026-10-10T05:00:01.000Z',
+      highlightUrl: null,
     },
   ]);
 

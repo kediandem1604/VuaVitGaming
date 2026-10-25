@@ -1,18 +1,23 @@
 /**
  * `DiscordNotifier` thật trên discord.js: DM, kênh thông báo, tin buổi chơi (embed +
- * nút, dựng bởi `buildSessionMessage`) và tin vote (embed + menu, dựng bởi
- * `buildVoteMessage`). Mọi lỗi Discord được ném ra — service coi đó là "đăng bù sau"
- * (cờ `discordDirty`, `resultPending`); riêng "Unknown Message" khi sửa tin thành
- * `MessageGoneError` để service đăng lại (tin buổi) hay bỏ qua (tin vote) thay vì thử
- * sửa mãi. Giới hạn 2000 ký tự của tin văn bản là việc của nơi gọi.
+ * nút, dựng bởi `buildSessionMessage`), tin vote (embed + menu, dựng bởi
+ * `buildVoteMessage`) và highlight (file kèm một dòng chú thích trong kênh `#highlight`).
+ * Mọi lỗi Discord được ném ra — service coi đó là "đăng bù sau" (cờ `discordDirty`,
+ * `resultPending`) hay "thử lại sau" (highlight); riêng "Unknown Message" khi sửa tin
+ * thành `MessageGoneError` để service đăng lại (tin buổi) hay bỏ qua (tin vote) thay vì
+ * thử sửa mãi. Giới hạn 2000 ký tự của tin văn bản là việc của nơi gọi.
  */
 
-import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
+import { DiscordAPIError, GuildPremiumTier, RESTJSONErrorCodes, escapeMarkdown } from 'discord.js';
 import type { APIEmbed, Client, SendableChannels } from 'discord.js';
 import type { Config } from '../config.js';
 import { MessageGoneError } from '../ports.js';
-import type { DiscordNotifier, SessionView, VotePrompt } from '../ports.js';
+import type { DiscordNotifier, HighlightPost, SessionView, VotePrompt } from '../ports.js';
 import { buildSessionMessage, buildVoteMessage } from './embeds.js';
+
+/** Giới hạn tải lên của Discord theo cấp boost (spec §5): chưa boost / cấp 1 → 10 MiB; cấp 2–3 → 50 MiB (trần của app). */
+const UPLOAD_LIMIT_BASE = 10 * 1024 * 1024;
+const UPLOAD_LIMIT_BOOSTED = 50 * 1024 * 1024;
 
 export class DiscordJsNotifier implements DiscordNotifier {
   constructor(
@@ -79,6 +84,46 @@ export class DiscordJsNotifier implements DiscordNotifier {
     await channel.send(text);
   }
 
+  /** Giới hạn tải lên theo `premiumTier` của server (đọc từ cache khi bot đã sẵn sàng). */
+  async highlightUploadLimit(): Promise<number> {
+    const guild = await this.client.guilds.fetch(this.config.discord.guildId);
+    const boosted = guild.premiumTier === GuildPremiumTier.Tier2 || guild.premiumTier === GuildPremiumTier.Tier3;
+    return boosted ? UPLOAD_LIMIT_BOOSTED : UPLOAD_LIMIT_BASE;
+  }
+
+  /**
+   * Đăng file kèm dòng `🎬 Highlight — **Tên** · {icon} {role} · {giá trị} {chỉ số} · {dd/mm/yyyy}`
+   * vào kênh highlight. Tên người được escape Markdown; không ping ai dù tên có dạng @mention.
+   * Chưa cấu hình kênh (tính năng tắt — service đã chặn trước) → ném lỗi.
+   */
+  async postHighlight(post: HighlightPost): Promise<{ channelId: string; messageId: string }> {
+    const channelId = this.config.discord.highlightChannelId;
+    if (channelId === null) throw new Error('Chưa cấu hình kênh highlight (DISCORD_HIGHLIGHT_CHANNEL_ID)');
+    const channel = await this.sendableChannel(channelId, 'highlight');
+    const content = `🎬 Highlight — **${escapeMarkdown(post.memberName)}** · ${post.roleLabel} · ${post.valueText} · ${post.playedOnText}`;
+    const message = await channel.send({
+      content,
+      files: [{ attachment: post.data, name: post.fileName }],
+      allowedMentions: { parse: [] },
+    });
+    return { channelId, messageId: message.id };
+  }
+
+  /**
+   * Xoá tin `messageId` trong kênh `channelId` (kênh highlight cũ — có thể khác kênh đang
+   * cấu hình). Tin đã bị xoá tay (10008) hay kênh đã mất (10003) → coi như xong; lỗi khác
+   * (thiếu quyền, mạng) ném ra để nơi gọi ghi log.
+   */
+  async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    try {
+      const channel = await this.sendableChannel(channelId, 'highlight');
+      await channel.messages.delete(messageId);
+    } catch (err) {
+      if (isUnknownMessage(err) || isUnknownChannel(err)) return;
+      throw err;
+    }
+  }
+
   private scheduleChannel(): Promise<SendableChannels> {
     return this.sendableChannel(this.config.discord.scheduleChannelId, 'lịch chơi');
   }
@@ -104,4 +149,8 @@ function asMessageGone(err: unknown, messageId: string): unknown {
 
 function isUnknownMessage(err: unknown): boolean {
   return err instanceof DiscordAPIError && err.code === RESTJSONErrorCodes.UnknownMessage;
+}
+
+function isUnknownChannel(err: unknown): boolean {
+  return err instanceof DiscordAPIError && err.code === RESTJSONErrorCodes.UnknownChannel;
 }

@@ -23,7 +23,11 @@ export type ErrorCode =
   | 'NOT_PENDING'
   | 'SELF_REVIEW'
   | 'REASON_REQUIRED'
-  | 'INVALID_IMAGE';
+  | 'INVALID_IMAGE'
+  | 'HIGHLIGHT_DISABLED'
+  | 'INVALID_HIGHLIGHT'
+  | 'HIGHLIGHT_TOO_LARGE'
+  | 'DISCORD_UNAVAILABLE';
 
 const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   NOT_FOUND: { status: 404, message: 'Không tìm thấy' },
@@ -46,6 +50,11 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   SELF_REVIEW: { status: 403, message: 'Mod không được tự duyệt lần khai của mình' },
   REASON_REQUIRED: { status: 400, message: 'Cần ghi lý do từ chối' },
   INVALID_IMAGE: { status: 400, message: 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB' },
+  HIGHLIGHT_DISABLED: { status: 409, message: 'Chưa bật tính năng highlight' },
+  INVALID_HIGHLIGHT: { status: 400, message: 'Highlight phải là video MP4, WebM, MOV hoặc ảnh PNG, JPG, GIF' },
+  // Nơi ném thường ghi rõ giới hạn hiện hành ("Highlight tối đa N MB"); đây là câu dự phòng.
+  HIGHLIGHT_TOO_LARGE: { status: 400, message: 'Highlight quá lớn' },
+  DISCORD_UNAVAILABLE: { status: 503, message: 'Không đăng được highlight lên Discord, thử lại sau' },
 };
 
 export class AppError extends Error {

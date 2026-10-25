@@ -302,6 +302,9 @@ model StatReport {
   reviewedAt   DateTime?    @map("reviewed_at") @db.Timestamptz(3)
   rejectReason String?      @map("reject_reason")
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// Tin Discord chứa highlight (kênh + id tin); luôn ghi/xoá cùng nhau, cả hai null = không có highlight.
+  highlightChannelId String? @map("highlight_channel_id")
+  highlightMessageId String? @map("highlight_message_id")
 
   member     Member       @relation("ReportMember", fields: [memberId], references: [id])
   role       Role         @relation(fields: [roleId], references: [id])
