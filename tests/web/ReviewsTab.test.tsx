@@ -145,6 +145,21 @@ test('NOT_PENDING shows the server message and refetches the queue', async () =>
   expect(screen.getAllByRole('listitem')).toHaveLength(1);
 });
 
+test('a report with a highlight shows a "Xem highlight" link opening in a new tab', async () => {
+  const highlightUrl = 'https://discord.com/channels/1/2/3';
+  stubFetch({
+    'GET /api/admin/reports?status=pending': () => json(200, [report({ id: 1, highlightUrl }), queue[1] as ReportDto]),
+  });
+  renderTab();
+
+  const [first, second] = (await screen.findAllByRole('listitem')) as [HTMLElement, HTMLElement];
+  const link = within(first).getByRole('link', { name: 'Xem highlight' });
+  expect(link).toHaveAttribute('href', highlightUrl);
+  expect(link).toHaveAttribute('target', '_blank');
+  expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  expect(within(second).queryByRole('link')).not.toBeInTheDocument();
+});
+
 test('an empty queue says so', async () => {
   stubFetch({ 'GET /api/admin/reports?status=pending': () => json(200, []) });
   renderTab();

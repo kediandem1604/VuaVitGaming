@@ -1,10 +1,11 @@
 /**
- * Gọi API của chính app: luôn gửi cookie phiên, JSON vào/ra, thân lỗi
- * `{ error: { code, message } }` thành `ApiError`. Gặp 401 ở ngoài trang đăng
+ * Gọi API của chính app: luôn gửi cookie phiên, JSON vào/ra (trừ hai route tải file thô),
+ * thân lỗi `{ error: { code, message } }` thành `ApiError`. Gặp 401 ở ngoài trang đăng
  * nhập thì đưa người dùng về `/login` (và vẫn ném lỗi cho nơi gọi).
  */
 
 import type { ApiErrorBody } from '../shared/api-types';
+import { HIGHLIGHT_CONTENT_TYPES } from '../shared/highlight';
 
 export class ApiError extends Error {
   readonly code: string;
@@ -38,18 +39,65 @@ export function errorMessage(error: unknown): string {
 
 /**
  * `PUT` một tệp nhị phân (ảnh role) dưới dạng body thô với content-type của chính
- * tệp — route ảnh là ngoại lệ duy nhất của guard "chỉ nhận JSON". Lỗi và 401 xử lý
- * như mọi lời gọi khác.
+ * tệp; server trả 204. Lỗi và 401 xử lý như mọi lời gọi khác.
  */
 export async function apiPutBlob(path: string, body: Blob): Promise<void> {
-  const res = await fetch(path, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { accept: 'application/json', 'content-type': body.type },
-    body,
-  });
+  const res = await putRaw(path, body, body.type);
   if (res.ok) return;
   throw await failure(res);
+}
+
+/**
+ * `PUT` một tệp (highlight kèm lần khai) dưới dạng body thô và đọc JSON trả về. `Content-Type`
+ * mặc định là `file.type`; truyền `contentType` khi trình duyệt để trống (xem
+ * `highlightContentType`). Lỗi và 401 xử lý như mọi lời gọi khác.
+ */
+export async function apiUpload<T>(path: string, file: File, contentType: string = file.type): Promise<T> {
+  const res = await putRaw(path, file, contentType);
+  if (res.ok) return (await res.json()) as T;
+  throw await failure(res);
+}
+
+/** Hai route tải file (ảnh role, highlight) là ngoại lệ duy nhất của guard "chỉ nhận JSON" trên server. */
+function putRaw(path: string, body: Blob, contentType: string): Promise<Response> {
+  return fetch(path, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { accept: 'application/json', 'content-type': contentType },
+    body,
+  });
+}
+
+/**
+ * Đuôi file (chữ thường) → content-type highlight, dùng khi trình duyệt không cho biết
+ * `file.type` (Safari trên iPhone thường để trống với video .MOV).
+ */
+const HIGHLIGHT_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+};
+
+/**
+ * Giá trị `accept` cho ô chọn highlight: content-type lẫn đuôi file (cùng bảng với
+ * `highlightContentType` nên không lệch nhau) — bộ chọn trên iPhone cần đuôi để đưa ra video.
+ */
+export const HIGHLIGHT_ACCEPT = [...HIGHLIGHT_CONTENT_TYPES, ...Object.keys(HIGHLIGHT_TYPE_BY_EXTENSION).map((ext) => `.${ext}`)].join(',');
+
+/**
+ * Content-type gửi kèm highlight: `file.type` nếu thuộc danh sách; trình duyệt để trống thì
+ * đoán theo đuôi file; còn lại (loại khác, không có đuôi) → `null` = không hỗ trợ, không tải lên.
+ */
+export function highlightContentType(file: File): string | null {
+  if (HIGHLIGHT_CONTENT_TYPES.includes(file.type)) return file.type;
+  if (file.type !== '') return null;
+  const dot = file.name.lastIndexOf('.');
+  if (dot === -1) return null;
+  return HIGHLIGHT_TYPE_BY_EXTENSION[file.name.slice(dot + 1).toLowerCase()] ?? null;
 }
 
 async function request<T>(method: 'GET' | MutatingMethod, path: string, body: unknown): Promise<T> {

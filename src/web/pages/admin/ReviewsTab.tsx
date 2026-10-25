@@ -5,7 +5,8 @@
  * người khai vừa sửa — server nhắn "hãy xem lại") → hiện lời nhắn và tải lại hàng chờ.
  *
  * Giao diện Sảnh đêm (spec §6 Quản trị): hàng chờ là danh sách kiểu bảng (một panel,
- * hàng kẻ `night-700`, chữ 14px); Xác nhận từ chối là `btn-danger`.
+ * hàng kẻ `night-700`, chữ 14px); Xác nhận từ chối là `btn-danger`. Lần khai có highlight
+ * kèm link "Xem highlight" (tin Discord, tab mới) để mod xem trước khi duyệt.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +14,7 @@ import { useId, useState, type FormEvent } from 'react';
 import type { ReportDto } from '../../../shared/api-types';
 import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
+import { HighlightLink } from '../../components/HighlightLink';
 import { QueryState } from '../../components/QueryState';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatTime } from '../../lib/format';
@@ -105,6 +107,7 @@ function PendingReport({ report }: { report: ReportDto }) {
         Khai lúc {formatTime(report.createdAt)} {formatDateLabel(new Date(report.createdAt))}
       </p>
       {report.note && <p className="text-night-200">{report.note}</p>}
+      {report.highlightUrl && <HighlightLink href={report.highlightUrl} />}
 
       {rejecting ? (
         <form noValidate onSubmit={onReject} className="flex flex-col gap-2">

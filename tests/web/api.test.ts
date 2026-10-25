@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { ApiError, apiGet, apiPutBlob, apiSend } from '../../src/web/api';
+import { ApiError, apiGet, apiPutBlob, apiSend, apiUpload, highlightContentType } from '../../src/web/api';
 
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -125,5 +125,60 @@ test('apiPutBlob turns an error body into ApiError and 401 into a login redirect
     vi.fn().mockResolvedValue(jsonResponse(401, { error: { code: 'UNAUTHENTICATED', message: 'Bạn cần đăng nhập' } })),
   );
   await expect(apiPutBlob('/api/admin/roles/1/image', new Blob(['x'], { type: 'image/png' }))).rejects.toMatchObject({ status: 401 });
+  expect(assign).toHaveBeenCalledWith('/login');
+});
+
+test('highlightContentType falls back to the file extension when the browser gives no type', () => {
+  // Safari trên iPhone thường để trống `type` với video .MOV — đoán theo đuôi, không phân biệt hoa thường.
+  expect(highlightContentType(new File(['x'], 'clip.MOV', { type: '' }))).toBe('video/quicktime');
+  expect(highlightContentType(new File(['x'], 'anh.JPEG', { type: '' }))).toBe('image/jpeg');
+  expect(highlightContentType(new File(['x'], 'clip.mp4', { type: 'video/mp4' }))).toBe('video/mp4');
+  expect(highlightContentType(new File(['x'], 'anh.png', { type: 'image/png' }))).toBe('image/png');
+  // Có `type` nhưng ngoài danh sách thì không đoán theo đuôi nữa.
+  expect(highlightContentType(new File(['x'], 'clip.mp4', { type: 'application/octet-stream' }))).toBeNull();
+  expect(highlightContentType(new File(['x'], 'a.pdf', { type: 'application/pdf' }))).toBeNull();
+  expect(highlightContentType(new File(['x'], 'a.pdf', { type: '' }))).toBeNull();
+  expect(highlightContentType(new File(['x'], 'khong-duoi', { type: '' }))).toBeNull();
+});
+
+test('apiUpload sends the file as the raw body with its content type', async () => {
+  // Mỗi lời gọi một Response mới: body chỉ đọc được một lần.
+  const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(200, { id: 3, highlightUrl: 'https://discord.com/channels/1/2/3' })));
+  vi.stubGlobal('fetch', fetchMock);
+  const clip = new File([new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70])], 'clip.mp4', { type: 'video/mp4' });
+
+  await expect(apiUpload('/api/reports/3/highlight', clip)).resolves.toEqual({ id: 3, highlightUrl: 'https://discord.com/channels/1/2/3' });
+
+  const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+  expect(url).toBe('/api/reports/3/highlight');
+  expect(init.method).toBe('PUT');
+  expect(init.credentials).toBe('include');
+  expect(init.body).toBe(clip);
+  expect(new Headers(init.headers).get('content-type')).toBe('video/mp4');
+
+  // Loại truyền vào ghi đè `file.type` (trình duyệt để trống với .MOV).
+  await apiUpload('/api/reports/3/highlight', new File(['x'], 'clip.MOV', { type: '' }), 'video/quicktime');
+  const [, movInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+  expect(new Headers(movInit.headers).get('content-type')).toBe('video/quicktime');
+});
+
+test('apiUpload turns an error body into ApiError and 401 into a login redirect', async () => {
+  const clip = () => new File(['x'], 'clip.mp4', { type: 'video/mp4' });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(jsonResponse(400, { error: { code: 'HIGHLIGHT_TOO_LARGE', message: 'Highlight tối đa 10 MB' } })),
+  );
+  await expect(apiUpload('/api/reports/3/highlight', clip())).rejects.toMatchObject({
+    code: 'HIGHLIGHT_TOO_LARGE',
+    message: 'Highlight tối đa 10 MB',
+    status: 400,
+  });
+  expect(assign).not.toHaveBeenCalled();
+
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(jsonResponse(401, { error: { code: 'UNAUTHENTICATED', message: 'Bạn cần đăng nhập' } })),
+  );
+  await expect(apiUpload('/api/reports/3/highlight', clip())).rejects.toMatchObject({ status: 401 });
   expect(assign).toHaveBeenCalledWith('/login');
 });

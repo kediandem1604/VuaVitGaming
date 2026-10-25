@@ -12,6 +12,7 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { HallDto, HeldRoleDto, HighlightConfigDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../shared/api-types.js';
+import { HIGHLIGHT_CONTENT_TYPES } from '../../../shared/highlight.js';
 import { appError } from '../../lib/errors.js';
 import { seasonIdOf, toVnDate } from '../../lib/time.js';
 import { listSeasons } from '../../modules/seasons/service.js';
@@ -31,9 +32,10 @@ import { SEASON_ID, VN_DATE, idParams, int32Id } from '../schemas.js';
 
 /**
  * Content-type được nhận ở `PUT /api/reports/:id/highlight` (guard JSON trong app.ts dùng cùng
- * danh sách). Chỉ để qua cửa: loại thật của file do service nhận diện theo nội dung.
+ * danh sách) — một danh sách dùng chung với web (`src/shared/highlight.ts`) để ô chọn file và
+ * route không lệch nhau. Chỉ để qua cửa: loại thật của file do service nhận diện theo nội dung.
  */
-export const HIGHLIGHT_TYPES: readonly string[] = ['video/mp4', 'video/webm', 'video/quicktime', 'image/png', 'image/jpeg', 'image/gif'];
+export const HIGHLIGHT_TYPES: readonly string[] = HIGHLIGHT_CONTENT_TYPES;
 /** Mẫu route tải highlight — guard JSON trong app.ts so đúng mẫu này (route đã khớp) để cho body thô đi qua. */
 export const HIGHLIGHT_UPLOAD_ROUTE = '/api/reports/:id/highlight';
 /**
