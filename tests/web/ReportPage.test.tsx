@@ -465,6 +465,8 @@ test('"Bỏ file" drops a refused file so the report can be sent without a highl
   fireEvent.change(input, { target: { files: [clip()] } });
   fireEvent.click(screen.getByRole('button', { name: 'Bỏ file' }));
   expect(screen.queryByRole('button', { name: 'Bỏ file' })).not.toBeInTheDocument();
+  // Nút vừa bấm đã biến mất: focus về ô file, không rơi về <body>.
+  expect(input).toHaveFocus();
 
   // Safari/Firefox giữ file cũ khi huỷ bộ chọn, nên file bị từ chối cần nút Bỏ file để thoát.
   fireEvent.change(input, { target: { files: [clip('to.mp4', 'video/mp4', 10 * MIB + 1)] } });
@@ -472,6 +474,7 @@ test('"Bỏ file" drops a refused file so the report can be sent without a highl
   fireEvent.click(screen.getByRole('button', { name: 'Bỏ file' }));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Bỏ file' })).not.toBeInTheDocument();
+  expect(input).toHaveFocus();
 
   fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
   expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();

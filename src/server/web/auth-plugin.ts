@@ -82,7 +82,10 @@ async function loadMember(request: FastifyRequest): Promise<Member | null> {
   return resolveWebSession(request.server.ctx, sessionId);
 }
 
-/** preHandler: cần đăng nhập (phiên còn hạn, thành viên còn `active`). */
+/**
+ * Hook `preHandler` hoặc `onRequest` (chỉ đọc cookie, không cần body — route tải file dùng ở
+ * onRequest để chặn trước khi đọc body): cần đăng nhập (phiên còn hạn, thành viên còn `active`).
+ */
 export async function requireMember(request: FastifyRequest): Promise<void> {
   const member = await loadMember(request);
   if (!member) throw appError('UNAUTHENTICATED');
@@ -102,7 +105,7 @@ export async function requireAdmin(request: FastifyRequest): Promise<void> {
   if (currentMember(request).accessLevel !== 'admin') throw appError('FORBIDDEN');
 }
 
-/** Thành viên đã qua một preHandler ở trên; dùng trong handler để khỏi kiểm tra null. */
+/** Thành viên đã qua một hook ở trên (`preHandler` hoặc `onRequest`); dùng trong handler để khỏi kiểm tra null. */
 export function currentMember(request: FastifyRequest): Member {
   if (!request.member) throw appError('UNAUTHENTICATED');
   return request.member;

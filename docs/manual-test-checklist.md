@@ -6,8 +6,8 @@ Thời gian ước tính: 60–90 phút (trong đó ~20 phút chờ nhắc giờ
 
 ## 0. Chuẩn bị
 
-- [ ] Server Discord thử có đủ 3 kênh (lịch chơi, vote, thông báo) và 2 role (`admin`, `mod`); ID đã điền vào biến môi trường.
-- [ ] Discord Developer Portal → Bot → **Server Members Intent** đã bật; bot đã được mời với scope `bot applications.commands` và quyền View Channels, Send Messages, Embed Links, Read Message History.
+- [ ] Server Discord thử có đủ 4 kênh (lịch chơi, vote, thông báo, `#highlight`) và 2 role (`admin`, `mod`); ID đã điền vào biến môi trường.
+- [ ] Discord Developer Portal → Bot → **Server Members Intent** đã bật; bot đã được mời với scope `bot applications.commands` và quyền View Channels, Send Messages, Embed Links, Attach Files, Read Message History.
 - [ ] OAuth2 → Redirects có đúng `{PUBLIC_URL}/auth/callback`.
 - [ ] Có **ít nhất 3 tài khoản Discord** để thử: **A** (role admin), **M** (role mod), **T** (thành viên thường). Thuận tiện nhất: rủ hai người bạn, hoặc dùng tài khoản phụ. Ít nhất một tài khoản có email Discord đã xác minh mà bạn đọc được.
 - [ ] Ứng dụng đang chạy (Railway hoặc `npm run build` + `npm start` ở máy) với `.env`/biến trỏ vào server thử.
@@ -97,6 +97,7 @@ Trước đó: **Quản trị → Hạng mục** có ít nhất một hạng m�
 - [ ] `/baocao` với `ngay` cách hôm nay **hơn 3 ngày** → bị từ chối.
 - [ ] Web **Khai điểm** của T: gõ `kiem si` → chọn **Kiếm sĩ**; ô số liệu mang tên chỉ số của role với `max`; ngày mặc định hôm nay (chỉ chọn được 3 ngày lùi); chọn buổi đã kết thúc; gửi → **Đã gửi, chờ mod duyệt**; lần khai hiện ở *Lần khai của tôi* với trạng thái **Chờ duyệt** và nút **Sửa**.
 - [ ] **T** sửa lần khai đang chờ (đổi số liệu) → cập nhật tại chỗ.
+- [ ] **Highlight** (bot có quyền **Attach Files** ở `#highlight`): trên **điện thoại**, T khai điểm kèm một clip ngắn ở ô **Highlight (không bắt buộc)** → nút hiện **Đang tải highlight…** rồi **Đã gửi, chờ mod duyệt**; kênh `#highlight` có tin của bot kèm clip và dòng `🎬 Highlight — **<tên T>** · …`. Ở *Lần khai của tôi*, **🎬 Xem highlight** mở đúng tin đó trong Discord; **M** thấy link **🎬 Xem highlight** cạnh lần khai trong **Duyệt điểm**. Form Khai điểm (có ô highlight) không cuộn ngang ở 320 px.
 - [ ] **M** → **Quản trị → Duyệt điểm**: thấy lần khai của T (cũ nhất trước). **Từ chối** không ghi lý do → **Cần ghi lý do từ chối**, không gửi. Ghi lý do → từ chối → T nhận **DM** có `… bị từ chối: <lý do>`; trạng thái trên web của T: **Bị từ chối** kèm lý do.
 - [ ] **M** **Duyệt** lần khai Cò gáy của T → biến mất khỏi hàng chờ.
 - [ ] Kênh thông báo có `👑 <tên T> đã hoá thân Cò gáy mùa YYYY-MM!` (lần đầu có người dẫn đầu role này trong mùa).

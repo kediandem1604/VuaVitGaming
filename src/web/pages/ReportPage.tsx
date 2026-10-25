@@ -333,6 +333,8 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
           onClear={() => {
             clearFile();
             touch();
+            // Nút "Bỏ file" biến mất ngay khi bấm: đưa focus về ô file thay vì rơi về <body>.
+            fileInput.current?.focus();
           }}
         />
       )}

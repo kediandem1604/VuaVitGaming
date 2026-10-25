@@ -99,7 +99,7 @@ Discord ẩn ID; bật chế độ nhà phát triển để thấy nút chép ID
    | `DISCORD_ANNOUNCE_CHANNEL_ID` | Thông báo | Kết quả tri ân, 👑 đổi người hoá thân, tổng kết mùa, nhắc mod |
    | `DISCORD_HIGHLIGHT_CHANNEL_ID` | Highlight *(không bắt buộc)* | Video/ảnh highlight thành viên kèm khi khai điểm (mục 10). Để trống thì form khai điểm không có ô highlight. Bot cần thêm **Attach Files** ở kênh này |
 
-   Server nhỏ có thể dùng chung một kênh cho cả ba (điền cùng một ID), nhưng tách riêng dễ theo dõi hơn.
+   Server nhỏ có thể dùng chung một kênh cho cả ba kênh bắt buộc (điền cùng một ID), nhưng tách riêng dễ theo dõi hơn.
 
 4. **ID role**: **Server Settings** → **Roles** → chuột phải vào role (hoặc nút ⋯) → **Copy Role ID**.
 
@@ -226,7 +226,7 @@ DISCORD_GUILD_ID=...
 DISCORD_SCHEDULE_CHANNEL_ID=...
 DISCORD_VOTE_CHANNEL_ID=...
 DISCORD_ANNOUNCE_CHANNEL_ID=...
-DISCORD_HIGHLIGHT_CHANNEL_ID=...
+DISCORD_HIGHLIGHT_CHANNEL_ID=
 DISCORD_ADMIN_ROLE_IDS=...
 DISCORD_MOD_ROLE_IDS=...
 
@@ -285,7 +285,7 @@ Các bước:
 
 1. Đẩy repo lên GitHub (nhánh có file `render.yaml`).
 2. Mở <https://dashboard.render.com/blueprint/new> → chọn repo → chọn **nhánh** muốn deploy → Render đọc `render.yaml` và liệt kê dịch vụ `ggd-hub` + database `ggd-db`.
-3. Render hỏi giá trị cho các biến đánh dấu `sync: false` — điền như mục 6.3: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, 3 ID kênh (`DISCORD_HIGHLIGHT_CHANNEL_ID` không bắt buộc — để trống nếu không dùng highlight), `DISCORD_ADMIN_ROLE_IDS`, `DISCORD_MOD_ROLE_IDS`, `BREVO_API_KEY`, `MAIL_FROM`. **Không** cần điền:
+3. Render hỏi giá trị cho các biến đánh dấu `sync: false` — điền như mục 6.3: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, 4 ID kênh (trong đó `DISCORD_HIGHLIGHT_CHANNEL_ID` không bắt buộc — để trống nếu không dùng highlight), `DISCORD_ADMIN_ROLE_IDS`, `DISCORD_MOD_ROLE_IDS`, `BREVO_API_KEY`, `MAIL_FROM`. **Không** cần điền:
    - `DATABASE_URL` — Render tự nối tới `ggd-db`;
    - `SESSION_SECRET` — Render tự sinh chuỗi ngẫu nhiên;
    - `PUBLIC_URL` — ứng dụng tự dùng địa chỉ `https://….onrender.com` mà Render cấp (biến `RENDER_EXTERNAL_URL`). Gắn tên miền riêng thì thêm `PUBLIC_URL` trong tab **Environment** của dịch vụ.
