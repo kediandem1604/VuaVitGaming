@@ -169,10 +169,29 @@
  * (Công tắc bật/tắt dùng checkbox ẩn + `peer-focus-visible` trên rãnh vẽ, không đi qua đây.)
  */
 @utility field {
-  @apply w-full rounded-xl border-2 border-night-600 bg-night-900 px-3 py-2 text-base text-white placeholder:text-night-300 focus:border-gold;
+  @apply w-full min-w-0 max-w-full rounded-xl border-2 border-night-600 bg-night-900 px-3 py-2 text-base text-white placeholder:text-night-300 focus:border-gold;
 
   &:focus-visible {
     outline: none;
+  }
+
+  /*
+   * Safari trên iPhone/iPad vẽ ô ngày/giờ bằng giao diện riêng của hệ thống, có bề rộng tối
+   * thiểu cố định → ô tràn ra ngoài khung trên màn hình hẹp. Chỉ trên iOS (`-webkit-touch-callout`
+   * chỉ Safari iOS hỗ trợ): bỏ giao diện đó (bấm vẫn mở bảng chọn ngày/giờ), giữ chiều cao bằng
+   * ô thường kể cả khi chưa có giá trị, và căn chữ sang trái như các ô khác.
+   */
+  @supports (-webkit-touch-callout: none) {
+    &[type='date'],
+    &[type='time'] {
+      -webkit-appearance: none;
+      appearance: none;
+      min-height: 2.75rem;
+    }
+
+    &::-webkit-date-and-time-value {
+      text-align: left;
+    }
   }
 
   /*
