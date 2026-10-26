@@ -256,6 +256,25 @@ function withHighlight(channelId: string | null): Config {
   return config;
 }
 
+test('announce posts the text to the announce channel with every mention disabled', async () => {
+  const f = fakeClient({});
+  const n = new DiscordJsNotifier(f.client, testConfig());
+  f.client.channels.fetch = (async (id: string) => (id === 'ch-announce' ? f.sendable(id) : null)) as never;
+
+  // Tên người tự đặt có thể trông như @mention — gửi nguyên văn nhưng không ping ai.
+  const text = '🏅 Danh hiệu tháng 10/2026\n👑 SMVP: @everyone <@123> (2 lần MVP)';
+  await n.announce(text);
+  expect(f.sent).toEqual([{ channelId: 'ch-announce', payload: { content: text, allowedMentions: { parse: [] } } }]);
+});
+
+test('a missing or non-text announce channel is an error (service keeps its pending flag)', async () => {
+  const missing = new DiscordJsNotifier(fakeClient({}).client, testConfig());
+  await expect(missing.announce('x')).rejects.toThrow(/Kênh thông báo ch-announce/);
+
+  const voice = new DiscordJsNotifier(fakeClient({ 'ch-announce': { isSendable: () => false } }).client, testConfig());
+  await expect(voice.announce('x')).rejects.toThrow(/Kênh thông báo ch-announce/);
+});
+
 test('postHighlight sends the file with the caption line (name escaped, no mentions) and returns its location', async () => {
   const f = fakeClient({});
   const n = new DiscordJsNotifier(f.client, withHighlight('ch-highlight'));
