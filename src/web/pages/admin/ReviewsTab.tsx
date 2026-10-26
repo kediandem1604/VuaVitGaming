@@ -12,6 +12,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
 import type { ReportDto } from '../../../shared/api-types';
+import { formatMetricValue } from '../../../shared/metric';
 import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { HighlightLink } from '../../components/HighlightLink';
@@ -101,7 +102,7 @@ function PendingReport({ report }: { report: ReportDto }) {
           {formatDateLabel(report.playedOn)}
         </time>
       </div>
-      <p className="text-lg leading-tight font-extrabold text-white">{`${report.value} ${report.role.metricLabel}`}</p>
+      <p className="text-lg leading-tight font-extrabold text-white">{formatMetricValue(report.value, report.role.metricLabel)}</p>
       <p className="text-night-300">
         {report.sessionId !== null && <>Buổi #{report.sessionId} · </>}
         Khai lúc {formatTime(report.createdAt)} {formatDateLabel(new Date(report.createdAt))}

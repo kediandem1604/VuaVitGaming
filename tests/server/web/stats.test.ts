@@ -390,7 +390,7 @@ test('review decisions: approve ignores an empty reason, reject needs one and DM
   const rejected = await review(modSid, b.id, { approve: false, reason: '  Khai trùng  ' });
   expect(rejected.statusCode).toBe(204);
   expect(await reportRow(b.id)).toMatchObject({ status: 'rejected', rejectReason: 'Khai trùng', reviewedById: mod.id });
-  expect(notifier.dms).toEqual([{ discordId: 'an-discord', text: 'Lần khai Kiếm sĩ (4 Số mạng chém) ngày 22/10 bị từ chối: Khai trùng' }]);
+  expect(notifier.dms).toEqual([{ discordId: 'an-discord', text: 'Lần khai Kiếm sĩ (4 mạng chém) ngày 22/10 bị từ chối: Khai trùng' }]);
   expect((await get('/api/reports/mine', sid)).json<ReportDto[]>().find((r) => r.id === b.id)).toMatchObject({
     status: 'rejected',
     rejectReason: 'Khai trùng',

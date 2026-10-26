@@ -35,6 +35,7 @@ import { parseCustomId } from './custom-ids.js';
 import type { CustomIdData } from './custom-ids.js';
 import { toGuildMemberInfo } from './guild-directory.js';
 import type { GuildMemberSource } from './guild-directory.js';
+import { formatMetricValue } from '../../shared/metric.js';
 
 /** Phần của `Interaction` mà bộ định tuyến cần: chỉ để nhận ra từng loại tương tác. */
 export interface InteractionLike {
@@ -242,7 +243,7 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
     const value = interaction.options.getInteger(OPTION.value) ?? Number.NaN;
     const report = await submitReport(ctx, member.id, { roleId: role.id, value, playedOn, note: interaction.options.getString(OPTION.note) });
     await interaction.editReply(
-      `Đã gửi: ${role.icon} ${role.nameVi} — ${report.value} ${role.metricLabel} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
+      `Đã gửi: ${role.icon} ${role.nameVi} — ${formatMetricValue(report.value, role.metricLabel)} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
     );
   } catch (err) {
     await answerError(interaction, `/${interaction.commandName}`, err);

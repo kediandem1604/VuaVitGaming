@@ -239,7 +239,7 @@ test('submitting posts the report, shows the success message and resets value an
   expect(note).toHaveValue('');
   // Lần khai mới xuất hiện đầu danh sách.
   const items = screen.getAllByRole('listitem');
-  expect(items[0]).toHaveTextContent('5 Số mạng chém');
+  expect(items[0]).toHaveTextContent('5 mạng chém');
   expect(items[0]).toHaveTextContent('Chờ duyệt');
 });
 
@@ -301,7 +301,7 @@ test('my reports show status chips with the reject reason, and pending ones can 
   fireEvent.click(within(editor).getByRole('button', { name: 'Lưu' }));
 
   await waitFor(() => expect(patched).toEqual({ value: 7, playedOn: today, note: 'Sửa lại' }));
-  expect(await within(editor).findByText('7 Số mạng chém')).toBeInTheDocument();
+  expect(await within(editor).findByText('7 mạng chém')).toBeInTheDocument();
   expect(editor).toHaveTextContent('Sửa lại');
   expect(within(editor).queryByRole('button', { name: 'Lưu' })).not.toBeInTheDocument();
 });
@@ -400,7 +400,7 @@ test('submitting with a file creates the report, then uploads the highlight', as
   expect(invalidate).toHaveBeenCalledWith({ queryKey: PENDING_REPORTS_KEY });
   // Lần khai mới ở đầu danh sách, đã có link xem highlight.
   const items = screen.getAllByRole('listitem');
-  expect(items[0]).toHaveTextContent('5 Số mạng chém');
+  expect(items[0]).toHaveTextContent('5 mạng chém');
   const link = within(items[0] as HTMLElement).getByRole('link', { name: 'Xem highlight' });
   expect(link).toHaveAttribute('href', HIGHLIGHT_URL);
   expect(link).toHaveAttribute('target', '_blank');
@@ -526,7 +526,7 @@ test('upload failure keeps the report and says "Đã gửi khai điểm, nhưng 
   expect(invalidate).not.toHaveBeenCalledWith({ queryKey: PENDING_REPORTS_KEY });
   // Lần khai vẫn được tạo, vào đầu danh sách với nút thêm highlight sau; form đã được dọn như khi gửi xong.
   const items = screen.getAllByRole('listitem');
-  expect(items[0]).toHaveTextContent('5 Số mạng chém');
+  expect(items[0]).toHaveTextContent('5 mạng chém');
   expect(within(items[0] as HTMLElement).getByRole('button', { name: 'Thêm highlight' })).toBeInTheDocument();
   expect(within(items[0] as HTMLElement).queryByRole('link', { name: 'Xem highlight' })).not.toBeInTheDocument();
   expect(value).toHaveValue(null);

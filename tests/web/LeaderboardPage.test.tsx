@@ -169,11 +169,11 @@ test('defaults to the first role and newest season; rank 1 wears the crown', asy
   const [gold, silver] = podium as [HTMLElement, HTMLElement];
   expect(within(gold).getByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
   expect(within(gold).queryByText('Ngỗng Một', { selector: 'p' })).toBeNull();
-  expect(gold).toHaveTextContent('7 Số lần vote trúng Vịt');
+  expect(gold).toHaveTextContent('7 lần vote trúng Vịt');
   // R13: avatar hạng 2 không mang nhãn (không có `img` nào), tên hiện bằng chữ bên dưới.
   expect(within(silver).queryByRole('img')).toBeNull();
   expect(within(silver).getByText('Ngỗng Ba', { selector: 'p' })).toBeInTheDocument();
-  expect(silver).toHaveTextContent('4 Số lần vote trúng Vịt');
+  expect(silver).toHaveTextContent('4 lần vote trúng Vịt');
   // R14: chưa đủ ba hàng → thứ tự tự nhiên trên màn hình, hạng 1 bên trái hạng 2.
   expect(podium.map((item) => item.className.split(' ').find((name) => name.startsWith('order-')))).toEqual(['order-1', 'order-2']);
   // Chỉ một nhân vật trên cả trang: của hạng 1.
@@ -212,7 +212,7 @@ test('?role= and ?mua= select a role and a closed season', async () => {
   expect(within(items[0] as HTMLElement).getByTitle('Số mạng chém')).toHaveTextContent('12');
   expect(items[0]).toHaveTextContent('5 trận');
   expect(podiumItems()).toHaveLength(1);
-  expect(podiumItems()[0]).toHaveTextContent('12 Số mạng chém');
+  expect(podiumItems()[0]).toHaveTextContent('12 mạng chém');
   expect(screen.getByRole('img', { name: 'Kiếm sĩ: Vịt Hai' })).toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: 'Role' })).toHaveValue('61');
   expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveValue('2026-09');
@@ -228,7 +228,7 @@ test('rows carry only the number; a 40-char metric label appears above the list 
   expect(items).toHaveLength(1);
   const first = items[0] as HTMLElement;
   expect(screen.getByText(`Chỉ số: ${LONG_METRIC}`)).toBeInTheDocument();
-  expect(podiumItems()[0]).toHaveTextContent(`3 ${LONG_METRIC}`);
+  expect(podiumItems()[0]).toHaveTextContent(`3 ${LONG_METRIC.replace(/^Số /, '')}`);
   // Trong dòng: số điểm (title = tên chỉ số cho người dùng rê chuột/đọc màn hình), số trận, không lặp nhãn.
   expect(first).not.toHaveTextContent(LONG_METRIC);
   expect(within(first).getByTitle(LONG_METRIC)).toHaveTextContent('3');
@@ -256,7 +256,7 @@ test('a single row gives a one-step podium', async () => {
   expect(within(only).getByRole('img', { name: 'Người Canada: Ngỗng Năm' })).toBeInTheDocument();
   // Tên chỉ ở bảng tên của nhân vật, không ghi lại bên dưới.
   expect(within(only).queryByText('Ngỗng Năm', { selector: 'p' })).toBeNull();
-  expect(only).toHaveTextContent(`3 ${LONG_METRIC}`);
+  expect(only).toHaveTextContent(`3 ${LONG_METRIC.replace(/^Số /, '')}`);
   // Không có avatar hạng 2/3: nhân vật là `img` duy nhất trên bục; một hàng đứng ở vị trí đầu.
   expect(within(screen.getByRole('list', { name: 'Bục vinh danh' })).getAllByRole('img')).toHaveLength(1);
   expect(only.className.split(' ')).toContain('order-1');
@@ -285,7 +285,7 @@ test('the podium stands 2-1-3 on screen while the DOM keeps rank order, and take
   expect(within(podium[1] as HTMLElement).getByText('Vịt Tám', { selector: 'p' })).toBeInTheDocument();
   expect(within(podium[2] as HTMLElement).queryByRole('img')).toBeNull();
   expect(within(podium[2] as HTMLElement).getByText('Ngỗng Chín', { selector: 'p' })).toBeInTheDocument();
-  expect(podium[2]).toHaveTextContent('2 Số trận thắng (bị vote ra)');
+  expect(podium[2]).toHaveTextContent('2 trận thắng (bị vote ra)');
 
   // Bảng đầy đủ bên dưới vẫn có cả bốn hạng.
   const rows = boardItems();
@@ -341,14 +341,14 @@ test('Top 3 mỗi phe: three faction blocks, rows in rank order with medal, role
   // Hạng 1: Dân phòng 2 phát × 5 = 10 điểm, xếp trên Ngỗng 9 vote của chính người đó.
   expect(within(first).getByTitle('Hạng 1')).toHaveTextContent('🥇');
   expect(first).toHaveTextContent('Ngỗng Một');
-  expect(first).toHaveTextContent('Dân phòng · 2 Số phát bắn trúng kẻ xấu');
+  expect(first).toHaveTextContent('Dân phòng · 2 phát bắn trúng kẻ xấu');
   expect(first).toHaveTextContent('10 điểm');
   expect(first).toHaveTextContent('2 × 5');
   expect(within(first).getByRole('link', { name: /Dân phòng/ })).toHaveAttribute('href', '/bang-xep-hang?role=4&mua=2026-10');
   // Cùng một người ở hạng 2 với role khác; hệ số 1 thì không ghi phép nhân.
   expect(within(second).getByTitle('Hạng 2')).toHaveTextContent('🥈');
   expect(second).toHaveTextContent('Ngỗng Một');
-  expect(second).toHaveTextContent('Ngỗng · 9 Số lần vote trúng Vịt');
+  expect(second).toHaveTextContent('Ngỗng · 9 lần vote trúng Vịt');
   expect(second).toHaveTextContent('9 điểm');
   expect(second).not.toHaveTextContent('×');
   expect(within(second).getByRole('link', { name: /Ngỗng/ })).toHaveAttribute('href', '/bang-xep-hang?role=1&mua=2026-10');
@@ -359,7 +359,7 @@ test('Top 3 mỗi phe: three faction blocks, rows in rank order with medal, role
   const duck = within(factionList('Phe Vịt')).getAllByRole('listitem');
   expect(duck).toHaveLength(1);
   expect(duck[0]).toHaveTextContent('Vịt Hai');
-  expect(duck[0]).toHaveTextContent('Kiếm sĩ · 11 Số mạng chém');
+  expect(duck[0]).toHaveTextContent('Kiếm sĩ · 11 mạng chém');
   expect(duck[0]).toHaveTextContent('11 điểm');
 
   // Phe chưa có ai: không có danh sách, chỉ câu trống.

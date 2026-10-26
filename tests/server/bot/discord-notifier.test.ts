@@ -243,7 +243,7 @@ test('a missing or non-text vote channel is an error (service retries later)', a
 const post: HighlightPost = {
   memberName: 'An **Vịt** _bay_',
   roleLabel: '🦆 Vịt',
-  valueText: '3 Số mạng đã giết',
+  valueText: '3 mạng đã giết',
   playedOnText: '10/10/2026',
   fileName: 'highlight-7.mp4',
   data: Buffer.from('\0\0\0\x18ftypisom', 'latin1'),
@@ -285,7 +285,7 @@ test('postHighlight sends the file with the caption line (name escaped, no menti
     {
       channelId: 'ch-highlight',
       payload: {
-        content: '🎬 Highlight — **An \\*\\*Vịt\\*\\* \\_bay\\_** · 🦆 Vịt · 3 Số mạng đã giết · 10/10/2026',
+        content: '🎬 Highlight — **An \\*\\*Vịt\\*\\* \\_bay\\_** · 🦆 Vịt · 3 mạng đã giết · 10/10/2026',
         files: [{ attachment: post.data, name: 'highlight-7.mp4' }],
         allowedMentions: { parse: [] },
       },

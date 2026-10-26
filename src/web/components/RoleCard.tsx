@@ -13,6 +13,7 @@
 
 import type { ReactNode } from 'react';
 import type { Faction, RoleDto } from '../../shared/api-types';
+import { metricAfterValue } from '../../shared/metric';
 import { cx } from '../lib/cx';
 import { FACTION_BAND, FACTION_LABEL } from '../lib/factions';
 import { Character, type CharacterVariant } from './Character';
@@ -65,7 +66,7 @@ export function RoleCard({ role, holderName, variant, score, extra, characterSiz
 
       {score !== null && (
         <p className="px-3 leading-tight font-bold text-gold">
-          <span className="text-lg tabular-nums">{score}</span> <span className="text-sm">{role.metricLabel}</span>
+          <span className="text-lg tabular-nums">{score}</span> <span className="text-sm">{metricAfterValue(role.metricLabel)}</span>
         </p>
       )}
 

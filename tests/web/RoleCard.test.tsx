@@ -42,9 +42,9 @@ test('the banner names the faction in capitals', () => {
 test('score line shows the score and the metric', () => {
   const { unmount } = render(<RoleCard role={swordsman} holderName="Kẹ" variant="current" score={31} />);
   expect(screen.getByText('31')).toBeInTheDocument();
-  expect(screen.getByText('Số mạng chém')).toBeInTheDocument();
-  // Toàn dòng đọc liền "31 Số mạng chém" (các trang kiểm bằng toHaveTextContent).
-  expect(screen.getByText('31').parentElement).toHaveTextContent(/^31 Số mạng chém$/);
+  expect(screen.getByText('mạng chém')).toBeInTheDocument();
+  // Toàn dòng đọc liền "31 mạng chém" (các trang kiểm bằng toHaveTextContent).
+  expect(screen.getByText('31').parentElement).toHaveTextContent(/^31 mạng chém$/);
   unmount();
 
   render(<RoleCard role={swordsman} holderName="Kẹ" variant="current" score={null} />);

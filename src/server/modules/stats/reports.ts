@@ -24,6 +24,7 @@
 import type { Prisma, StatReport } from '@prisma/client';
 import { z } from 'zod';
 import type { AccessLevel, ReportDto } from '../../../shared/api-types.js';
+import { formatMetricValue } from '../../../shared/metric.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import {
@@ -337,7 +338,7 @@ async function afterApprove(ctx: Ctx, report: ReviewableReport, seasonId: string
 /** DM người khai lý do bị từ chối. Discord lỗi chỉ ghi log — lần khai đã bị từ chối trong DB rồi. */
 async function notifyRejected(ctx: Ctx, report: ReviewableReport, reason: string): Promise<void> {
   const text =
-    `Lần khai ${report.role.nameVi} (${report.value} ${report.role.metricLabel}) ` +
+    `Lần khai ${report.role.nameVi} (${formatMetricValue(report.value, report.role.metricLabel)}) ` +
     `ngày ${formatVnDay(dbToDateOnly(report.playedOn))} bị từ chối: ${reason}`;
   try {
     await ctx.notifier.sendDm(report.member.discordId, text);

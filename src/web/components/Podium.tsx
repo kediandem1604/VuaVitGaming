@@ -10,6 +10,7 @@
  */
 
 import type { LeaderboardRowDto, RoleDto } from '../../shared/api-types';
+import { metricAfterValue } from '../../shared/metric';
 import { cx } from '../lib/cx';
 import { Avatar } from './Avatar';
 import { Character } from './Character';
@@ -50,7 +51,7 @@ export function Podium({ role, rows }: PodiumProps) {
               </>
             )}
             <p className="px-1 text-sm leading-tight font-bold break-words text-gold">
-              <span className="text-base tabular-nums">{row.score}</span> {role.metricLabel}
+              <span className="text-base tabular-nums">{row.score}</span> {metricAfterValue(role.metricLabel)}
             </p>
             {/* Số hạng in trên mặt bục; "Hạng" chỉ dành cho trình đọc màn hình. */}
             <p

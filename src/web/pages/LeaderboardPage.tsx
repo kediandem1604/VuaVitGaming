@@ -16,6 +16,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import type { Faction, FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleDto } from '../../shared/api-types';
+import { metricAfterValue } from '../../shared/metric';
 import { apiGet } from '../api';
 import { Avatar } from '../components/Avatar';
 import { EmptyState } from '../components/EmptyState';
@@ -213,7 +214,7 @@ function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string
             <span aria-hidden="true">{row.role.icon}</span> {row.role.nameVi}
           </Link>
           {' · '}
-          <span className="tabular-nums">{row.value}</span> {row.role.metricLabel}
+          <span className="tabular-nums">{row.value}</span> {metricAfterValue(row.role.metricLabel)}
         </p>
       </div>
     </li>

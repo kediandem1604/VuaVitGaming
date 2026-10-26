@@ -16,6 +16,7 @@
 
 import type { ReportDto } from '../../../shared/api-types.js';
 import { highlightLimitMessage } from '../../../shared/highlight.js';
+import { formatMetricValue } from '../../../shared/metric.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dbToDateOnly } from '../../lib/time.js';
@@ -100,7 +101,7 @@ export async function attachHighlight(ctx: Ctx, memberId: number, reportId: numb
   const post: HighlightPost = {
     memberName: report.member.displayName,
     roleLabel: `${report.role.icon} ${report.role.nameVi}`,
-    valueText: `${report.value} ${report.role.metricLabel}`,
+    valueText: formatMetricValue(report.value, report.role.metricLabel),
     playedOnText: toDmy(dbToDateOnly(report.playedOn)),
     fileName: `highlight-${report.id}.${kind.ext}`,
     data: upload.data,

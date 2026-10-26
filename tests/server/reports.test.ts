@@ -337,7 +337,7 @@ test('rejection DMs reporter with reason', async () => {
   expect(notifier.dms).toEqual([
     {
       discordId: member.discordId,
-      text: 'Lần khai Vịt (7 Số mạng đã giết) ngày 08/10 bị từ chối: Ảnh chụp mờ, không thấy số',
+      text: 'Lần khai Vịt (7 mạng đã giết) ngày 08/10 bị từ chối: Ảnh chụp mờ, không thấy số',
     },
   ]);
   expect(notifier.dms[0]?.text).toContain('bị từ chối');
@@ -347,7 +347,7 @@ test('rejection DMs reporter with reason', async () => {
   const r2 = await submit({ roleKey: 'swordsman', value: 2 });
   await reviewReport(ctx, asReviewer(m), r2.id, { approve: false, reason: 'y'.repeat(200) });
   expect((await reportRow(r2.id)).rejectReason).toBe('y'.repeat(200));
-  expect(notifier.dms[1]?.text).toBe(`Lần khai Kiếm sĩ (2 Số mạng chém) ngày 10/10 bị từ chối: ${'y'.repeat(200)}`);
+  expect(notifier.dms[1]?.text).toBe(`Lần khai Kiếm sĩ (2 mạng chém) ngày 10/10 bị từ chối: ${'y'.repeat(200)}`);
 
   // DM lỗi: lần khai vẫn bị từ chối, lỗi chỉ ghi log, hàm không ném.
   const errors = silenceConsoleError();

@@ -89,9 +89,9 @@ test('held roles render as role cards with the faction band, my name on the char
   // Thẻ role (`RoleCard`): băng phe viết hoa trên cùng, rồi tên role và dòng điểm.
   expect(items[0]).toHaveTextContent('PHE VỊT');
   expect(items[0]).toHaveTextContent('⚔️ Kiếm sĩ');
-  expect(items[0]).toHaveTextContent('12 Số mạng chém');
+  expect(items[0]).toHaveTextContent('12 mạng chém');
   expect(items[1]).toHaveTextContent('PHE NGỖNG');
-  expect(items[1]).toHaveTextContent('7 Số lần vote trúng Vịt');
+  expect(items[1]).toHaveTextContent('7 lần vote trúng Vịt');
   // Role đang giữ không bao giờ là ô trống.
   expect(screen.queryByText('Khai điểm để giành')).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Xem lịch sử khai điểm' })).toHaveAttribute('href', '/khai-diem');

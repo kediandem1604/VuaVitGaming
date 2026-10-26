@@ -359,7 +359,7 @@ test('/baocao defers ephemerally, upserts the caller, submits a pending report a
 
   expect(i.steps).toEqual([
     { step: 'defer', ephemeral: true },
-    { step: 'edit', content: 'Đã gửi: ⚔️ Kiếm sĩ — 5 Số mạng chém ngày 22/10. Chờ mod duyệt nhé!' },
+    { step: 'edit', content: 'Đã gửi: ⚔️ Kiếm sĩ — 5 mạng chém ngày 22/10. Chờ mod duyệt nhé!' },
   ]);
   const me = await presser();
   expect(me).toMatchObject({ displayName: 'Người gõ', avatarUrl: 'https://cdn.test/u1.png', status: 'active' });
@@ -381,12 +381,12 @@ test('/baocao defers ephemerally, upserts the caller, submits a pending report a
 test('/baocao takes dd/MM or YYYY-MM-DD for the day and keeps the note', async () => {
   const i = baocao({ role: 'swordsman', so_lieu: 3, ngay: '21/10', ghi_chu: '  Trận cuối  ' });
   await handleInteraction(ctx, i);
-  expect(i.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 3 Số mạng chém ngày 21/10. Chờ mod duyệt nhé!');
+  expect(i.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 3 mạng chém ngày 21/10. Chờ mod duyệt nhé!');
   expect((await reports())[0]).toMatchObject({ playedOn: new Date('2026-10-21T00:00:00Z'), note: 'Trận cuối' });
 
   const iso = baocao({ role: 'swordsman', so_lieu: 0, ngay: '2026-10-20' });
   await handleInteraction(ctx, iso);
-  expect(iso.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 0 Số mạng chém ngày 20/10. Chờ mod duyệt nhé!');
+  expect(iso.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 0 mạng chém ngày 20/10. Chờ mod duyệt nhé!');
   expect(await reports()).toHaveLength(2);
 });
 
@@ -394,7 +394,7 @@ test('/baocao resolves a role typed as its exact Vietnamese name, ignoring case 
   for (const typed of ['Kiếm sĩ', 'KIEM SI', '  kiếm sĩ ']) {
     const i = baocao({ role: typed, so_lieu: 1 });
     await handleInteraction(ctx, i);
-    expect(i.lastText, typed).toBe('Đã gửi: ⚔️ Kiếm sĩ — 1 Số mạng chém ngày 22/10. Chờ mod duyệt nhé!');
+    expect(i.lastText, typed).toBe('Đã gửi: ⚔️ Kiếm sĩ — 1 mạng chém ngày 22/10. Chờ mod duyệt nhé!');
   }
   expect(await reports()).toHaveLength(3);
 
@@ -461,7 +461,7 @@ test('/bxh replies publicly with a faction-coloured top-10 embed', async () => {
       embeds: [
         {
           title: '👑 Bảng xếp hạng Kiếm sĩ — mùa 10/2026',
-          description: ['1. 👑 An — 7 Số mạng chém (1 trận)', '2. Bình — 4 Số mạng chém (1 trận)'].join('\n'),
+          description: ['1. 👑 An — 7 mạng chém (1 trận)', '2. Bình — 4 mạng chém (1 trận)'].join('\n'),
           color: 0xe5484d,
         },
       ],
@@ -472,7 +472,7 @@ test('/bxh replies publicly with a faction-coloured top-10 embed', async () => {
   await handleInteraction(ctx, goose);
   expect(goose.steps[1]).toEqual({
     step: 'edit',
-    embeds: [{ title: '👑 Bảng xếp hạng Ngỗng — mùa 10/2026', description: '1. 👑 An — 2 Số lần vote trúng Vịt (1 trận)', color: 0x2f80ed }],
+    embeds: [{ title: '👑 Bảng xếp hạng Ngỗng — mùa 10/2026', description: '1. 👑 An — 2 lần vote trúng Vịt (1 trận)', color: 0x2f80ed }],
   });
   expect(errors).not.toHaveBeenCalled();
 });

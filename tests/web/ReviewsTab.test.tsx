@@ -67,7 +67,7 @@ test('the queue shows member, role, value with metric, date, note and session', 
   const first = items[0] as HTMLElement;
   expect(first).toHaveTextContent('Ngỗng Chín');
   expect(first).toHaveTextContent('⚔️ Kiếm sĩ');
-  expect(first).toHaveTextContent('4 Số mạng chém');
+  expect(first).toHaveTextContent('4 mạng chém');
   expect(first).toHaveTextContent('22/10/2026');
   expect(first).toHaveTextContent('Trận cuối');
   expect(first).toHaveTextContent('Buổi #7');
@@ -141,7 +141,7 @@ test('NOT_PENDING shows the server message and refetches the queue', async () =>
 
   expect(await screen.findByRole('alert')).toHaveTextContent('Lần khai vừa được sửa, hãy xem lại');
   await waitFor(() => expect(listCalls).toBe(2));
-  expect(await screen.findByText('9 Số mạng chém')).toBeInTheDocument();
+  expect(await screen.findByText('9 mạng chém')).toBeInTheDocument();
   expect(screen.getAllByRole('listitem')).toHaveLength(1);
 });
 

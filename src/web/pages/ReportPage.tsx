@@ -22,6 +22,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { Faction, HighlightConfigDto, ReportDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
+import { formatMetricValue } from '../../shared/metric';
 import { normalizeText } from '../../shared/text';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { Character } from '../components/Character';
@@ -631,7 +632,7 @@ function ReportItem({ report, highlight }: ReportItemProps) {
         <EditForm report={report} onDone={() => setEditing(false)} />
       ) : (
         <>
-          <p className="font-bold text-white">{`${report.value} ${report.role.metricLabel}`}</p>
+          <p className="font-bold text-white">{formatMetricValue(report.value, report.role.metricLabel)}</p>
           {report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>}
           {report.note && <p className="text-sm text-night-200">{report.note}</p>}
           {report.status === 'rejected' && report.rejectReason && (

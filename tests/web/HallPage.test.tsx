@@ -121,7 +121,7 @@ test('defaults to the newest season and the goose tab, showing only goose main r
 
   // Ô có người giữ: điểm + tên chỉ số; ô trống thì không có dòng điểm.
   const gooseCard = screen.getByRole('link', { name: /Ngỗng: Ngỗng Một/ });
-  expect(gooseCard).toHaveTextContent('7 Số lần vote trúng Vịt');
+  expect(gooseCard).toHaveTextContent('7 lần vote trúng Vịt');
   expect(gooseCard).toHaveAttribute('href', '/bang-xep-hang?role=1&mua=2026-10');
   expect(screen.getByRole('link', { name: /Thầy đồng/ })).not.toHaveTextContent('Số xác');
 });
@@ -186,7 +186,7 @@ test('switching to Phe Vịt shows duck roles, with the previous holder marked',
 
   const card = screen.getByRole('link', { name: /Kiếm sĩ/ });
   expect(within(card).getByText('Mùa trước')).toBeInTheDocument();
-  expect(card).toHaveTextContent('12 Số mạng chém');
+  expect(card).toHaveTextContent('12 mạng chém');
   expect(card).toHaveTextContent('mùa trước');
   expect(card).toHaveTextContent('Có từ v4.10 (08/2026)');
   expect(card).toHaveAttribute('href', '/bang-xep-hang?role=61&mua=2026-10');

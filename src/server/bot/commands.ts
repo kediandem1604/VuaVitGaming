@@ -12,6 +12,7 @@ import type { Faction, HeldRoleDto, RoleDto } from '../../shared/api-types.js';
 import { normalizeText } from '../../shared/text.js';
 import { dateOnlyToDb, formatSeasonLabel } from '../lib/time.js';
 import type { LeaderboardRow } from '../modules/stats/leaderboard.js';
+import { formatMetricValue } from '../../shared/metric.js';
 
 /** Tên lệnh — dùng ở định nghĩa và ở bộ định tuyến để hai bên không lệch nhau. */
 export const COMMAND = { report: 'baocao', leaderboard: 'bxh', profile: 'hoso' } as const;
@@ -185,7 +186,7 @@ const pad4 = (n: number): string => String(n).padStart(4, '0');
  * Chưa ai có điểm → một câu báo trống.
  */
 export function leaderboardEmbed(role: RoleDto, seasonId: string, rows: readonly LeaderboardRow[]): APIEmbed {
-  const lines = rows.map((r) => `${r.rank}. ${r.rank === 1 ? '👑 ' : ''}${r.displayName} — ${r.score} ${role.metricLabel} (${r.games} trận)`);
+  const lines = rows.map((r) => `${r.rank}. ${r.rank === 1 ? '👑 ' : ''}${r.displayName} — ${formatMetricValue(r.score, role.metricLabel)} (${r.games} trận)`);
   return {
     title: `👑 Bảng xếp hạng ${role.nameVi} — mùa ${formatSeasonLabel(seasonId)}`,
     description: lines.length > 0 ? lines.join('\n') : 'Chưa có ai khai điểm mùa này',

@@ -78,7 +78,7 @@ test('a pending report owner attaches a video and gets a Discord jump link', asy
   expect(posted).toEqual({
     memberName: 'An',
     roleLabel: '🦆 Vịt',
-    valueText: '3 Số mạng đã giết',
+    valueText: '3 mạng đã giết',
     playedOnText: '10/10/2026',
     fileName: `highlight-${r.id}.mp4`,
     data: file,
