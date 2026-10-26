@@ -126,6 +126,52 @@ test('defaults to the newest season and the goose tab, showing only goose main r
   expect(screen.getByRole('link', { name: /Thầy đồng/ })).not.toHaveTextContent('Số xác');
 });
 
+test('inside a tab, roles with a holder come first, each group keeping the catalogue order', async () => {
+  // Danh mục Phe Ngỗng: Ngỗng (trống) → Thầy đồng (trống) → Dân phòng (chỉ có mùa trước) →
+  // Cảnh sát trưởng (có người) → Người Canada (có người). Thẻ có người lên đầu, còn lại giữ thứ tự.
+  const vigilante = role({ id: 4, key: 'vigilante', faction: 'goose', nameVi: 'Dân phòng', icon: '🔫', metricLabel: 'Số phát bắn trúng kẻ xấu' });
+  const sheriff = role({ id: 5, key: 'sheriff', faction: 'goose', nameVi: 'Cảnh sát trưởng', icon: '⭐', metricLabel: 'Số phát bắn trúng kẻ xấu' });
+  const canadian = role({ id: 6, key: 'canadian', faction: 'goose', nameVi: 'Người Canada', icon: '🍁', metricLabel: 'Số lần tự báo xác' });
+  stubFetch({
+    '2026-10': {
+      seasonId: '2026-10',
+      closed: false,
+      roles: [
+        { role: goose, holder: null, previous: null },
+        { role: medium, holder: null, previous: null },
+        { role: vigilante, holder: null, previous: { memberId: 9, displayName: 'Ngỗng Chín', score: 1, seasonId: '2026-09' } },
+        { role: sheriff, holder: { memberId: 5, displayName: 'Ngỗng Năm', score: 4 }, previous: null },
+        { role: canadian, holder: { memberId: 6, displayName: 'Ngỗng Sáu', score: 1 }, previous: null },
+        // Hai tab khác chỉ có một thẻ mỗi tab: thứ tự không đổi.
+        { role: swordsman, holder: null, previous: null },
+        { role: dodo, holder: { memberId: 3, displayName: 'Ngỗng Ba', score: 1 }, previous: null },
+      ],
+    },
+  });
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Cảnh sát trưởng: Ngỗng Năm' });
+
+  // Người giữ mùa trước không tính là "có người": Dân phòng vẫn đứng sau hai thẻ có người.
+  expect(characters()).toEqual([
+    'Cảnh sát trưởng: Ngỗng Năm',
+    'Người Canada: Ngỗng Sáu',
+    'Ngỗng: Chưa ai hoá thân',
+    'Thầy đồng: Chưa ai hoá thân',
+    'Dân phòng: Ngỗng Chín (mùa trước)',
+  ]);
+  // Link của mỗi ô vẫn là của chính role đó.
+  expect(screen.getAllByRole('link').map((tile) => tile.getAttribute('href'))).toEqual([
+    '/bang-xep-hang?role=5&mua=2026-10',
+    '/bang-xep-hang?role=6&mua=2026-10',
+    '/bang-xep-hang?role=1&mua=2026-10',
+    '/bang-xep-hang?role=3&mua=2026-10',
+    '/bang-xep-hang?role=4&mua=2026-10',
+  ]);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe thứ 3' }));
+  expect(characters()).toEqual(['Chim đa đa: Ngỗng Ba']);
+});
+
 test('switching to Phe Vịt shows duck roles, with the previous holder marked', async () => {
   stubFetch();
   renderAt('/dai-sanh');

@@ -1,9 +1,10 @@
 /**
  * Đại sảnh hoá thân (spec §4.7, §6): lưới thẻ role (`RoleCard`) của mọi role đang bật trong
  * một mùa, chia tab Phe Ngỗng / Phe Vịt / Phe thứ 3 (+ "Chế độ đặc biệt" khi có role riêng
- * của chế độ đang bật) vẽ thành chip màu phe. Mỗi ô là link (nhích lên khi rê chuột) tới
- * bảng xếp hạng của role đó trong mùa đó; thẻ ghi người dẫn đầu trên bảng tên, tên role,
- * `{điểm} {chỉ số}`, ghi chú bản đồ, và "mùa trước" khi mùa này chưa ai hoá thân.
+ * của chế độ đang bật) vẽ thành chip màu phe. Trong mỗi tab, thẻ đang có người hoá thân
+ * đứng trước thẻ trống (giữ thứ tự danh mục trong mỗi nhóm). Mỗi ô là link (nhích lên khi
+ * rê chuột) tới bảng xếp hạng của role đó trong mùa đó; thẻ ghi người dẫn đầu trên bảng tên,
+ * tên role, `{điểm} {chỉ số}`, ghi chú bản đồ, và "mùa trước" khi mùa này chưa ai hoá thân.
  *
  * Mùa trong `?mua=YYYY-MM`, tab trong `?phe=goose|duck|neutral|special` để chia sẻ
  * được; giá trị lạ thì về mặc định (mùa mới nhất, Phe Ngỗng) và không gửi lên API.
@@ -100,9 +101,10 @@ function HallGrid({ data, requestedTab, onTab }: HallGridProps) {
   const hasSpecial = data.roles.some((entry) => isSpecialRole(entry.role));
   const tab = resolveTab(requestedTab, hasSpecial);
   const tabs = TABS.filter((item) => item.key !== 'special' || hasSpecial);
-  const shown = data.roles.filter((entry) =>
+  const inTab = data.roles.filter((entry) =>
     tab === 'special' ? isSpecialRole(entry.role) : !isSpecialRole(entry.role) && entry.role.faction === tab,
   );
+  const shown = heldFirst(inTab);
 
   return (
     <div className="flex flex-col gap-4">
@@ -139,6 +141,15 @@ function HallGrid({ data, requestedTab, onTab }: HallGridProps) {
       )}
     </div>
   );
+}
+
+/**
+ * Thẻ đang có người hoá thân lên đầu, thẻ trống xuống sau; trong mỗi nhóm giữ nguyên thứ
+ * tự danh mục của API (chia nhóm ổn định, không xếp lại theo điểm). Chỉ có người giữ mùa
+ * trước (`previous`) mà chưa ai hoá thân mùa này thì vẫn là thẻ trống.
+ */
+function heldFirst(entries: HallRoleDto[]): HallRoleDto[] {
+  return [...entries.filter((entry) => entry.holder !== null), ...entries.filter((entry) => entry.holder === null)];
 }
 
 function resolveTab(requested: string | null, hasSpecial: boolean): HallTab {
