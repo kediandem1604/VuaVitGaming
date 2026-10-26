@@ -80,10 +80,14 @@ export class DiscordJsNotifier implements DiscordNotifier {
     }
   }
 
-  /** Gửi vào kênh thông báo đã cấu hình; kênh không tồn tại hay không gửi tin được → ném lỗi. */
+  /**
+   * Gửi vào kênh thông báo đã cấu hình; kênh không tồn tại hay không gửi tin được → ném lỗi.
+   * Không ping ai dù chữ có dạng @mention (tên người trong tổng kết là do thành viên tự đặt);
+   * không tin thông báo nào của app cần ping.
+   */
   async announce(text: string): Promise<void> {
     const channel = await this.sendableChannel(this.config.discord.announceChannelId, 'thông báo');
-    await channel.send(text);
+    await channel.send({ content: text, allowedMentions: { parse: [] } });
   }
 
   /**
