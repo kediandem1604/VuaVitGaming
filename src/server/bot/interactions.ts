@@ -35,7 +35,7 @@ import { parseCustomId } from './custom-ids.js';
 import type { CustomIdData } from './custom-ids.js';
 import { toGuildMemberInfo } from './guild-directory.js';
 import type { GuildMemberSource } from './guild-directory.js';
-import { formatMetricValue } from '../../shared/metric.js';
+import { formatReportValue } from '../../shared/metric.js';
 
 /** Phần của `Interaction` mà bộ định tuyến cần: chỉ để nhận ra từng loại tương tác. */
 export interface InteractionLike {
@@ -220,8 +220,10 @@ async function handleCommand(ctx: Ctx, interaction: CommandInteractionLike): Pro
 
 /**
  * `/baocao`: hồ sơ người gõ từ GuildMember → tra role (theo `key` từ autocomplete, hoặc
- * gõ tay đúng tên tiếng Việt) → đọc ngày → `submitReport` (mọi quy tắc khai nằm ở đó)
- * → xác nhận ẩn `Đã gửi: … Chờ mod duyệt nhé!`.
+ * gõ tay đúng tên tiếng Việt) → đọc ngày → `submitReport` (mọi quy tắc khai nằm ở đó,
+ * kể cả chỉ số phụ `so_lieu_phu`: role không có mà điền ≠ 0 → lỗi của service) → xác
+ * nhận ẩn `Đã gửi: … Chờ mod duyệt nhé!` (role có chỉ số phụ đọc "4 mạng đã giết + 2 lần
+ * ám sát trong cuộc họp").
  */
 async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Promise<void> {
   await interaction.deferReply(EPHEMERAL);
@@ -241,9 +243,11 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
 
     // `so_lieu` là bắt buộc; thiếu (client bị sửa) → NaN để service từ chối như giá trị sai.
     const value = interaction.options.getInteger(OPTION.value) ?? Number.NaN;
-    const report = await submitReport(ctx, member.id, { roleId: role.id, value, playedOn, note: interaction.options.getString(OPTION.note) });
+    // `so_lieu_phu` không bắt buộc; bỏ trống → 0 (như web).
+    const extraValue = interaction.options.getInteger(OPTION.extraValue) ?? 0;
+    const report = await submitReport(ctx, member.id, { roleId: role.id, value, extraValue, playedOn, note: interaction.options.getString(OPTION.note) });
     await interaction.editReply(
-      `Đã gửi: ${role.icon} ${role.nameVi} — ${formatMetricValue(report.value, role.metricLabel)} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
+      `Đã gửi: ${role.icon} ${role.nameVi} — ${formatReportValue(report.value, report.extraValue, role)} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
     );
   } catch (err) {
     await answerError(interaction, `/${interaction.commandName}`, err);

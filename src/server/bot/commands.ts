@@ -12,13 +12,13 @@ import type { Faction, HeldRoleDto, RoleDto } from '../../shared/api-types.js';
 import { normalizeText } from '../../shared/text.js';
 import { dateOnlyToDb, formatSeasonLabel } from '../lib/time.js';
 import type { LeaderboardRow } from '../modules/stats/leaderboard.js';
-import { formatMetricValue } from '../../shared/metric.js';
+import { formatSeasonScore } from '../../shared/metric.js';
 
 /** Tên lệnh — dùng ở định nghĩa và ở bộ định tuyến để hai bên không lệch nhau. */
 export const COMMAND = { report: 'baocao', leaderboard: 'bxh', profile: 'hoso' } as const;
 
-/** Tên tuỳ chọn của `/baocao` (và `role` của `/bxh`). */
-export const OPTION = { role: 'role', value: 'so_lieu', day: 'ngay', note: 'ghi_chu' } as const;
+/** Tên tuỳ chọn của `/baocao` (và `role` của `/bxh`). `extraValue` là chỉ số phụ (spec chỉ số phụ §6). */
+export const OPTION = { role: 'role', value: 'so_lieu', extraValue: 'so_lieu_phu', day: 'ngay', note: 'ghi_chu' } as const;
 
 /** Discord cho tối đa 25 gợi ý autocomplete. */
 const MAX_CHOICES = 25;
@@ -26,7 +26,7 @@ const MAX_CHOICES = 25;
 const CHOICE_NAME_MAX = 100;
 /** Ghi chú lần khai tối đa 300 ký tự (như `reports.ts`). */
 const NOTE_MAX = 300;
-/** `maxPerGame` của role nằm trong 1–100 nên giá trị khai không bao giờ quá 100. */
+/** `maxPerGame` (và `extraMaxPerGame`) của role nằm trong 1–100 nên giá trị khai không bao giờ quá 100. */
 const VALUE_MAX = 100;
 
 /** Màu phe (global constraints): Ngỗng, Vịt, Phe thứ 3. */
@@ -37,9 +37,11 @@ const FACTION_COLOUR: Record<Faction, number> = { goose: 0x2f80ed, duck: 0xe5484
 // ---------------------------------------------------------------------------
 
 /**
- * Ba lệnh chỉ dùng trong server (`dm_permission: false`): `/baocao role so_lieu [ngay]
- * [ghi_chu]`, `/bxh role`, `/hoso`. Tuỳ chọn bắt buộc đứng trước tuỳ chọn không bắt
- * buộc (Discord yêu cầu); `role` có autocomplete.
+ * Ba lệnh chỉ dùng trong server (`dm_permission: false`): `/baocao role so_lieu
+ * [so_lieu_phu] [ngay] [ghi_chu]`, `/bxh role`, `/hoso`. Tuỳ chọn bắt buộc đứng trước
+ * tuỳ chọn không bắt buộc (Discord yêu cầu) nên `so_lieu_phu` đứng ngay sau `so_lieu`;
+ * `role` có autocomplete. Role nào có chỉ số phụ do `submitReport` quyết — ở đây chỉ
+ * giới hạn 0–100 như `so_lieu`.
  */
 export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
   const roleOption = (description: string) => ({
@@ -62,6 +64,13 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           name: OPTION.value,
           description: 'Giá trị chỉ số của role trong trận (vd số mạng chém)',
           required: true,
+          min_value: 0,
+          max_value: VALUE_MAX,
+        },
+        {
+          type: ApplicationCommandOptionType.Integer,
+          name: OPTION.extraValue,
+          description: 'Chỉ số phụ, nếu role có (vd số lần ám sát trong cuộc họp); bỏ trống = 0',
           min_value: 0,
           max_value: VALUE_MAX,
         },
@@ -97,7 +106,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
 // ---------------------------------------------------------------------------
 
 export interface RoleChoice {
-  /** `{icon} {nameVi} — {metricLabel}`, cắt còn 100 ký tự. */
+  /** `{icon} {nameVi} — {metricLabel}`, thêm ` (+ {extraMetricLabel})` nếu role có chỉ số phụ; cắt còn 100 ký tự. */
   name: string;
   /** `key` của role — `/baocao` và `/bxh` tra role theo đây. */
   value: string;
@@ -121,7 +130,13 @@ export function filterRoleChoices(roles: readonly RoleDto[], query: string): Rol
     hits.sort((x, y) => Number(y.vi.startsWith(q)) - Number(x.vi.startsWith(q)));
     matched = hits.slice(0, MAX_CHOICES).map((h) => h.role);
   }
-  return matched.map((role) => ({ name: clipChars(`${role.icon} ${role.nameVi} — ${role.metricLabel}`, CHOICE_NAME_MAX), value: role.key }));
+  return matched.map((role) => ({ name: clipChars(choiceName(role), CHOICE_NAME_MAX), value: role.key }));
+}
+
+/** `{icon} {tên} — {nhãn chính}`; role có chỉ số phụ thêm ` (+ {nhãn phụ})` (spec chỉ số phụ §7). */
+function choiceName(role: RoleDto): string {
+  const extra = role.extraMetricLabel === null ? '' : ` (+ ${role.extraMetricLabel})`;
+  return `${role.icon} ${role.nameVi} — ${role.metricLabel}${extra}`;
 }
 
 /** Cắt theo ký tự Unicode (không cắt giữa một emoji). */
@@ -182,11 +197,12 @@ const pad4 = (n: number): string => String(n).padStart(4, '0');
 
 /**
  * Embed `/bxh`: tiêu đề `👑 Bảng xếp hạng {role} — mùa MM/YYYY`, mỗi dòng
- * `{hạng}. [👑 ]{tên} — {điểm} {chỉ số} ({trận} trận)` (👑 cho hạng 1), màu theo phe.
+ * `{hạng}. [👑 ]{tên} — {điểm mùa} ({trận} trận)` (👑 cho hạng 1), màu theo phe. Điểm mùa
+ * đọc theo `formatSeasonScore`: role có chỉ số phụ → "10 điểm", role thường → "7 mạng chém".
  * Chưa ai có điểm → một câu báo trống.
  */
 export function leaderboardEmbed(role: RoleDto, seasonId: string, rows: readonly LeaderboardRow[]): APIEmbed {
-  const lines = rows.map((r) => `${r.rank}. ${r.rank === 1 ? '👑 ' : ''}${r.displayName} — ${formatMetricValue(r.score, role.metricLabel)} (${r.games} trận)`);
+  const lines = rows.map((r) => `${r.rank}. ${r.rank === 1 ? '👑 ' : ''}${r.displayName} — ${formatSeasonScore(r.score, role)} (${r.games} trận)`);
   return {
     title: `👑 Bảng xếp hạng ${role.nameVi} — mùa ${formatSeasonLabel(seasonId)}`,
     description: lines.length > 0 ? lines.join('\n') : 'Chưa có ai khai điểm mùa này',

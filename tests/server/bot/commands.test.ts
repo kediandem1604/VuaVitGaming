@@ -60,14 +60,17 @@ test('definitions are valid for Discord', () => {
   }
 
   const [baocao, bxh, hoso] = defs;
-  expect(baocao?.options).toHaveLength(4);
-  expect(baocao?.options?.map((o) => o.name)).toEqual(['role', 'so_lieu', 'ngay', 'ghi_chu']);
+  expect(baocao?.options).toHaveLength(5);
+  // `so_lieu_phu` (chỉ số phụ, không bắt buộc) đứng ngay sau `so_lieu` (spec chỉ số phụ §6).
+  expect(baocao?.options?.map((o) => o.name)).toEqual(['role', 'so_lieu', 'so_lieu_phu', 'ngay', 'ghi_chu']);
   expect(baocao?.options?.[0]).toMatchObject({ type: ApplicationCommandOptionType.String, required: true, autocomplete: true });
   expect(baocao?.options?.[1]).toMatchObject({ type: ApplicationCommandOptionType.Integer, required: true, min_value: 0, max_value: 100 });
-  expect(baocao?.options?.[2]).toMatchObject({ type: ApplicationCommandOptionType.String });
+  expect(baocao?.options?.[2]).toMatchObject({ type: ApplicationCommandOptionType.Integer, min_value: 0, max_value: 100 });
   expect(baocao?.options?.[2]?.required ?? false).toBe(false);
-  expect(baocao?.options?.[3]).toMatchObject({ type: ApplicationCommandOptionType.String, max_length: 300 });
+  expect(baocao?.options?.[3]).toMatchObject({ type: ApplicationCommandOptionType.String });
   expect(baocao?.options?.[3]?.required ?? false).toBe(false);
+  expect(baocao?.options?.[4]).toMatchObject({ type: ApplicationCommandOptionType.String, max_length: 300 });
+  expect(baocao?.options?.[4]?.required ?? false).toBe(false);
 
   expect(bxh?.options).toHaveLength(1);
   expect(bxh?.options?.[0]).toMatchObject({ type: ApplicationCommandOptionType.String, name: 'role', required: true, autocomplete: true });
@@ -78,7 +81,7 @@ test('definitions are valid for Discord', () => {
 // Gợi ý role
 // ---------------------------------------------------------------------------
 
-/** RoleDto tối giản cho test thuần (không cần DB). */
+/** RoleDto tối giản cho test thuần (không cần DB); không có chỉ số phụ. */
 function role(key: string, nameVi: string, nameEn = key, icon = '🎲', metricLabel = 'Số điểm'): RoleDto {
   return {
     id: 0,
@@ -89,6 +92,9 @@ function role(key: string, nameVi: string, nameEn = key, icon = '🎲', metricLa
     description: '',
     metricLabel,
     maxPerGame: 10,
+    extraMetricLabel: null,
+    extraMaxPerGame: null,
+    extraPoints: null,
     mapNote: null,
     modeKey: null,
     icon,
@@ -97,6 +103,16 @@ function role(key: string, nameVi: string, nameEn = key, icon = '🎲', metricLa
     sortOrder: 0,
   };
 }
+
+/** Ám sát như seed: chỉ số chính "Số mạng đã giết" (tối đa 15), chỉ số phụ "Số lần ám sát trong cuộc họp" (tối đa 2, +3). */
+const assassinRole: RoleDto = {
+  ...role('assassin', 'Ám sát', 'Assassin', '🗡️', 'Số mạng đã giết'),
+  faction: 'duck',
+  maxPerGame: 15,
+  extraMetricLabel: 'Số lần ám sát trong cuộc họp',
+  extraMaxPerGame: 2,
+  extraPoints: 3,
+};
 
 test('role search ignores diacritics', async () => {
   const roles = await listRoles(ctx);
@@ -130,6 +146,22 @@ test('role search ranks nameVi prefix matches first, matches key and nameEn, cap
   const long = role('long', 'A'.repeat(120), 'Long');
   const [choice] = filterRoleChoices([long], 'aaa');
   expect(choice?.value).toBe('long');
+  expect([...(choice?.name ?? '')]).toHaveLength(100);
+});
+
+test('role choice names show the secondary metric in parentheses and are still clipped to 100 chars', () => {
+  // Role có chỉ số phụ: "{icon} {tên} — {nhãn chính} (+ {nhãn phụ})" (spec chỉ số phụ §7).
+  expect(filterRoleChoices([assassinRole], 'am sat')[0]).toEqual({
+    name: '🗡️ Ám sát — Số mạng đã giết (+ Số lần ám sát trong cuộc họp)',
+    value: 'assassin',
+  });
+  // Role thường không đổi.
+  expect(filterRoleChoices([role('goose', 'Ngỗng', 'Goose', '🪿', 'Số lần vote trúng Vịt')], 'ngong')[0]?.name).toBe('🪿 Ngỗng — Số lần vote trúng Vịt');
+
+  const longExtra: RoleDto = { ...assassinRole, extraMetricLabel: 'B'.repeat(120) };
+  const [choice] = filterRoleChoices([longExtra], 'am sat');
+  expect(choice?.value).toBe('assassin');
+  expect(choice?.name.startsWith('🗡️ Ám sát — Số mạng đã giết (+ BBB')).toBe(true);
   expect([...(choice?.name ?? '')]).toHaveLength(100);
 });
 
@@ -293,10 +325,10 @@ const baocao = (options: OptionValues, extra: { guildId?: string | null; member?
 const presser = () => testDb.member.findUniqueOrThrow({ where: { discordId: 'u1' } });
 const reports = () => testDb.statReport.findMany({ orderBy: { id: 'asc' } });
 
-/** Khai rồi duyệt ngay cho `member` (role `roleKey`, `value`), bằng một mod riêng. */
-async function approvedReport(member: Member, roleKey: string, value: number): Promise<void> {
+/** Khai rồi duyệt ngay cho `member` (role `roleKey`, `value` [+ `extraValue` chỉ số phụ]), bằng một mod riêng. */
+async function approvedReport(member: Member, roleKey: string, value: number, extraValue = 0): Promise<void> {
   const mod = (await testDb.member.findFirst({ where: { accessLevel: 'mod' } })) ?? (await createMember(testDb, { accessLevel: 'mod', displayName: 'Mod' }));
-  const r = await submitReport(ctx, member.id, { roleId: (await roleByKey(testDb, roleKey)).id, value, playedOn: '2026-10-22' });
+  const r = await submitReport(ctx, member.id, { roleId: (await roleByKey(testDb, roleKey)).id, value, extraValue, playedOn: '2026-10-22' });
   await reviewReport(ctx, { id: mod.id, accessLevel: mod.accessLevel }, r.id, { approve: true });
 }
 
@@ -310,6 +342,11 @@ test('autocomplete answers directly with active roles matching the typed text', 
   expect(i.responses).toHaveLength(1);
   expect(i.responses[0]?.[0]).toEqual({ name: '⚔️ Kiếm sĩ — Số mạng chém', value: 'swordsman' });
   expect(i.responses[0]?.length).toBeLessThanOrEqual(25);
+
+  // Role có chỉ số phụ (Ám sát trong seed) nêu cả hai nhãn.
+  const assassin = new FakeAutocomplete('baocao', 'am sat');
+  await handleInteraction(ctx, assassin);
+  expect(assassin.responses[0]?.[0]).toEqual({ name: '🗡️ Ám sát — Số mạng đã giết (+ Số lần ám sát trong cuộc họp)', value: 'assassin' });
 
   const all = new FakeAutocomplete('bxh', '');
   await handleInteraction(ctx, all);
@@ -423,6 +460,43 @@ test('/baocao rejects an unparsable day with the hint copy', async () => {
   expect(await reports()).toEqual([]);
 });
 
+test('/baocao passes so_lieu_phu as the secondary metric and confirms with "x + y"', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  const i = baocao({ role: 'assassin', so_lieu: 4, so_lieu_phu: 2 });
+  await handleInteraction(ctx, i);
+  expect(i.steps).toEqual([
+    { step: 'defer', ephemeral: true },
+    { step: 'edit', content: 'Đã gửi: 🗡️ Ám sát — 4 mạng đã giết + 2 lần ám sát trong cuộc họp ngày 22/10. Chờ mod duyệt nhé!' },
+  ]);
+  expect((await reports())[0]).toMatchObject({ roleId: assassin.id, value: 4, extraValue: 2, status: 'pending' });
+
+  // Bỏ trống `so_lieu_phu` → 0; tin xác nhận vẫn nêu cả hai chỉ số.
+  const none = baocao({ role: 'assassin', so_lieu: 3 });
+  await handleInteraction(ctx, none);
+  expect(none.lastText).toBe('Đã gửi: 🗡️ Ám sát — 3 mạng đã giết + 0 lần ám sát trong cuộc họp ngày 22/10. Chờ mod duyệt nhé!');
+  expect((await reports())[1]).toMatchObject({ value: 3, extraValue: 0 });
+
+  // Role thường: tin xác nhận như cũ, lần khai có extraValue 0.
+  const plain = baocao({ role: 'swordsman', so_lieu: 5 });
+  await handleInteraction(ctx, plain);
+  expect(plain.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 5 mạng chém ngày 22/10. Chờ mod duyệt nhé!');
+  expect((await reports())[2]).toMatchObject({ value: 5, extraValue: 0 });
+  expect(errors).not.toHaveBeenCalled();
+});
+
+test('/baocao answers secondary-metric rule violations with the business message', async () => {
+  const over = baocao({ role: 'assassin', so_lieu: 1, so_lieu_phu: 3 });
+  await handleInteraction(ctx, over);
+  expect(over.lastText).toBe('Chỉ số phụ phải từ 0 đến 2');
+
+  const noExtra = baocao({ role: 'swordsman', so_lieu: 1, so_lieu_phu: 1 });
+  await handleInteraction(ctx, noExtra);
+  expect(noExtra.lastText).toBe('Role này không có chỉ số phụ');
+
+  expect(await reports()).toEqual([]);
+  expect(errors).not.toHaveBeenCalled();
+});
+
 test('/baocao answers rule violations with the business message', async () => {
   const over = baocao({ role: 'swordsman', so_lieu: 99 });
   await handleInteraction(ctx, over);
@@ -477,6 +551,28 @@ test('/bxh replies publicly with a faction-coloured top-10 embed', async () => {
   expect(errors).not.toHaveBeenCalled();
 });
 
+test('/bxh shows "N điểm" for a role with a secondary metric', async () => {
+  const an = await createMember(testDb, { displayName: 'An' });
+  const binh = await createMember(testDb, { displayName: 'Bình' });
+  // An: 4 + 2×3 = 10 điểm; Bình: 7 + 0 = 7 điểm (một trận mỗi người).
+  await approvedReport(an, 'assassin', 4, 2);
+  await approvedReport(binh, 'assassin', 7);
+
+  const i = new FakeCommand('bxh', { options: { role: 'assassin' } });
+  await handleInteraction(ctx, i);
+  expect(i.steps[1]).toEqual({
+    step: 'edit',
+    embeds: [
+      {
+        title: '👑 Bảng xếp hạng Ám sát — mùa 10/2026',
+        description: ['1. 👑 An — 10 điểm (1 trận)', '2. Bình — 7 điểm (1 trận)'].join('\n'),
+        color: 0xe5484d,
+      },
+    ],
+  });
+  expect(errors).not.toHaveBeenCalled();
+});
+
 test('/bxh for a role nobody reported says so; unknown role is answered as text', async () => {
   const i = new FakeCommand('bxh', { options: { role: 'cuckoo' } });
   await handleInteraction(ctx, i);
@@ -504,6 +600,8 @@ test('/hoso shows the member code, held roles this season and the web link, ephe
   const other = await createMember(testDb, { displayName: 'Bình' });
   await approvedReport(me, 'swordsman', 7);
   await approvedReport(me, 'cuckoo', 3);
+  // Role có chỉ số phụ: điểm mùa = 4 + 2×3 = 10 (chỉ hiện số, không có nhãn).
+  await approvedReport(me, 'assassin', 4, 2);
   await approvedReport(other, 'goose', 9);
 
   const i = new FakeCommand('hoso');
@@ -513,6 +611,7 @@ test('/hoso shows the member code, held roles this season and the web link, ephe
   const text = i.lastText ?? '';
   expect(text).toContain('GGD-0007');
   expect(text).toContain('⚔️ Kiếm sĩ (7), 🥚 Cò gáy (3)');
+  expect(text).toContain('🗡️ Ám sát (10)');
   expect(text).not.toContain('Ngỗng');
   expect(text).toContain('http://localhost:3000/ho-so');
   // Hồ sơ được làm mới từ Discord.
