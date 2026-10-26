@@ -254,6 +254,44 @@ export interface SeasonDto {
   closed: boolean;
 }
 
+/** Người nhận một danh hiệu — đủ để vẽ avatar + tên và link tới trang thành viên `/thanh-vien/:id`. */
+export interface BadgeMemberDto {
+  id: number;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+/**
+ * Một danh hiệu đã trao (`GET /api/badges`, `PublicMemberDto.badges`). `title`, `icon`, `detail`
+ * là chữ đóng băng lúc trao; `kind` tra từ danh mục `src/shared/badges.ts` theo `badgeKey`;
+ * `periodId` là `YYYY-MM` với danh hiệu tháng, `''` với cột mốc; `awardedAt` ISO 8601 (UTC).
+ */
+export interface BadgeDto {
+  id: number;
+  badgeKey: string;
+  kind: 'monthly' | 'milestone';
+  periodId: string;
+  title: string;
+  icon: string;
+  detail: string;
+  awardedAt: string;
+  member: BadgeMemberDto;
+}
+
+/**
+ * Trang thành viên công khai (`GET /api/members/:id`, mọi thành viên đã đăng nhập xem được):
+ * KHÔNG có email, quyền hay Discord id. `joinedAt` ISO 8601 (UTC); `left` = đã rời server;
+ * `badges` mọi danh hiệu của người đó, mới nhất trước.
+ */
+export interface PublicMemberDto {
+  id: number;
+  displayName: string;
+  avatarUrl: string | null;
+  joinedAt: string;
+  left: boolean;
+  badges: BadgeDto[];
+}
+
 export type MemberStatus = 'active' | 'left';
 
 /**

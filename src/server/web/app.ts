@@ -22,6 +22,7 @@ import { adminCategoryRoutes } from './routes/admin-categories.js';
 import { adminMiscRoutes } from './routes/admin-misc.js';
 import { adminModeRoutes } from './routes/admin-modes.js';
 import { authRoutes } from './routes/auth.js';
+import { badgeRoutes } from './routes/badges.js';
 import { meRoutes } from './routes/me.js';
 import { mvpRoutes } from './routes/mvp.js';
 import { ROLE_IMAGE_TYPES, ROLE_IMAGE_UPLOAD_ROUTE, roleRoutes } from './routes/roles.js';
@@ -83,6 +84,7 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(adminModeRoutes);
   await app.register(roleRoutes);
   await app.register(statsRoutes);
+  await app.register(badgeRoutes);
 
   if (deps.webDistDir !== undefined) {
     await app.register(fastifyStatic, { root: deps.webDistDir });
