@@ -9,10 +9,16 @@
  * tên role + chip phe; role đã chọn hiện thành thẻ nhỏ có nhân vật; chip trạng thái lần khai: chờ
  * duyệt `gold`, đã duyệt `ok`, bị từ chối `duck-soft`.
  *
- * Form chỉ chặn tại chỗ hai lỗi hiển nhiên (chưa chọn role, chưa nhập giá trị) và file
- * highlight sai loại/quá cỡ; mọi quy tắc khác (giới hạn của role, cửa sổ 3 ngày, mùa đã
- * chốt…) do server báo và thông báo của server được hiện nguyên văn. Lần khai vừa tạo/sửa
- * được ghi thẳng vào cache danh sách (dùng DTO server trả về) thay vì tải lại.
+ * Form chỉ chặn tại chỗ hai lỗi hiển nhiên (chưa chọn role, chưa nhập giá trị), chỉ số phụ
+ * ngoài giới hạn và file highlight sai loại/quá cỡ; mọi quy tắc khác (giới hạn của chỉ số
+ * chính, cửa sổ 3 ngày, mùa đã chốt…) do server báo và thông báo của server được hiện nguyên
+ * văn. Lần khai vừa tạo/sửa được ghi thẳng vào cache danh sách (dùng DTO server trả về) thay
+ * vì tải lại.
+ *
+ * Chỉ số phụ (spec chỉ số phụ §6–7): role có chỉ số phụ thì form khai và form sửa có ô thứ hai
+ * (nhãn = `extraMetricLabel`, gợi ý "Tối đa N mỗi trận · +P điểm mỗi lần", mặc định 0) gửi
+ * thành `extraValue`; role không có thì không gửi trường này. Dòng của một lần khai đọc qua
+ * `formatReportValue` ("4 mạng đã giết + 2 lần ám sát trong cuộc họp").
  *
  * Highlight (spec highlight §3): ô file không bắt buộc, chỉ hiện khi tính năng dùng được;
  * gửi = tạo lần khai rồi mới tải file, lỗi tải file không huỷ lần khai. Danh sách có link
@@ -21,8 +27,8 @@
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { Faction, HighlightConfigDto, ReportDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
-import { formatMetricValue } from '../../shared/metric';
+import type { Faction, HighlightConfigDto, ReportDto, ReportRoleDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
+import { formatReportValue, hasExtraMetric } from '../../shared/metric';
 import { normalizeText } from '../../shared/text';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { Character } from '../components/Character';
@@ -74,6 +80,8 @@ const HINT_CLASS = 'text-sm text-night-300';
 interface ReportBody {
   roleId: number;
   value: number;
+  /** Chỉ gửi với role có chỉ số phụ (server mặc định 0). */
+  extraValue?: number;
   playedOn: string;
   sessionId?: number;
   note?: string;
@@ -81,8 +89,31 @@ interface ReportBody {
 
 interface ReportPatchBody {
   value: number;
+  /** Chỉ gửi với role có chỉ số phụ (không gửi thì server giữ giá trị cũ). */
+  extraValue?: number;
   playedOn: string;
   note: string | null;
+}
+
+/** Giá trị mặc định của ô chỉ số phụ: 0 (hầu hết trận không có lần ám sát trong họp). */
+const EXTRA_DEFAULT = '0';
+
+/**
+ * Phần role mà form cần để vẽ ô chỉ số phụ: `RoleDto` (form khai) và `ReportDto.role` (form sửa)
+ * đều khớp. Ba trường phụ cùng có hoặc cùng null.
+ */
+type FormRole = Pick<ReportRoleDto, 'metricLabel' | 'maxPerGame' | 'extraMetricLabel' | 'extraMaxPerGame' | 'extraPoints'>;
+
+/**
+ * Đọc ô chỉ số phụ đã gõ: trống = 0; phải là số nguyên trong [0, extraMaxPerGame], không thì
+ * trả lời báo cùng chữ với server (`VALUE_OUT_OF_RANGE`). Role không có chỉ số phụ → 0, không lỗi.
+ */
+function parseExtraValue(raw: string, role: FormRole): { value: number; error: null } | { value: null; error: string } {
+  if (!hasExtraMetric(role)) return { value: 0, error: null };
+  const max = role.extraMaxPerGame ?? 0;
+  const value = raw.trim() === '' ? 0 : Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > max) return { value: null, error: `Chỉ số phụ phải từ 0 đến ${max}` };
+  return { value, error: null };
 }
 
 /** Gửi khai điểm: thân JSON và file highlight đã kiểm tra (nếu có chọn). */
@@ -169,6 +200,7 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
 
   const [role, setRole] = useState<RoleDto | null>(null);
   const [value, setValue] = useState('');
+  const [extraValue, setExtraValue] = useState(EXTRA_DEFAULT);
   const [playedOn, setPlayedOn] = useState(today);
   const [sessionId, setSessionId] = useState('');
   const [note, setNote] = useState('');
@@ -210,6 +242,7 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
       queryClient.setQueryData<ReportDto[]>(MY_REPORTS_KEY, (current) => [report, ...(current ?? [])]);
       if (upload && highlightError === null) refreshReviewQueue(queryClient);
       setValue('');
+      setExtraValue(EXTRA_DEFAULT);
       setNote('');
       clearFile();
     },
@@ -231,6 +264,11 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
       setLocalError(`Hãy nhập ${role.metricLabel}`);
       return;
     }
+    const extra = parseExtraValue(extraValue, role);
+    if (extra.error !== null) {
+      setLocalError(extra.error);
+      return;
+    }
     // File sai loại/quá cỡ: không gửi gì cả; lời báo đang hiện được dựng lại để đọc lại (xem `refusals`).
     // Lối ra: nút "Bỏ file" rồi gửi không kèm highlight, hoặc chọn file khác.
     if (chosen?.problem) {
@@ -243,6 +281,7 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
       body: {
         roleId: role.id,
         value: Number(value),
+        ...(hasExtraMetric(role) ? { extraValue: extra.value } : {}),
         playedOn,
         ...(sessionId !== '' ? { sessionId: Number(sessionId) } : {}),
         ...(trimmedNote !== '' ? { note: trimmedNote } : {}),
@@ -265,6 +304,8 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
         selected={role}
         onSelect={(next) => {
           setRole(next);
+          // Ô phụ của role trước không có nghĩa với role mới: về mặc định.
+          setExtraValue(EXTRA_DEFAULT);
           touch();
         }}
       />
@@ -290,6 +331,18 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
         />
         <p className={HINT_CLASS}>{role ? `Tối đa ${role.maxPerGame} mỗi trận` : 'Chọn role để biết chỉ số cần khai'}</p>
       </div>
+
+      {role && hasExtraMetric(role) && (
+        <ExtraField
+          id={ids.extra}
+          role={role}
+          value={extraValue}
+          onChange={(next) => {
+            setExtraValue(next);
+            touch();
+          }}
+        />
+      )}
 
       <DateField
         id={ids.date}
@@ -362,6 +415,7 @@ function useFieldIds() {
   const base = useId();
   return {
     value: `${base}-value`,
+    extra: `${base}-extra`,
     date: `${base}-date`,
     session: `${base}-session`,
     note: `${base}-note`,
@@ -507,6 +561,42 @@ function FactionChip({ faction }: { faction: Faction }) {
 // Các ô dùng chung cho form khai và form sửa
 // ---------------------------------------------------------------------------
 
+interface ExtraFieldProps {
+  id: string;
+  /** Role có chỉ số phụ (người gọi đã kiểm `hasExtraMetric`). */
+  role: FormRole;
+  value: string;
+  onChange: (value: string) => void;
+}
+
+/**
+ * Ô chỉ số phụ (spec chỉ số phụ §6): nhãn = `extraMetricLabel`, giới hạn [0, extraMaxPerGame], gợi
+ * ý "Tối đa N mỗi trận · +P điểm mỗi lần". Cùng dáng với ô chỉ số chính ngay trên.
+ */
+function ExtraField({ id, role, value, onChange }: ExtraFieldProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className={LABEL_CLASS}>
+        {role.extraMetricLabel}
+      </label>
+      <input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={role.extraMaxPerGame ?? undefined}
+        step={1}
+        className="field"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <p className={HINT_CLASS}>
+        Tối đa {role.extraMaxPerGame} mỗi trận · +{role.extraPoints} điểm mỗi lần
+      </p>
+    </div>
+  );
+}
+
 interface DateFieldProps {
   id: string;
   today: string;
@@ -632,7 +722,8 @@ function ReportItem({ report, highlight }: ReportItemProps) {
         <EditForm report={report} onDone={() => setEditing(false)} />
       ) : (
         <>
-          <p className="font-bold text-white">{formatMetricValue(report.value, report.role.metricLabel)}</p>
+          {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
+          <p className="font-bold break-words text-white">{formatReportValue(report.value, report.extraValue, report.role)}</p>
           {report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>}
           {report.note && <p className="text-sm text-night-200">{report.note}</p>}
           {report.status === 'rejected' && report.rejectReason && (
@@ -664,12 +755,16 @@ function ReportItem({ report, highlight }: ReportItemProps) {
   );
 }
 
-/** Sửa giá trị / ngày / ghi chú của lần khai còn chờ duyệt (PATCH); role và buổi giữ nguyên. */
+/**
+ * Sửa giá trị (và chỉ số phụ nếu role có) / ngày / ghi chú của lần khai còn chờ duyệt (PATCH);
+ * role và buổi giữ nguyên. Ô chính giới hạn theo `role.maxPerGame`, ô phụ theo `extraMaxPerGame`.
+ */
 function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void }) {
   const queryClient = useQueryClient();
   const ids = useFieldIds();
   const today = vnTodayIso();
   const [value, setValue] = useState(String(report.value));
+  const [extraValue, setExtraValue] = useState(String(report.extraValue));
   const [playedOn, setPlayedOn] = useState(report.playedOn);
   const [note, setNote] = useState(report.note ?? '');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -690,9 +785,19 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
       setLocalError(`Hãy nhập ${report.role.metricLabel}`);
       return;
     }
+    const extra = parseExtraValue(extraValue, report.role);
+    if (extra.error !== null) {
+      setLocalError(extra.error);
+      return;
+    }
     setLocalError(null);
     const trimmedNote = note.trim();
-    save.mutate({ value: Number(value), playedOn, note: trimmedNote === '' ? null : trimmedNote });
+    save.mutate({
+      value: Number(value),
+      ...(hasExtraMetric(report.role) ? { extraValue: extra.value } : {}),
+      playedOn,
+      note: trimmedNote === '' ? null : trimmedNote,
+    });
   };
 
   const error = localError ?? (save.isError ? errorMessage(save.error) : null);
@@ -708,6 +813,7 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
           type="number"
           inputMode="numeric"
           min={0}
+          max={report.role.maxPerGame}
           step={1}
           className="field"
           value={value}
@@ -716,7 +822,19 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
             setLocalError(null);
           }}
         />
+        <p className={HINT_CLASS}>Tối đa {report.role.maxPerGame} mỗi trận</p>
       </div>
+      {hasExtraMetric(report.role) && (
+        <ExtraField
+          id={ids.extra}
+          role={report.role}
+          value={extraValue}
+          onChange={(next) => {
+            setExtraValue(next);
+            setLocalError(null);
+          }}
+        />
+      )}
       <DateField id={ids.date} today={today} value={playedOn} onChange={setPlayedOn} />
       <NoteField id={ids.note} value={note} onChange={setNote} />
       <div className="flex flex-wrap gap-2">

@@ -9,6 +9,9 @@ const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'icon' |
   nameEn: over.key,
   description: '',
   maxPerGame: 10,
+  extraMetricLabel: null,
+  extraMaxPerGame: null,
+  extraPoints: null,
   mapNote: null,
   modeKey: null,
   hasImage: false,
@@ -26,6 +29,19 @@ const roles: RoleDto[] = [
   role({ id: 6, key: 'canadian', faction: 'goose', nameVi: 'Người Canada', icon: '🍁', metricLabel: LONG_METRIC }),
   role({ id: 80, key: 'inquisitor', faction: 'goose', nameVi: 'Thanh tra', icon: '🪿', metricLabel: 'Điểm', modeKey: 'corruption' }),
   role({ id: 61, key: 'swordsman', faction: 'duck', nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém' }),
+  // Role có chỉ số phụ: điểm mùa đã trộn hai chỉ số nên đọc "N điểm".
+  role({
+    id: 50,
+    key: 'assassin',
+    faction: 'duck',
+    nameVi: 'Ám sát',
+    icon: '🗡️',
+    metricLabel: 'Số mạng đã giết',
+    maxPerGame: 15,
+    extraMetricLabel: 'Số lần ám sát trong cuộc họp',
+    extraMaxPerGame: 2,
+    extraPoints: 3,
+  }),
   role({ id: 70, key: 'dodo', faction: 'neutral', nameVi: 'Chim đa đa', icon: '🦤', metricLabel: 'Số trận thắng (bị vote ra)' }),
 ];
 
@@ -49,21 +65,32 @@ const boards: Record<string, LeaderboardRowDto[]> = {
   '6@2026-10': [row(1, 5, 'Ngỗng Năm', 3, 4)],
   '61@2026-09': [row(1, 2, 'Vịt Hai', 12, 5)],
   '61@2026-10': [],
+  // Ám sát: điểm mùa (4 giết + 2 ám sát họp × 3 = 10), không còn đơn vị.
+  '50@2026-10': [row(1, 11, 'Vịt Mười Một', 10, 2), row(2, 12, 'Vịt Mười Hai', 3, 1)],
   // Bốn hàng: bục chỉ lấy ba, bảng đầy đủ bên dưới có cả bốn.
   '70@2026-10': [row(1, 7, 'Ngỗng Bảy', 9, 3), row(2, 8, 'Vịt Tám', 6, 2), row(3, 9, 'Ngỗng Chín', 2, 1), row(4, 10, 'Vịt Mười', 1, 1)],
 };
 
-/** Phần role của một dòng "Top 3 mỗi phe". */
-const topRole = (id: number, nameVi: string, icon: string, metricLabel: string, faction: FactionTopRowDto['role']['faction']) => ({
+/** Phần role của một dòng "Top 3 mỗi phe"; `extra` = nhãn phụ và điểm mỗi lần (mặc định không có). */
+const topRole = (
+  id: number,
+  nameVi: string,
+  icon: string,
+  metricLabel: string,
+  faction: FactionTopRowDto['role']['faction'],
+  extra: Pick<FactionTopRowDto['role'], 'extraMetricLabel' | 'extraPoints'> = { extraMetricLabel: null, extraPoints: null },
+): FactionTopRowDto['role'] => ({
   id,
   nameVi,
   icon,
   metricLabel,
   faction,
+  ...extra,
 });
 const VIGILANTE = topRole(4, 'Dân phòng', '🔫', 'Số phát bắn trúng kẻ xấu', 'goose');
 const GOOSE = topRole(1, 'Ngỗng', '🪿', 'Số lần vote trúng Vịt', 'goose');
 const SWORDSMAN = topRole(61, 'Kiếm sĩ', '⚔️', 'Số mạng chém', 'duck');
+const ASSASSIN = topRole(50, 'Ám sát', '🗡️', 'Số mạng đã giết', 'duck', { extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraPoints: 3 });
 
 const topRow = (rank: number, memberId: number, displayName: string, role: FactionTopRowDto['role'], value: number, weight: number, games: number): FactionTopRowDto => ({
   rank,
@@ -419,6 +446,46 @@ test('member names link to the public member page while role links stay', async 
 
   // Không có link lồng trong link ở bất kỳ đâu trên trang.
   for (const link of screen.getAllByRole('link')) expect(within(link).queryByRole('link')).toBeNull();
+});
+
+test('an extra-metric role reads "N điểm" on the podium, in the table and in Top 3 mỗi phe, with both metrics on the "Chỉ số:" line', async () => {
+  const tops: Record<string, FactionTopDto> = {
+    '2026-10': {
+      seasonId: '2026-10',
+      factions: {
+        goose: [],
+        // Ám sát 10 điểm mùa (hệ số 1) xếp trên Kiếm sĩ 7 mạng chém.
+        duck: [topRow(1, 11, 'Vịt Mười Một', ASSASSIN, 10, 1, 2), topRow(2, 2, 'Vịt Hai', SWORDSMAN, 7, 1, 3)],
+        neutral: [],
+      },
+    },
+  };
+  stubFetch(tops);
+  renderAt('/bang-xep-hang?role=50');
+  await findBoard();
+
+  expect(screen.getByRole('heading', { level: 2, name: /Ám sát/ })).toBeInTheDocument();
+  expect(screen.getByText('Chỉ số: Số mạng đã giết (+1 điểm) · Số lần ám sát trong cuộc họp (+3 điểm)')).toBeInTheDocument();
+
+  // Bục và bảng: "10 điểm", không in nhãn chỉ số nào.
+  const [gold, silver] = podiumItems() as [HTMLElement, HTMLElement];
+  expect(gold).toHaveTextContent('10 điểm');
+  expect(silver).toHaveTextContent('3 điểm');
+  expect(gold).not.toHaveTextContent('mạng đã giết');
+  const [first, second] = boardItems() as [HTMLElement, HTMLElement];
+  expect(first).toHaveTextContent('Vịt Mười Một');
+  expect(first).toHaveTextContent('10 điểm');
+  expect(first).toHaveTextContent('2 trận');
+  expect(first).not.toHaveTextContent('mạng đã giết');
+  expect(second).toHaveTextContent('3 điểm');
+
+  // Top 3 mỗi phe: dòng của Ám sát đọc "10 điểm" thay cho `{giá trị} {nhãn}`; Kiếm sĩ như cũ.
+  const duck = within(factionList('Phe Vịt')).getAllByRole('listitem');
+  expect(duck).toHaveLength(2);
+  expect(duck[0]).toHaveTextContent('Ám sát · 10 điểm');
+  expect(duck[0]).not.toHaveTextContent('mạng đã giết');
+  expect(duck[1]).toHaveTextContent('Kiếm sĩ · 7 mạng chém');
+  expect(duck[1]).toHaveTextContent('7 điểm');
 });
 
 test('a failed board load shows the message and Thử lại recovers', async () => {

@@ -10,6 +10,9 @@
  * 1), avatar, tên, điểm, số trận. Tên người ở mọi chỗ (dòng phe, bục, bảng) là link tới trang
  * thành viên công khai (spec huy hiệu §9).
  *
+ * Role có chỉ số phụ (spec chỉ số phụ §7): dòng "Chỉ số:" ghi cả hai chỉ số kèm điểm mỗi đơn
+ * vị; điểm mùa trên bục, trong bảng và ở "Top 3 mỗi phe" đọc "N điểm" thay cho `{N} {nhãn}`.
+ *
  * Role trong `?role={id}`, mùa trong `?mua=YYYY-MM` (Đại sảnh và dòng "Top 3 mỗi phe" dẫn
  * tới đây với cả hai); giá trị lạ về mặc định (role đầu danh mục, mùa mới nhất), không gửi lên API.
  */
@@ -17,7 +20,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import type { Faction, FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleDto } from '../../shared/api-types';
-import { metricAfterValue } from '../../shared/metric';
+import { formatSeasonScore, hasExtraMetric } from '../../shared/metric';
 import { apiGet } from '../api';
 import { Avatar } from '../components/Avatar';
 import { EmptyState } from '../components/EmptyState';
@@ -102,7 +105,7 @@ export function LeaderboardPage() {
                           <span aria-hidden="true">{role.icon}</span> {role.nameVi}
                         </h2>
                         {role.description && <p className="text-sm text-night-200">{role.description}</p>}
-                        <p className="text-sm text-night-300">Chỉ số: {role.metricLabel}</p>
+                        <p className="text-sm text-night-300">Chỉ số: {metricsLine(role)}</p>
                       </div>
                       <QueryState query={board}>{(rows) => <Board role={role} rows={rows} />}</QueryState>
                     </section>
@@ -115,6 +118,15 @@ export function LeaderboardPage() {
       </QueryState>
     </div>
   );
+}
+
+/**
+ * Phần sau "Chỉ số:" — role thường chỉ có nhãn; role có chỉ số phụ ghi cả hai kèm điểm mỗi đơn vị
+ * (chỉ số chính luôn +1): "Số mạng đã giết (+1 điểm) · Số lần ám sát trong cuộc họp (+3 điểm)".
+ */
+function metricsLine(role: RoleDto): string {
+  if (!hasExtraMetric(role)) return role.metricLabel;
+  return `${role.metricLabel} (+1 điểm) · ${role.extraMetricLabel} (+${role.extraPoints} điểm)`;
 }
 
 /** `?role=` phải là số nguyên và là một role đang bật; không thì role đầu danh mục. */
@@ -186,9 +198,9 @@ function FactionBlock({ faction, rows, seasonId }: FactionBlockProps) {
 /**
  * Một dòng: huy chương, avatar, rồi hai dòng chữ — tên người (link tới trang thành viên) với
  * `{điểm} điểm` bên phải (role có hệ số ghi thêm `{giá trị} × {hệ số}` nhỏ bên dưới), và
- * `{icon} {role} · {giá trị thô} {chỉ số}` với tên role là link tới bảng của role đó trong mùa
- * đang xem. Hai link tách dòng, không lồng nhau. Hai dòng để nhãn chỉ số dài (tới 40 ký tự)
- * xuống dòng thay vì tràn ngang ở 320px.
+ * `{icon} {role} · {điểm mùa} {chỉ số}` (role có chỉ số phụ: `{điểm mùa} điểm`) với tên role là
+ * link tới bảng của role đó trong mùa đang xem. Hai link tách dòng, không lồng nhau. Hai dòng
+ * để nhãn chỉ số dài (tới 40 ký tự) xuống dòng thay vì tràn ngang ở 320px.
  */
 function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string }) {
   return (
@@ -219,7 +231,7 @@ function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string
             <span aria-hidden="true">{row.role.icon}</span> {row.role.nameVi}
           </Link>
           {' · '}
-          <span className="tabular-nums">{row.value}</span> {metricAfterValue(row.role.metricLabel)}
+          <span className="tabular-nums">{formatSeasonScore(row.value, row.role)}</span>
         </p>
       </div>
     </li>
@@ -291,11 +303,18 @@ function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
             <Link to={memberPath(row.memberId)} className="min-w-0 flex-1 truncate font-bold text-white hover:underline">
               {row.displayName}
             </Link>
-            {/* Chỉ số đã ghi một lần trên đầu ("Chỉ số: …") và trên bục; dòng chỉ ghi số để không tràn ở 320px với nhãn dài. */}
+            {/*
+             * Chỉ số đã ghi một lần trên đầu ("Chỉ số: …") và trên bục; dòng chỉ ghi số (title = tên chỉ
+             * số) để không tràn ở 320px với nhãn dài. Role có chỉ số phụ không có đơn vị dài: ghi "N điểm".
+             */}
             <span className="flex shrink-0 flex-col items-end leading-tight">
-              <span className="font-bold text-gold tabular-nums" title={role.metricLabel}>
-                {row.score}
-              </span>
+              {hasExtraMetric(role) ? (
+                <span className="font-bold text-gold tabular-nums">{formatSeasonScore(row.score, role)}</span>
+              ) : (
+                <span className="font-bold text-gold tabular-nums" title={role.metricLabel}>
+                  {row.score}
+                </span>
+              )}
               <span className="text-sm text-night-300 tabular-nums">{row.games} trận</span>
             </span>
           </li>

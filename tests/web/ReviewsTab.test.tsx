@@ -4,10 +4,24 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { ReportDto } from '../../src/shared/api-types';
 import { ReviewsTab } from '../../src/web/pages/admin/ReviewsTab';
 
+/** Phần role của một lần khai; `extra` = ba trường chỉ số phụ (mặc định không có). */
+const reportRole = (
+  id: number,
+  nameVi: string,
+  icon: string,
+  metricLabel: string,
+  maxPerGame = 15,
+  extra: Pick<ReportDto['role'], 'extraMetricLabel' | 'extraMaxPerGame' | 'extraPoints'> = { extraMetricLabel: null, extraMaxPerGame: null, extraPoints: null },
+): ReportDto['role'] => ({ id, nameVi, icon, metricLabel, maxPerGame, ...extra });
+
+const ASSASSIN = reportRole(50, 'Ám sát', '🗡️', 'Số mạng đã giết', 15, { extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraMaxPerGame: 2, extraPoints: 3 });
+
 const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id'>): ReportDto => ({
   member: { id: 9, displayName: 'Ngỗng Chín' },
-  role: { id: 61, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém' },
+  role: reportRole(61, 'Kiếm sĩ', '⚔️', 'Số mạng chém'),
   value: 4,
+  extraValue: 0,
+  points: over.value ?? 4,
   playedOn: '2026-10-22',
   sessionId: 7,
   note: 'Trận cuối',
@@ -20,7 +34,7 @@ const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id'>): ReportDto => 
 
 const queue: ReportDto[] = [
   report({ id: 1 }),
-  report({ id: 2, member: { id: 10, displayName: 'Vịt Mười' }, role: { id: 1, nameVi: 'Ngỗng', icon: '🪿', metricLabel: 'Số lần vote trúng Vịt' }, value: 2, sessionId: null, note: null }),
+  report({ id: 2, member: { id: 10, displayName: 'Vịt Mười' }, role: reportRole(1, 'Ngỗng', '🪿', 'Số lần vote trúng Vịt', 10), value: 2, sessionId: null, note: null }),
 ];
 
 const json = (status: number, body: unknown) =>
@@ -74,6 +88,21 @@ test('the queue shows member, role, value with metric, date, note and session', 
   expect(within(first).getByRole('button', { name: 'Duyệt' })).toBeInTheDocument();
   expect(within(first).getByRole('button', { name: 'Từ chối' })).toBeInTheDocument();
   expect(items[1]).not.toHaveTextContent('Buổi #');
+});
+
+test('a report of an extra-metric role reads "x + y"; others are unchanged', async () => {
+  stubFetch({
+    'GET /api/admin/reports?status=pending': () =>
+      json(200, [report({ id: 3, member: { id: 11, displayName: 'Vịt Mười Một' }, role: ASSASSIN, value: 4, extraValue: 2, points: 10 }), ...queue]),
+  });
+  renderTab();
+
+  const items = await screen.findAllByRole('listitem');
+  expect(items).toHaveLength(3);
+  expect(items[0]).toHaveTextContent('🗡️ Ám sát');
+  expect(items[0]).toHaveTextContent('4 mạng đã giết + 2 lần ám sát trong cuộc họp');
+  expect(items[1]).toHaveTextContent('4 mạng chém');
+  expect(items[1]).not.toHaveTextContent('+');
 });
 
 test('rejecting requires a reason before anything is sent', async () => {

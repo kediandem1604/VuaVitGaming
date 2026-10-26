@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { formatMetricValue, formatReportValue, formatSeasonScore, metricAfterValue, reportPoints } from '../../src/shared/metric';
+import { formatMetricValue, formatReportValue, formatSeasonScore, metricAfterValue, reportPoints, seasonScoreUnit } from '../../src/shared/metric';
 import type { MetricRole } from '../../src/shared/metric';
 
 test('drops the leading "Số" when the label follows a number', () => {
@@ -59,4 +59,12 @@ test('formatSeasonScore is "N điểm" for an extra-metric role and "{N} {label}
   expect(formatSeasonScore(0, assassin)).toBe('0 điểm');
   expect(formatSeasonScore(12, swordsman)).toBe('12 mạng chém');
   expect(formatSeasonScore(1, { metricLabel: 'Số trận thắng (bị vote ra)', extraMetricLabel: null, extraPoints: null })).toBe('1 trận thắng (bị vote ra)');
+});
+
+test('seasonScoreUnit is the word after the number: "điểm" for an extra-metric role, the label without "Số" otherwise', () => {
+  // Thẻ role và bục in số và đơn vị bằng hai cỡ chữ nên cần riêng phần đơn vị; ghép lại phải bằng formatSeasonScore.
+  expect(seasonScoreUnit(assassin)).toBe('điểm');
+  expect(seasonScoreUnit(swordsman)).toBe('mạng chém');
+  expect(`10 ${seasonScoreUnit(assassin)}`).toBe(formatSeasonScore(10, assassin));
+  expect(`12 ${seasonScoreUnit(swordsman)}`).toBe(formatSeasonScore(12, swordsman));
 });

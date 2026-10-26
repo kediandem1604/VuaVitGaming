@@ -13,12 +13,29 @@ const swordsman: RoleDto = {
   description: 'Vung kiếm chém mọi người đứng gần.',
   metricLabel: 'Số mạng chém',
   maxPerGame: 15,
+  extraMetricLabel: null,
+  extraMaxPerGame: null,
+  extraPoints: null,
   mapNote: 'Có từ v4.10 (08/2026)',
   modeKey: null,
   icon: '⚔️',
   hasImage: false,
   active: true,
   sortOrder: 31,
+};
+
+/** Role có chỉ số phụ: điểm mùa đã trộn hai chỉ số nên đọc "N điểm". */
+const assassin: RoleDto = {
+  ...swordsman,
+  id: 50,
+  key: 'assassin',
+  nameVi: 'Ám sát',
+  nameEn: 'Assassin',
+  metricLabel: 'Số mạng đã giết',
+  extraMetricLabel: 'Số lần ám sát trong cuộc họp',
+  extraMaxPerGame: 2,
+  extraPoints: 3,
+  icon: '🗡️',
 };
 
 afterEach(cleanup);
@@ -49,6 +66,13 @@ test('score line shows the score and the metric', () => {
 
   render(<RoleCard role={swordsman} holderName="Kẹ" variant="current" score={null} />);
   expect(screen.queryByText('Số mạng chém')).not.toBeInTheDocument();
+});
+
+test('an extra-metric role reads its season score as "N điểm", not with a metric label', () => {
+  render(<RoleCard role={assassin} holderName="Kẹ" variant="current" score={10} />);
+  expect(screen.getByText('10').parentElement).toHaveTextContent(/^10 điểm$/);
+  expect(screen.queryByText(/mạng đã giết/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/ám sát trong cuộc họp/)).not.toBeInTheDocument();
 });
 
 test('an empty role invites a report without nesting a link', () => {

@@ -2,7 +2,8 @@
  * Thẻ role (spec §5.3) dùng ở Đại sảnh và Hồ sơ: panel có băng phe trên cùng (chữ trắng
  * viết hoa trên `goose-strong` / `duck-strong` / `third` — không đặt chữ trắng thẳng lên
  * `goose`/`duck`), rồi `Character`, dòng `{icon} {tên role}`, dòng điểm `{điểm} {chỉ số}`
- * màu vàng và `extra` (ghi chú bản đồ, "mùa trước"…) ở cuối.
+ * (role có chỉ số phụ: `{điểm} điểm`, spec chỉ số phụ §7) màu vàng và `extra` (ghi chú bản
+ * đồ, "mùa trước"…) ở cuối.
  *
  * Role trống (`variant = 'empty'`): viền nét đứt `night-600`, băng phe nhạt (chỉ nền mờ đi,
  * chữ vẫn trắng để giữ tương phản) và dòng "Khai điểm để giành".
@@ -13,7 +14,7 @@
 
 import type { ReactNode } from 'react';
 import type { Faction, RoleDto } from '../../shared/api-types';
-import { metricAfterValue } from '../../shared/metric';
+import { seasonScoreUnit } from '../../shared/metric';
 import { cx } from '../lib/cx';
 import { FACTION_BAND, FACTION_LABEL } from '../lib/factions';
 import { Character, type CharacterVariant } from './Character';
@@ -66,7 +67,7 @@ export function RoleCard({ role, holderName, variant, score, extra, characterSiz
 
       {score !== null && (
         <p className="px-3 leading-tight font-bold text-gold">
-          <span className="text-lg tabular-nums">{score}</span> <span className="text-sm">{metricAfterValue(role.metricLabel)}</span>
+          <span className="text-lg tabular-nums">{score}</span> <span className="text-sm">{seasonScoreUnit(role)}</span>
         </p>
       )}
 

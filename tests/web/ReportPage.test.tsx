@@ -9,6 +9,9 @@ import { PENDING_REPORTS_KEY } from '../../src/web/pages/admin/ReviewsTab';
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn' | 'icon' | 'metricLabel' | 'maxPerGame'> & Partial<RoleDto>): RoleDto => ({
   description: '',
+  extraMetricLabel: null,
+  extraMaxPerGame: null,
+  extraPoints: null,
   mapNote: null,
   modeKey: null,
   hasImage: false,
@@ -21,7 +24,37 @@ const roles: RoleDto[] = [
   role({ id: 1, key: 'goose', faction: 'goose', nameVi: 'Ngỗng', nameEn: 'Goose', icon: '🪿', metricLabel: 'Số lần vote trúng Vịt', maxPerGame: 10 }),
   role({ id: 61, key: 'swordsman', faction: 'duck', nameVi: 'Kiếm sĩ', nameEn: 'Swordsman', icon: '⚔️', metricLabel: 'Số mạng chém', maxPerGame: 15 }),
   role({ id: 70, key: 'dodo', faction: 'neutral', nameVi: 'Chim đa đa', nameEn: 'Dodo', icon: '🦤', metricLabel: 'Số trận thắng (bị vote ra)', maxPerGame: 1 }),
+  // Role có chỉ số phụ: giết ×1 (tối đa 15), ám sát trong họp ×3 (tối đa 2).
+  role({
+    id: 50,
+    key: 'assassin',
+    faction: 'duck',
+    nameVi: 'Ám sát',
+    nameEn: 'Assassin',
+    icon: '🗡️',
+    metricLabel: 'Số mạng đã giết',
+    maxPerGame: 15,
+    extraMetricLabel: 'Số lần ám sát trong cuộc họp',
+    extraMaxPerGame: 2,
+    extraPoints: 3,
+  }),
 ];
+
+const EXTRA_LABEL = 'Số lần ám sát trong cuộc họp';
+const EXTRA_HINT = 'Tối đa 2 mỗi trận · +3 điểm mỗi lần';
+const EXTRA_OUT_OF_RANGE = 'Chỉ số phụ phải từ 0 đến 2';
+
+/** Phần role kèm trong lần khai của Ám sát (như `ReportDto.role` server trả). */
+const ASSASSIN_REPORT_ROLE: ReportDto['role'] = {
+  id: 50,
+  nameVi: 'Ám sát',
+  icon: '🗡️',
+  metricLabel: 'Số mạng đã giết',
+  maxPerGame: 15,
+  extraMetricLabel: EXTRA_LABEL,
+  extraMaxPerGame: 2,
+  extraPoints: 3,
+};
 
 const today = vnTodayIso();
 
@@ -39,8 +72,10 @@ const session: SessionDto = {
 
 const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id' | 'status'>): ReportDto => ({
   member: { id: 9, displayName: 'Tôi' },
-  role: { id: 61, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém' },
+  role: { id: 61, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém', maxPerGame: 15, extraMetricLabel: null, extraMaxPerGame: null, extraPoints: null },
   value: 4,
+  extraValue: 0,
+  points: over.value ?? 4,
   playedOn: today,
   sessionId: null,
   note: null,
@@ -296,7 +331,13 @@ test('my reports show status chips with the reject reason, and pending ones can 
 
   fireEvent.click(within(items[0] as HTMLElement).getByRole('button', { name: 'Sửa' }));
   const editor = items[0] as HTMLElement;
-  fireEvent.change(within(editor).getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '7' } });
+  const editValue = within(editor).getByRole('spinbutton', { name: 'Số mạng chém' });
+  // Form sửa cũng giới hạn theo role (DTO nay có `maxPerGame`); role không có chỉ số phụ thì không có ô thứ hai.
+  expect(editValue).toHaveAttribute('min', '0');
+  expect(editValue).toHaveAttribute('max', '15');
+  expect(within(editor).getByText('Tối đa 15 mỗi trận')).toBeInTheDocument();
+  expect(within(editor).getAllByRole('spinbutton')).toHaveLength(1);
+  fireEvent.change(editValue, { target: { value: '7' } });
   fireEvent.change(within(editor).getByRole('textbox', { name: 'Ghi chú' }), { target: { value: 'Sửa lại' } });
   fireEvent.click(within(editor).getByRole('button', { name: 'Lưu' }));
 
@@ -304,6 +345,131 @@ test('my reports show status chips with the reject reason, and pending ones can 
   expect(await within(editor).findByText('7 mạng chém')).toBeInTheDocument();
   expect(editor).toHaveTextContent('Sửa lại');
   expect(within(editor).queryByRole('button', { name: 'Lưu' })).not.toBeInTheDocument();
+});
+
+// ---------------------------------------------------------------------------
+// Chỉ số phụ
+// ---------------------------------------------------------------------------
+
+test('an extra-metric role adds a second input (label, hint, default 0) that is sent as extraValue and capped before sending', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    ...baseRoutes,
+    'POST /api/reports': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return json(201, report({ id: 4, status: 'pending', role: ASSASSIN_REPORT_ROLE, value: 4, extraValue: 2, points: 10 }));
+    },
+  });
+  renderPage();
+  const search = await screen.findByRole('combobox', { name: 'Role' });
+  // Chưa chọn role: chỉ một ô số.
+  expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
+
+  await pickRole('am sat', /Ám sát/);
+  const value = screen.getByRole('spinbutton', { name: 'Số mạng đã giết' });
+  expect(value).toHaveAttribute('max', '15');
+  expect(screen.getByText('Tối đa 15 mỗi trận')).toBeInTheDocument();
+  const extra = screen.getByRole('spinbutton', { name: EXTRA_LABEL });
+  expect(extra).toHaveValue(0);
+  expect(extra).toHaveAttribute('min', '0');
+  expect(extra).toHaveAttribute('max', '2');
+  expect(screen.getByText(EXTRA_HINT)).toBeInTheDocument();
+
+  // Vượt tối đa: chặn tại chỗ, không gửi gì.
+  fireEvent.change(value, { target: { value: '4' } });
+  fireEvent.change(extra, { target: { value: '3' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(EXTRA_OUT_OF_RANGE);
+  expect(posted).toBeNull();
+
+  fireEvent.change(extra, { target: { value: '2' } });
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
+  expect(posted).toEqual({ roleId: 50, value: 4, extraValue: 2, playedOn: today });
+  // Lần khai mới đọc "x + y"; form về mặc định (ô chính trống, ô phụ 0).
+  expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('4 mạng đã giết + 2 lần ám sát trong cuộc họp');
+  expect(value).toHaveValue(null);
+  expect(extra).toHaveValue(0);
+
+  // Đổi sang role không có chỉ số phụ: ô thứ hai biến mất.
+  fireEvent.change(search, { target: { value: 'kiem' } });
+  fireEvent.click(await screen.findByRole('option', { name: /Kiếm sĩ/ }));
+  expect(screen.queryByRole('spinbutton', { name: EXTRA_LABEL })).not.toBeInTheDocument();
+  expect(screen.queryByText(EXTRA_HINT)).not.toBeInTheDocument();
+  expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
+});
+
+test('a blank extra input counts as 0; a role without an extra metric never sends extraValue', async () => {
+  const bodies: unknown[] = [];
+  stubFetch({
+    ...baseRoutes,
+    'POST /api/reports': (init) => {
+      const body = JSON.parse(String(init?.body)) as { roleId: number };
+      bodies.push(body);
+      return json(201, body.roleId === 50 ? report({ id: 4, status: 'pending', role: ASSASSIN_REPORT_ROLE, value: 4, points: 4 }) : report({ id: 5, status: 'pending', value: 5 }));
+    },
+  });
+  renderPage();
+  await pickRole('am sat', /Ám sát/);
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Số mạng đã giết' }), { target: { value: '4' } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: EXTRA_LABEL }), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
+  expect(bodies[0]).toEqual({ roleId: 50, value: 4, extraValue: 0, playedOn: today });
+
+  fireEvent.change(screen.getByRole('combobox', { name: 'Role' }), { target: { value: 'kiem' } });
+  fireEvent.click(await screen.findByRole('option', { name: /Kiếm sĩ/ }));
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '5' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  await waitFor(() => expect(bodies).toHaveLength(2));
+  expect(bodies[1]).toEqual({ roleId: 61, value: 5, playedOn: today });
+});
+
+test('my reports read "x + y" for an extra-metric role, and its edit form has both inputs capped by the role', async () => {
+  let patched: unknown = null;
+  const assassinReport = report({ id: 8, status: 'pending', role: ASSASSIN_REPORT_ROLE, value: 4, extraValue: 2, points: 10 });
+  stubFetch({
+    ...baseRoutes,
+    'GET /api/reports/mine': () => json(200, [assassinReport, ...mine]),
+    'PATCH /api/reports/8': (init) => {
+      patched = JSON.parse(String(init?.body));
+      return json(200, { ...assassinReport, value: 5, extraValue: 1, points: 8 });
+    },
+  });
+  renderPage();
+
+  const items = await screen.findAllByRole('listitem');
+  const item = items[0] as HTMLElement;
+  expect(item).toHaveTextContent('🗡️ Ám sát');
+  expect(item).toHaveTextContent('4 mạng đã giết + 2 lần ám sát trong cuộc họp');
+  // Role không có chỉ số phụ đọc như cũ.
+  expect(items[1]).toHaveTextContent('4 mạng chém');
+  expect(items[1]).not.toHaveTextContent('+');
+
+  fireEvent.click(within(item).getByRole('button', { name: 'Sửa' }));
+  const value = within(item).getByRole('spinbutton', { name: 'Số mạng đã giết' });
+  expect(value).toHaveValue(4);
+  expect(value).toHaveAttribute('max', '15');
+  const extra = within(item).getByRole('spinbutton', { name: EXTRA_LABEL });
+  expect(extra).toHaveValue(2);
+  expect(extra).toHaveAttribute('min', '0');
+  expect(extra).toHaveAttribute('max', '2');
+  expect(within(item).getByText(EXTRA_HINT)).toBeInTheDocument();
+
+  // Vượt tối đa: chặn tại chỗ.
+  fireEvent.change(extra, { target: { value: '3' } });
+  fireEvent.click(within(item).getByRole('button', { name: 'Lưu' }));
+  expect(await within(item).findByRole('alert')).toHaveTextContent(EXTRA_OUT_OF_RANGE);
+  expect(patched).toBeNull();
+
+  fireEvent.change(value, { target: { value: '5' } });
+  fireEvent.change(extra, { target: { value: '1' } });
+  expect(within(item).queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.click(within(item).getByRole('button', { name: 'Lưu' }));
+  await waitFor(() => expect(patched).toEqual({ value: 5, extraValue: 1, playedOn: today, note: null }));
+  expect(await within(item).findByText('5 mạng đã giết + 1 lần ám sát trong cuộc họp')).toBeInTheDocument();
+  expect(within(item).queryByRole('button', { name: 'Lưu' })).not.toBeInTheDocument();
 });
 
 // ---------------------------------------------------------------------------

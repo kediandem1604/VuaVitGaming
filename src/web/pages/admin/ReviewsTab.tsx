@@ -6,13 +6,15 @@
  *
  * Giao diện Sảnh đêm (spec §6 Quản trị): hàng chờ là danh sách kiểu bảng (một panel,
  * hàng kẻ `night-700`, chữ 14px); Xác nhận từ chối là `btn-danger`. Lần khai có highlight
- * kèm link "Xem highlight" (tin Discord, tab mới) để mod xem trước khi duyệt.
+ * kèm link "Xem highlight" (tin Discord, tab mới) để mod xem trước khi duyệt. Dòng giá trị
+ * đọc qua `formatReportValue`: role có chỉ số phụ ra "4 mạng đã giết + 2 lần ám sát trong
+ * cuộc họp" (spec chỉ số phụ §7).
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
 import type { ReportDto } from '../../../shared/api-types';
-import { formatMetricValue } from '../../../shared/metric';
+import { formatReportValue } from '../../../shared/metric';
 import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { HighlightLink } from '../../components/HighlightLink';
@@ -102,7 +104,8 @@ function PendingReport({ report }: { report: ReportDto }) {
           {formatDateLabel(report.playedOn)}
         </time>
       </div>
-      <p className="text-lg leading-tight font-extrabold text-white">{formatMetricValue(report.value, report.role.metricLabel)}</p>
+      {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
+      <p className="text-lg leading-tight font-extrabold break-words text-white">{formatReportValue(report.value, report.extraValue, report.role)}</p>
       <p className="text-night-300">
         {report.sessionId !== null && <>Buổi #{report.sessionId} · </>}
         Khai lúc {formatTime(report.createdAt)} {formatDateLabel(new Date(report.createdAt))}

@@ -5,8 +5,8 @@
  * tự nhiên để hạng 1 không bao giờ nằm lệch phải (ruling R14). Hạng 1 có nhân vật hoá thân
  * đứng trên bục — tên đã ở bảng tên trên đầu nên không ghi lại bên dưới; hạng 2 và 3 là avatar
  * trang trí kèm tên bên dưới (ruling R13: avatar không mang nhãn để trình đọc màn hình không
- * đọc tên hai lần). Mọi mục ghi `{điểm} {chỉ số}`; số trận chỉ có ở bảng đầy đủ bên dưới.
- * Không có hàng nào thì trang không vẽ bục.
+ * đọc tên hai lần). Mọi mục ghi `{điểm} {chỉ số}` (role có chỉ số phụ: `{điểm} điểm`, spec chỉ
+ * số phụ §7); số trận chỉ có ở bảng đầy đủ bên dưới. Không có hàng nào thì trang không vẽ bục.
  *
  * Phần "người" của mỗi mục là một link tới trang thành viên công khai (spec huy hiệu §9):
  * hạng 1 là cả nhân vật (tên link đọc theo nhãn nhân vật "{role}: {tên}"), hạng 2–3 là avatar
@@ -15,7 +15,7 @@
 
 import { Link } from 'react-router';
 import type { LeaderboardRowDto, RoleDto } from '../../shared/api-types';
-import { metricAfterValue } from '../../shared/metric';
+import { seasonScoreUnit } from '../../shared/metric';
 import { cx } from '../lib/cx';
 import { memberPath } from '../lib/links';
 import { Avatar } from './Avatar';
@@ -61,7 +61,7 @@ export function Podium({ role, rows }: PodiumProps) {
               </Link>
             )}
             <p className="px-1 text-sm leading-tight font-bold break-words text-gold">
-              <span className="text-base tabular-nums">{row.score}</span> {metricAfterValue(role.metricLabel)}
+              <span className="text-base tabular-nums">{row.score}</span> {seasonScoreUnit(role)}
             </p>
             {/* Số hạng in trên mặt bục; "Hạng" chỉ dành cho trình đọc màn hình. */}
             <p

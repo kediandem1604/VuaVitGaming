@@ -53,9 +53,18 @@ export function formatReportValue(value: number, extraValue: number, role: Metri
 }
 
 /**
- * Điểm mùa đọc tự nhiên: role có chỉ số phụ → `{điểm} điểm` (điểm đã trộn hai chỉ số, không còn
- * đơn vị); role không có → `{điểm} {nhãn}` như cũ.
+ * Phần đứng sau con số của điểm mùa: role có chỉ số phụ → "điểm" (điểm đã trộn hai chỉ số, không
+ * còn đơn vị); role không có → nhãn bỏ chữ "Số" (`metricAfterValue`). Thẻ role và bục in số và
+ * đơn vị bằng hai cỡ chữ nên cần riêng phần này; `formatSeasonScore` ghép hai phần lại.
+ */
+export function seasonScoreUnit(role: MetricRole): string {
+  return hasExtraMetric(role) ? 'điểm' : metricAfterValue(role.metricLabel);
+}
+
+/**
+ * Điểm mùa đọc tự nhiên: role có chỉ số phụ → `{điểm} điểm`; role không có → `{điểm} {nhãn}`
+ * như cũ.
  */
 export function formatSeasonScore(score: number, role: MetricRole): string {
-  return hasExtraMetric(role) ? `${score} điểm` : formatMetricValue(score, role.metricLabel);
+  return `${score} ${seasonScoreUnit(role)}`;
 }
