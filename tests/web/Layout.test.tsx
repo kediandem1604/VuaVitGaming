@@ -102,6 +102,20 @@ test('Huy hiệu sits right after Tri ân in both navs and links to /huy-hieu', 
   }
 });
 
+test('both navs show the short label; the desktop pill keeps the full name as its title', () => {
+  renderLayout(me);
+  const [headerNav, bottomNav] = screen.getAllByRole('navigation', { name: 'Điều hướng chính' }) as [HTMLElement, HTMLElement];
+
+  const pill = within(headerNav).getByRole('link', { name: 'Xếp hạng' });
+  expect(pill).toHaveAttribute('href', '/bang-xep-hang');
+  expect(pill).toHaveAttribute('title', 'Bảng xếp hạng');
+  expect(within(headerNav).queryByRole('link', { name: 'Bảng xếp hạng' })).toBeNull();
+  // Mục không có nhãn ngắn thì không mang `title` thừa.
+  expect(within(headerNav).getByRole('link', { name: 'Tri ân' })).not.toHaveAttribute('title');
+
+  expect(within(bottomNav).getByRole('link', { name: 'Xếp hạng' })).toHaveAttribute('href', '/bang-xep-hang');
+});
+
 test('the open page is marked in gold in both navs', () => {
   renderLayout(me, '/ho-so');
   const [headerLink, dockLink] = screen.getAllByRole('link', { name: /Hồ sơ/ });

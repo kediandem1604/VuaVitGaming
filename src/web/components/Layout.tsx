@@ -3,18 +3,21 @@
  * 90% làm mờ phía sau: logo + chữ "GGD Hub" vàng viền tối (`text-raised`), cụm người dùng
  * (chip avatar + tên, nút Đăng xuất). Điều hướng là thanh dock cố định dưới cùng (icon
  * lucide 22px + nhãn ngắn 11px, mục đang mở màu vàng có chấm vàng trên icon) cho tới dưới
- * `lg` (1024px); từ `lg` trở lên là hàng viên thuốc (icon 16px + nhãn) nằm trong thanh trên.
+ * `lg` (1024px); từ `lg` trở lên là hàng viên thuốc (icon 16px + nhãn ngắn, tên đầy đủ ở `title`)
+ * nằm trong thanh trên.
  *
- * Vì sao `lg`, và vì sao tên người dùng ẩn từ `lg`: khung tối đa `max-w-5xl` cho 992px dùng
- * được ở MỌI màn hình từ 1056px (ở 1024 còn 977 vì thanh cuộn dọc). Đo bằng Baloo 2 đậm
- * 14px: 7 viên thuốc của thành viên thường (icon 16 + nhãn, `px-2`, cách nhau 2px) ≈ 645px,
- * logo 119, hai khoảng cách 24, chip avatar + nút Đăng xuất 138 → ≈ 925px, còn ~50px dư ở 1024
- * và ~65px từ 1056. Mod/admin có thêm viên "Quản trị" (8 viên ≈ 740px → ≈ 1020px): từ ~1090px
- * mới vừa hẳn, dưới đó hàng link cuộn trong nó vài chục px (lưới an toàn bên dưới). Thêm tên cắt
- * ở 128px thì cụm người dùng lên ~280px → ≈ 1070px, không bao giờ vừa; nên tên chỉ hiện dưới
+ * Vì sao `lg`, và vì sao tên người dùng ẩn từ `lg`: khung `max-w-5xl px-4` cho hàng trên tối đa
+ * 992px ở MỌI màn hình (rộng hơn cũng không thêm chỗ), ở 1024 có thanh cuộn dọc còn 977. Đo
+ * trong Chromium với Baloo 2 đậm 14px, nhãn ngắn như thanh dock ("Xếp hạng"), `px-1.5`, cách
+ * nhau 2px: 8 viên thuốc của mod/admin = 662px (+14px cách = 676px), 7 viên của thành viên
+ * thường = 579px (+12 = 591px); logo 119, hai khoảng cách 24, chip avatar + nút Đăng xuất 138
+ * → hàng link được 711px ở 992 và 696px ở 977 (đã trừ `p-1`): cả hai bộ đều vừa, mod/admin
+ * còn ~20px ở 1024 có thanh cuộn. (Với `px-2` và nhãn đầy đủ "Bảng xếp hạng", 8 viên ≈ 742px
+ * tràn ở mọi màn hình; `px-2` + nhãn ngắn = 708px vừa ở 992 nhưng thiếu 10px ở 977.) Thêm tên
+ * cắt ở 128px thì cụm người dùng lên ~280px, 8 viên không bao giờ vừa; nên tên chỉ hiện dưới
  * `lg` (nơi thanh trên không có hàng link) và chip mang `title` để rê chuột vẫn thấy tên. Hàng
- * link có `overflow-x-auto` làm lưới an toàn: phông chữ rộng hơn dự tính (hay 8 viên) thì hàng
- * này cuộn trong nó, không đè lên cụm người dùng, không cuộn trang.
+ * link có `overflow-x-auto` làm lưới an toàn: phông chữ rộng hơn dự tính thì hàng này cuộn
+ * trong nó, không đè lên cụm người dùng, không cuộn trang.
  * Ở 768–1023 thanh dock vẫn thừa chỗ (≥ 96px mỗi mục với 8 mục).
  */
 
@@ -91,19 +94,21 @@ export function Layout({ me, children }: LayoutProps) {
               {items.map((item) => {
                 const Icon = item.icon;
                 return (
+                  // Nhãn ngắn như thanh dock ("Xếp hạng"); tên đầy đủ nằm ở `title` cho rê chuột (như chip người dùng).
                   <NavLink
                     key={item.to}
                     to={item.to}
                     end={item.to === '/'}
+                    title={item.short ? item.label : undefined}
                     className={({ isActive }) =>
                       cx(
-                        'flex items-center gap-1 rounded-full px-2 py-1 text-sm font-bold whitespace-nowrap',
+                        'flex items-center gap-1 rounded-full px-1.5 py-1 text-sm font-bold whitespace-nowrap',
                         isActive ? 'bg-gold text-gold-ink' : 'text-night-200 hover:bg-night-700',
                       )
                     }
                   >
                     <Icon aria-hidden="true" className="size-4 shrink-0" />
-                    {item.label}
+                    {item.short ?? item.label}
                   </NavLink>
                 );
               })}
