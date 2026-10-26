@@ -120,6 +120,13 @@ export interface RoleDto {
   metricLabel: string;
   /** Giới hạn giá trị một lần khai (1–100). */
   maxPerGame: number;
+  /**
+   * Chỉ số phụ (tuỳ chọn): tên, giới hạn một lần khai (1–100) và điểm mỗi đơn vị (1–100).
+   * Cả ba cùng có hoặc cùng null (role không có chỉ số phụ).
+   */
+  extraMetricLabel: string | null;
+  extraMaxPerGame: number | null;
+  extraPoints: number | null;
   mapNote: string | null;
   modeKey: string | null;
   /** Biểu tượng emoji của role. */

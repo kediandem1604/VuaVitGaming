@@ -9,6 +9,7 @@ import { buildApp } from '../../../src/server/web/app.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
 import { createMember, roleByKey } from '../../helpers/factories.js';
+import { dateOnlyToDb } from '../../../src/server/lib/time.js';
 
 /** Không route nào ở đây đụng tới OAuth. */
 const oauth: OAuthClient = {
@@ -138,6 +139,9 @@ test('members see only active roles', async () => {
     description: 'Vung kiếm chém mọi người đứng gần.',
     metricLabel: 'Số mạng chém',
     maxPerGame: 15,
+    extraMetricLabel: null,
+    extraMaxPerGame: null,
+    extraPoints: null,
     mapNote: 'Có từ v4.10 (08/2026)',
     modeKey: null,
     icon: '⚔️',
@@ -317,6 +321,60 @@ test('admin edits metric', async () => {
   expect(await roleByKey(testDb, 'swordsman')).toMatchObject({ key: 'swordsman', maxPerGame: 16, modeId: null });
 });
 
+test('admin manages the secondary metric over HTTP', async () => {
+  const { sid } = await memberWithSid();
+  const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
+  const extra = { extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraMaxPerGame: 2, extraPoints: 3 };
+  const noExtra = { extraMetricLabel: null, extraMaxPerGame: null, extraPoints: null };
+  const incomplete = errorBody('VALIDATION', 'Chỉ số phụ cần đủ cả ba: tên, tối đa mỗi trận và điểm mỗi lần');
+
+  // Thành viên thấy chỉ số phụ của Ám sát trong danh mục.
+  const assassin = (await get('/api/roles', sid)).json<RoleDto[]>().find((r) => r.key === 'assassin');
+  expect(assassin).toMatchObject({ metricLabel: 'Số mạng đã giết', maxPerGame: 15, ...extra });
+
+  // Tạo với đủ ba trường / thiếu một trường.
+  const created = await post('/api/admin/roles', adminSid, { ...newRole, ...extra });
+  expect(created.statusCode).toBe(201);
+  expect(created.json<RoleDto>()).toMatchObject({ key: 'test_role', ...extra });
+  const partial = await post('/api/admin/roles', adminSid, { ...newRole, key: 'other_role', extraMetricLabel: 'Số lần thử lại', extraPoints: 2 });
+  expect(partial.statusCode).toBe(400);
+  expect(partial.json()).toEqual(incomplete);
+  expect((await post('/api/admin/roles', adminSid, { ...newRole, key: 'other_role', ...extra, extraPoints: 101 })).json()).toEqual(
+    errorBody('VALIDATION', 'Điểm mỗi lần của chỉ số phụ phải từ 1 đến 100'),
+  );
+  // Sai kiểu → 400 chung.
+  for (const body of [{ ...newRole, key: 'other_role', ...extra, extraPoints: '3' }, { ...newRole, key: 'other_role', ...extra, extraMaxPerGame: 2.5 }, { ...newRole, key: 'other_role', ...extra, extraMetricLabel: 7 }]) {
+    const bad = await post('/api/admin/roles', adminSid, body);
+    expect(bad.statusCode, JSON.stringify(body)).toBe(400);
+    expect(bad.json(), JSON.stringify(body)).toEqual(INVALID);
+  }
+
+  // Bật trên role có sẵn, sửa một trường, tắt khi chưa có lần khai dùng.
+  const swordsman = await roleByKey(testDb, 'swordsman');
+  const enabled = await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { extraMetricLabel: 'Số lần chém đôi', extraMaxPerGame: 5, extraPoints: 2 });
+  expect(enabled.statusCode).toBe(200);
+  expect(enabled.json<RoleDto>()).toMatchObject({ key: 'swordsman', extraMetricLabel: 'Số lần chém đôi', extraMaxPerGame: 5, extraPoints: 2 });
+  expect((await get('/api/roles', sid)).json<RoleDto[]>().find((r) => r.key === 'swordsman')).toEqual(enabled.json());
+  expect((await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { extraPoints: 4 })).json<RoleDto>()).toMatchObject({ extraMetricLabel: 'Số lần chém đôi', extraPoints: 4 });
+  const halfOff = await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { extraPoints: null });
+  expect(halfOff.statusCode).toBe(400);
+  expect(halfOff.json()).toEqual(incomplete);
+  expect((await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { ...noExtra })).json<RoleDto>()).toMatchObject(noExtra);
+  for (const body of [{ extraPoints: '3' }, { extraMetricLabel: 7 }, { extraMaxPerGame: 2.5 }]) {
+    const bad = await patch(`/api/admin/roles/${swordsman.id}`, adminSid, body);
+    expect(bad.statusCode, JSON.stringify(body)).toBe(400);
+    expect(bad.json(), JSON.stringify(body)).toEqual(INVALID);
+  }
+
+  // Ám sát đã có lần khai dùng chỉ số phụ → không tắt được; đổi điểm vẫn được.
+  const { member } = await memberWithSid();
+  await testDb.statReport.create({ data: { memberId: member.id, roleId: assassin!.id, playedOn: dateOnlyToDb('2026-10-10'), value: 0, extraValue: 1 } });
+  const blocked = await patch(`/api/admin/roles/${assassin!.id}`, adminSid, { ...noExtra });
+  expect(blocked.statusCode).toBe(400);
+  expect(blocked.json()).toEqual(errorBody('VALIDATION', 'Role đã có lần khai dùng chỉ số phụ, không tắt được'));
+  expect((await patch(`/api/admin/roles/${assassin!.id}`, adminSid, { extraPoints: 5 })).json<RoleDto>()).toMatchObject({ ...extra, extraPoints: 5 });
+});
+
 test('admin creates a role', async () => {
   const { sid } = await memberWithSid();
   const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
@@ -333,6 +391,9 @@ test('admin creates a role', async () => {
     description: 'Chỉ để thử.',
     metricLabel: 'Số lần thử',
     maxPerGame: 5,
+    extraMetricLabel: null,
+    extraMaxPerGame: null,
+    extraPoints: null,
     mapNote: null,
     modeKey: null,
     icon: '🧪',

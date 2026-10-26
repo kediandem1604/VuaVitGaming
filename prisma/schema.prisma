@@ -276,21 +276,26 @@ model Award {
 // ---------------------------------------------------------------------------
 
 model Role {
-  id          Int     @id @default(autoincrement())
-  key         String  @unique
-  faction     Faction
-  nameEn      String  @map("name_en")
-  nameVi      String  @map("name_vi")
-  description String
-  metricLabel String  @map("metric_label")
-  maxPerGame  Int     @map("max_per_game")
-  mapNote     String? @map("map_note")
-  modeId      Int?    @map("mode_id")
-  icon        String
-  image       Bytes?
-  imageMime   String? @map("image_mime")
-  active      Boolean @default(true)
-  sortOrder   Int     @map("sort_order")
+  id               Int     @id @default(autoincrement())
+  key              String  @unique
+  faction          Faction
+  nameEn           String  @map("name_en")
+  nameVi           String  @map("name_vi")
+  description      String
+  metricLabel      String  @map("metric_label")
+  maxPerGame       Int     @map("max_per_game")
+  /// Chỉ số phụ tuỳ chọn (spec chỉ số phụ §3–4): mỗi đơn vị `extraValue` của lần khai
+  /// được `extraPoints` điểm. Ba cột cùng null hoặc cùng có (CHECK roles_extra_metric_all_or_none).
+  extraMetricLabel String? @map("extra_metric_label")
+  extraMaxPerGame  Int?    @map("extra_max_per_game")
+  extraPoints      Int?    @map("extra_points")
+  mapNote          String? @map("map_note")
+  modeId           Int?    @map("mode_id")
+  icon             String
+  image            Bytes?
+  imageMime        String? @map("image_mime")
+  active           Boolean @default(true)
+  sortOrder        Int     @map("sort_order")
 
   mode        GameMode?    @relation(fields: [modeId], references: [id])
   statReports StatReport[]
@@ -306,6 +311,8 @@ model StatReport {
   sessionId    Int?         @map("session_id")
   playedOn     DateTime     @map("played_on") @db.Date
   value        Int
+  /// Giá trị chỉ số phụ của role (0 khi role không có chỉ số phụ); CHECK extra_value >= 0.
+  extraValue   Int          @default(0) @map("extra_value")
   note         String?
   status       ReportStatus @default(pending)
   reviewedById Int?         @map("reviewed_by")

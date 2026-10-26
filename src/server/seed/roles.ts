@@ -8,6 +8,10 @@ export type RoleSeed = {
   description: string;
   metricLabel: string;
   maxPerGame: number;
+  /** Chỉ số phụ: cả ba cùng có hoặc cùng null (spec chỉ số phụ §3). */
+  extraMetricLabel: string | null;
+  extraMaxPerGame: number | null;
+  extraPoints: number | null;
   mapNote: string | null;
   modeKey: string | null;
   icon: string;
@@ -24,10 +28,14 @@ type MainRow = [
   maxPerGame: number,
   mapNote: string | null,
   icon: string,
+  /** Chỉ số phụ (tuỳ chọn): tên, tối đa mỗi trận, điểm mỗi lần. */
+  extra?: ExtraMetric,
 ];
 
+type ExtraMetric = readonly [label: string, maxPerGame: number, points: number];
+
 function mainRoles(faction: Faction, rows: readonly MainRow[]): RoleSeed[] {
-  return rows.map(([key, nameVi, nameEn, description, metricLabel, maxPerGame, mapNote, icon], i) => ({
+  return rows.map(([key, nameVi, nameEn, description, metricLabel, maxPerGame, mapNote, icon, extra], i) => ({
     key,
     faction,
     nameVi,
@@ -35,6 +43,9 @@ function mainRoles(faction: Faction, rows: readonly MainRow[]): RoleSeed[] {
     description,
     metricLabel,
     maxPerGame,
+    extraMetricLabel: extra?.[0] ?? null,
+    extraMaxPerGame: extra?.[1] ?? null,
+    extraPoints: extra?.[2] ?? null,
     mapNote,
     modeKey: null,
     icon,
@@ -86,7 +97,8 @@ const DUCK_ROLES = mainRoles('duck', [
   ['silencer', 'Kẻ câm lặng', 'Silencer', 'Làm một người không thể nói trong cuộc họp.', 'Số người bị bạn câm rồi bị vote ra', 10, null, '🤫'],
   ['professional', 'Cao thủ', 'Professional', 'Vịt lão luyện với thời gian hồi chiêu giết ngắn hơn.', 'Số mạng đã giết', 15, null, '😎'],
   ['spy', 'Gián điệp', 'Spy', 'Soi được role của người khác.', 'Số role đã soi được', 10, null, '🕵️'],
-  ['assassin', 'Ám sát', 'Assassin', 'Ám sát ngay trong cuộc họp bằng cách đoán đúng role của nạn nhân.', 'Số lần ám sát thành công trong cuộc họp', 2, null, '🗡️'],
+  // Chỉ số phụ (spec chỉ số phụ §1): mỗi mạng giết +1, mỗi lần ám sát trong họp +3 (tối đa 2 mỗi ván).
+  ['assassin', 'Ám sát', 'Assassin', 'Ám sát ngay trong cuộc họp bằng cách đoán đúng role của nạn nhân.', 'Số mạng đã giết', 15, null, '🗡️', ['Số lần ám sát trong cuộc họp', 2, 3]],
   ['hitman', 'Sát thủ', 'Hitman', 'Được giao mục tiêu cụ thể để hạ.', 'Số mục tiêu đã hạ', 10, null, '🎯'],
   ['snitch', 'Kẻ mách lẻo', 'Snitch', 'Tống người khác vào tù.', 'Số người bị tống tù', 10, 'Bản đồ có nhà tù', '📣'],
   ['party', 'Tiệc tùng', 'Party', 'Mở tiệc để gom mọi người lại một chỗ rồi ra tay.', 'Số mạng đã giết', 15, null, '🎉'],
@@ -162,6 +174,9 @@ const SPECIAL_ROLES: RoleSeed[] = SPECIAL_ROWS.map(([key, nameVi, nameEn, factio
   description: 'Role riêng của chế độ đặc biệt; admin xác nhận phe và chỉ số rồi mới bật.',
   metricLabel: 'Chưa đặt chỉ số',
   maxPerGame: 15,
+  extraMetricLabel: null,
+  extraMaxPerGame: null,
+  extraPoints: null,
   mapNote: null,
   modeKey,
   icon: FACTION_ICON[faction],

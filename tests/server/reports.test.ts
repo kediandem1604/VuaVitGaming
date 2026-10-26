@@ -76,6 +76,7 @@ test('submit stores a pending report with the clock time and ensures the season'
     sessionId: null,
     playedOn: dateOnlyToDb('2026-10-10'),
     value: 3,
+    extraValue: 0,
     note: 'Trận cuối tối qua',
     status: 'pending',
     reviewedById: null,

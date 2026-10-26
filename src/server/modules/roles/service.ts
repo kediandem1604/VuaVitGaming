@@ -2,7 +2,8 @@
  * Danh mục role (spec §4.6, §6): 71 role chính của ba phe nạp sẵn và bật; 20 role
  * riêng của chế độ đặc biệt nạp sẵn nhưng tắt, admin xác nhận rồi bật. Admin sửa
  * tên, mô tả, chỉ số, giới hạn, biểu tượng, thứ tự, bật/tắt và thêm role mới khi
- * game cập nhật; `key` đặt một lần khi tạo. Ảnh tuỳ chỉnh ở `image.ts`.
+ * game cập nhật; `key` đặt một lần khi tạo. Ảnh tuỳ chỉnh ở `image.ts`. Role có thể
+ * có chỉ số phụ được nhân điểm (ba trường `extra*`, spec chỉ số phụ §3–5).
  *
  * Thứ tự hiển thị mọi nơi: phe Ngỗng → Vịt → Phe thứ 3, rồi `sortOrder`, rồi `id`.
  * DTO không bao giờ chứa ảnh (không kéo 91 blob khi liệt kê).
@@ -30,6 +31,9 @@ const ROLE_SELECT = {
   description: true,
   metricLabel: true,
   maxPerGame: true,
+  extraMetricLabel: true,
+  extraMaxPerGame: true,
+  extraPoints: true,
   mapNote: true,
   icon: true,
   active: true,
@@ -54,6 +58,9 @@ function toRoleDto(r: RoleRow): RoleDto {
     description: r.description,
     metricLabel: r.metricLabel,
     maxPerGame: r.maxPerGame,
+    extraMetricLabel: r.extraMetricLabel,
+    extraMaxPerGame: r.extraMaxPerGame,
+    extraPoints: r.extraPoints,
     mapNote: r.mapNote,
     modeKey: r.mode?.key ?? null,
     icon: r.icon,
@@ -97,6 +104,13 @@ export interface RoleInput {
   metricLabel: string;
   /** 1–100. */
   maxPerGame: number;
+  /**
+   * Chỉ số phụ (spec chỉ số phụ §5): gửi đủ cả ba hoặc bỏ trống/null cả ba; thiếu một → `VALIDATION`.
+   * Tên cắt khoảng trắng, 1–60 ký tự; tối đa mỗi trận 1–100; điểm mỗi lần 1–100.
+   */
+  extraMetricLabel?: string | null;
+  extraMaxPerGame?: number | null;
+  extraPoints?: number | null;
   /** Cắt khoảng trắng, tối đa 80 ký tự; rỗng → null. */
   mapNote?: string | null;
   /** Emoji, 1–8 ký tự (đơn vị UTF-16). */
@@ -109,8 +123,18 @@ export interface RoleInput {
   modeKey?: string | null;
 }
 
-/** Các trường sửa được: không có `key`, `modeKey` và ảnh. */
+/**
+ * Các trường sửa được: không có `key`, `modeKey` và ảnh. Ba trường chỉ số phụ ghép lên
+ * giá trị hiện có của role rồi mới kiểm "cùng có hoặc cùng null": đổi lẻ một trường khi
+ * đã bật thì được; bật phải gửi đủ ba; tắt phải gửi null cả ba.
+ */
 export type RolePatch = Partial<Omit<RoleInput, 'key' | 'modeKey'>>;
+
+/** Ba trường chỉ số phụ sau khi kiểm tra: cùng có hoặc cùng null. */
+type ExtraMetric = { extraMetricLabel: string | null; extraMaxPerGame: number | null; extraPoints: number | null };
+
+const EXTRA_INCOMPLETE_MESSAGE = 'Chỉ số phụ cần đủ cả ba: tên, tối đa mỗi trận và điểm mỗi lần';
+const EXTRA_IN_USE_MESSAGE = 'Role đã có lần khai dùng chỉ số phụ, không tắt được';
 
 const keySchema = z
   .string()
@@ -125,6 +149,24 @@ const maxPerGameSchema = z
   .int('Tối đa mỗi trận phải từ 1 đến 100')
   .min(1, 'Tối đa mỗi trận phải từ 1 đến 100')
   .max(100, 'Tối đa mỗi trận phải từ 1 đến 100');
+const extraMetricLabelSchema = z
+  .string()
+  .trim()
+  .min(1, 'Tên chỉ số phụ phải từ 1 đến 60 ký tự')
+  .max(60, 'Tên chỉ số phụ phải từ 1 đến 60 ký tự')
+  .nullish();
+const extraMaxPerGameSchema = z
+  .number()
+  .int('Tối đa mỗi trận của chỉ số phụ phải từ 1 đến 100')
+  .min(1, 'Tối đa mỗi trận của chỉ số phụ phải từ 1 đến 100')
+  .max(100, 'Tối đa mỗi trận của chỉ số phụ phải từ 1 đến 100')
+  .nullish();
+const extraPointsSchema = z
+  .number()
+  .int('Điểm mỗi lần của chỉ số phụ phải từ 1 đến 100')
+  .min(1, 'Điểm mỗi lần của chỉ số phụ phải từ 1 đến 100')
+  .max(100, 'Điểm mỗi lần của chỉ số phụ phải từ 1 đến 100')
+  .nullish();
 const mapNoteSchema = z.string().trim().max(80, 'Ghi chú bản đồ tối đa 80 ký tự').nullish();
 const iconSchema = z.string().trim().min(1, 'Biểu tượng phải từ 1 đến 8 ký tự').max(8, 'Biểu tượng phải từ 1 đến 8 ký tự');
 const sortOrderSchema = z.number().int('Thứ tự không hợp lệ').min(INT32_MIN, 'Thứ tự không hợp lệ').max(INT32_MAX, 'Thứ tự không hợp lệ');
@@ -139,6 +181,9 @@ const createSchema = z
     description: descriptionSchema.default(''),
     metricLabel: metricLabelSchema,
     maxPerGame: maxPerGameSchema,
+    extraMetricLabel: extraMetricLabelSchema,
+    extraMaxPerGame: extraMaxPerGameSchema,
+    extraPoints: extraPointsSchema,
     mapNote: mapNoteSchema,
     icon: iconSchema,
     active: z.boolean().default(true),
@@ -155,6 +200,9 @@ const patchSchema = z
     description: descriptionSchema.optional(),
     metricLabel: metricLabelSchema.optional(),
     maxPerGame: maxPerGameSchema.optional(),
+    extraMetricLabel: extraMetricLabelSchema,
+    extraMaxPerGame: extraMaxPerGameSchema,
+    extraPoints: extraPointsSchema,
     mapNote: mapNoteSchema,
     icon: iconSchema.optional(),
     active: z.boolean().optional(),
@@ -169,13 +217,15 @@ const defaultErrorMap: z.ZodErrorMap = () => ({ message: 'Dữ liệu không h�
 export async function createRole(ctx: Ctx, input: RoleInput): Promise<RoleDto> {
   const parsed = createSchema.safeParse(input, { errorMap: defaultErrorMap });
   if (!parsed.success) throw appError('VALIDATION', parsed.error.issues[0]?.message);
-  const { modeKey, mapNote, sortOrder, ...fields } = parsed.data;
+  const { modeKey, mapNote, sortOrder, extraMetricLabel, extraMaxPerGame, extraPoints, ...fields } = parsed.data;
+  // Không gửi hoặc null cả ba → role không có chỉ số phụ.
+  const extra = checkExtraMetric({ extraMetricLabel: extraMetricLabel ?? null, extraMaxPerGame: extraMaxPerGame ?? null, extraPoints: extraPoints ?? null });
 
   const modeId = modeKey ? await modeIdByKey(ctx, modeKey) : null;
   const order = sortOrder ?? (await nextSortOrder(ctx, fields.faction));
   try {
     const row = await ctx.db.role.create({
-      data: { ...fields, modeId, mapNote: emptyToNull(mapNote), sortOrder: order },
+      data: { ...fields, ...extra, modeId, mapNote: emptyToNull(mapNote), sortOrder: order },
       select: ROLE_SELECT,
     });
     return toRoleDto(row);
@@ -189,18 +239,49 @@ export async function createRole(ctx: Ctx, input: RoleInput): Promise<RoleDto> {
 /**
  * Sửa các trường được truyền (trường vắng mặt giữ nguyên); `key`, chế độ chơi và
  * ảnh không sửa qua đây. Role không có → `NOT_FOUND`.
+ *
+ * Chỉ số phụ: ba trường gửi lên ghép với giá trị hiện có rồi kiểm "cùng có hoặc cùng
+ * null" (thiếu một → `VALIDATION`). Tắt (về null cả ba) bị chặn khi role đã có lần khai
+ * với `extraValue > 0` — điểm của các lần khai đó sẽ mất; đổi tên/tối đa/điểm vẫn được.
  */
 export async function updateRole(ctx: Ctx, id: number, patch: RolePatch): Promise<RoleDto> {
   const parsed = patchSchema.safeParse(patch, { errorMap: defaultErrorMap });
   if (!parsed.success) throw appError('VALIDATION', parsed.error.issues[0]?.message);
-  const { mapNote, ...rest } = parsed.data;
+  const { mapNote, extraMetricLabel, extraMaxPerGame, extraPoints, ...rest } = parsed.data;
 
   const data: Prisma.RoleUncheckedUpdateInput = { ...rest };
   if (mapNote !== undefined) data.mapNote = emptyToNull(mapNote);
 
-  const existing = await ctx.db.role.findUnique({ where: { id }, select: { id: true } });
+  const existing = await ctx.db.role.findUnique({
+    where: { id },
+    select: { extraMetricLabel: true, extraMaxPerGame: true, extraPoints: true },
+  });
   if (!existing) throw appError('NOT_FOUND');
+
+  const touchesExtra = extraMetricLabel !== undefined || extraMaxPerGame !== undefined || extraPoints !== undefined;
+  if (touchesExtra) {
+    const merged = checkExtraMetric({
+      extraMetricLabel: extraMetricLabel === undefined ? existing.extraMetricLabel : extraMetricLabel,
+      extraMaxPerGame: extraMaxPerGame === undefined ? existing.extraMaxPerGame : extraMaxPerGame,
+      extraPoints: extraPoints === undefined ? existing.extraPoints : extraPoints,
+    });
+    const disabling = existing.extraMetricLabel !== null && merged.extraMetricLabel === null;
+    // Kiểm tra rồi ghi, không khoá: lần khai chen vào giữa hai bước là trường hợp hiếm và
+    // chỉ để lại một lần khai có extraValue trên role không còn chỉ số phụ (tính điểm bỏ qua).
+    if (disabling && (await ctx.db.statReport.count({ where: { roleId: id, extraValue: { gt: 0 } } })) > 0) {
+      throw appError('VALIDATION', EXTRA_IN_USE_MESSAGE);
+    }
+    Object.assign(data, merged);
+  }
+
   return toRoleDto(await ctx.db.role.update({ where: { id }, data, select: ROLE_SELECT }));
+}
+
+/** Ba trường chỉ số phụ phải cùng có hoặc cùng null; lẫn lộn → `VALIDATION`. */
+function checkExtraMetric(extra: ExtraMetric): ExtraMetric {
+  const present = [extra.extraMetricLabel, extra.extraMaxPerGame, extra.extraPoints].filter((v) => v !== null).length;
+  if (present !== 0 && present !== 3) throw appError('VALIDATION', EXTRA_INCOMPLETE_MESSAGE);
+  return extra;
 }
 
 async function modeIdByKey(ctx: Ctx, key: string): Promise<number> {

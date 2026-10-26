@@ -3,9 +3,10 @@ import type { Ctx } from '../../src/server/ctx.js';
 import { clearRoleImage, detectImageMime, getRoleImage, setRoleImage } from '../../src/server/modules/roles/image.js';
 import { createRole, listRoles, updateRole } from '../../src/server/modules/roles/service.js';
 import type { RoleDto } from '../../src/shared/api-types.js';
+import { dateOnlyToDb } from '../../src/server/lib/time.js';
 import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
-import { roleByKey } from '../helpers/factories.js';
+import { createMember, roleByKey } from '../helpers/factories.js';
 
 let ctx: Ctx;
 
@@ -21,6 +22,9 @@ const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('W
 const DTO_KEYS = [
   'active',
   'description',
+  'extraMaxPerGame',
+  'extraMetricLabel',
+  'extraPoints',
   'faction',
   'hasImage',
   'icon',
@@ -79,6 +83,9 @@ test('lists active roles by faction then sortOrder, without image bytes', async 
     description: 'Vung kiếm chém mọi người đứng gần.',
     metricLabel: 'Số mạng chém',
     maxPerGame: 15,
+    extraMetricLabel: null,
+    extraMaxPerGame: null,
+    extraPoints: null,
     mapNote: 'Có từ v4.10 (08/2026)',
     modeKey: null,
     icon: '⚔️',
@@ -120,6 +127,9 @@ test('createRole fills defaults and resolves the mode key', async () => {
     description: '',
     metricLabel: 'Số lần thử',
     maxPerGame: 5,
+    extraMetricLabel: null,
+    extraMaxPerGame: null,
+    extraPoints: null,
     mapNote: null,
     modeKey: null,
     icon: '🧪',
@@ -214,6 +224,131 @@ test('updateRole changes the editable fields only', async () => {
   // Key, id và ảnh không sửa qua đây (kiểu đã chặn; thêm trường lạ cũng bị từ chối).
   await expect(updateRole(ctx, swordsman.id, { key: 'other' } as never)).rejects.toMatchObject({ code: 'VALIDATION' });
   expect((await roleByKey(testDb, 'swordsman')).maxPerGame).toBe(16);
+});
+
+// ---------------------------------------------------------------------------
+// Chỉ số phụ
+// ---------------------------------------------------------------------------
+
+const EXTRA = { extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraMaxPerGame: 2, extraPoints: 3 };
+const NO_EXTRA = { extraMetricLabel: null, extraMaxPerGame: null, extraPoints: null };
+const EXTRA_INCOMPLETE = 'Chỉ số phụ cần đủ cả ba: tên, tối đa mỗi trận và điểm mỗi lần';
+const EXTRA_IN_USE = 'Role đã có lần khai dùng chỉ số phụ, không tắt được';
+
+/** Một lần khai của `roleId` với chỉ số phụ `extraValue` (ghi thẳng, bỏ qua kiểm tra của module khai điểm). */
+async function reportWithExtra(roleId: number, extraValue: number): Promise<number> {
+  const member = await createMember(testDb);
+  const report = await testDb.statReport.create({
+    data: { memberId: member.id, roleId, playedOn: dateOnlyToDb('2026-10-10'), value: 1, extraValue },
+    select: { id: true },
+  });
+  return report.id;
+}
+
+test('seeded Ám sát carries the secondary metric in its DTO', async () => {
+  const assassin = (await listRoles(ctx)).find((r) => r.key === 'assassin');
+  expect(assassin).toMatchObject({ metricLabel: 'Số mạng đã giết', maxPerGame: 15, ...EXTRA });
+  // Mọi role khác không có chỉ số phụ.
+  expect((await listRoles(ctx, { includeInactive: true })).filter((r) => r.extraMetricLabel !== null).map((r) => r.key)).toEqual(['assassin']);
+});
+
+test('createRole with and without a secondary metric', async () => {
+  const withExtra = await createRole(ctx, validInput({ ...EXTRA, extraMetricLabel: '  Số lần ám sát trong cuộc họp  ' }));
+  expect(withExtra).toMatchObject(EXTRA);
+  expect(await testDb.role.findUniqueOrThrow({ where: { id: withExtra.id } })).toMatchObject(EXTRA);
+
+  // Không gửi hoặc gửi null cả ba → không có chỉ số phụ.
+  expect(await createRole(ctx, validInput({ key: 'plain_role' }))).toMatchObject(NO_EXTRA);
+  expect(await createRole(ctx, validInput({ key: 'null_role', ...NO_EXTRA }))).toMatchObject(NO_EXTRA);
+});
+
+test('createRole secondary metric validation', async () => {
+  const reject = (p: Record<string, unknown>, message: string) =>
+    expect(createRole(ctx, validInput(p)), JSON.stringify(p)).rejects.toMatchObject({ code: 'VALIDATION', message });
+
+  // Thiếu một hoặc hai trong ba → lỗi (kể cả null lẫn với giá trị).
+  await reject({ extraMetricLabel: 'Số lần ám sát' }, EXTRA_INCOMPLETE);
+  await reject({ extraMaxPerGame: 2 }, EXTRA_INCOMPLETE);
+  await reject({ extraPoints: 3 }, EXTRA_INCOMPLETE);
+  await reject({ extraMetricLabel: 'Số lần ám sát', extraMaxPerGame: 2 }, EXTRA_INCOMPLETE);
+  await reject({ extraMaxPerGame: 2, extraPoints: 3 }, EXTRA_INCOMPLETE);
+  await reject({ ...EXTRA, extraPoints: null }, EXTRA_INCOMPLETE);
+  await reject({ ...EXTRA, extraMetricLabel: null }, EXTRA_INCOMPLETE);
+
+  // Khoảng giá trị.
+  await reject({ ...EXTRA, extraMetricLabel: '   ' }, 'Tên chỉ số phụ phải từ 1 đến 60 ký tự');
+  await reject({ ...EXTRA, extraMetricLabel: 'x'.repeat(61) }, 'Tên chỉ số phụ phải từ 1 đến 60 ký tự');
+  await reject({ ...EXTRA, extraMaxPerGame: 0 }, 'Tối đa mỗi trận của chỉ số phụ phải từ 1 đến 100');
+  await reject({ ...EXTRA, extraMaxPerGame: 101 }, 'Tối đa mỗi trận của chỉ số phụ phải từ 1 đến 100');
+  await reject({ ...EXTRA, extraMaxPerGame: 1.5 }, 'Tối đa mỗi trận của chỉ số phụ phải từ 1 đến 100');
+  await reject({ ...EXTRA, extraPoints: 0 }, 'Điểm mỗi lần của chỉ số phụ phải từ 1 đến 100');
+  await reject({ ...EXTRA, extraPoints: 101 }, 'Điểm mỗi lần của chỉ số phụ phải từ 1 đến 100');
+  await reject({ ...EXTRA, extraPoints: 2.5 }, 'Điểm mỗi lần của chỉ số phụ phải từ 1 đến 100');
+  // Sai kiểu → thông báo chung.
+  await reject({ ...EXTRA, extraPoints: '3' }, 'Dữ liệu không hợp lệ');
+
+  expect(await testDb.role.count()).toBe(91);
+});
+
+test('updateRole enables, edits and disables the secondary metric', async () => {
+  const swordsman = await roleByKey(testDb, 'swordsman');
+  expect(swordsman).toMatchObject(NO_EXTRA);
+
+  // Bật: phải đủ ba trường; một hoặc hai → lỗi, role không đổi.
+  for (const partial of [{ extraPoints: 3 }, { extraMetricLabel: 'Số lần chém đôi', extraMaxPerGame: 2 }, { ...EXTRA, extraMaxPerGame: null }]) {
+    await expect(updateRole(ctx, swordsman.id, partial), JSON.stringify(partial)).rejects.toMatchObject({ code: 'VALIDATION', message: EXTRA_INCOMPLETE });
+  }
+  expect(await roleByKey(testDb, 'swordsman')).toMatchObject(NO_EXTRA);
+  // Null cả ba trên role chưa có chỉ số phụ: vô hại.
+  expect(await updateRole(ctx, swordsman.id, NO_EXTRA)).toMatchObject(NO_EXTRA);
+
+  const enabled = await updateRole(ctx, swordsman.id, { extraMetricLabel: ' Số lần chém đôi ', extraMaxPerGame: 5, extraPoints: 2 });
+  expect(enabled).toMatchObject({ extraMetricLabel: 'Số lần chém đôi', extraMaxPerGame: 5, extraPoints: 2 });
+  expect((await listRoles(ctx)).find((r) => r.key === 'swordsman')).toEqual(enabled);
+
+  // Sửa từng trường khi đã bật: được.
+  expect(await updateRole(ctx, swordsman.id, { extraPoints: 4 })).toMatchObject({ extraMetricLabel: 'Số lần chém đôi', extraMaxPerGame: 5, extraPoints: 4 });
+  expect(await updateRole(ctx, swordsman.id, { extraMetricLabel: 'Số lần chém ba', nameVi: 'Kiếm sĩ' })).toMatchObject({
+    nameVi: 'Kiếm sĩ',
+    extraMetricLabel: 'Số lần chém ba',
+    extraMaxPerGame: 5,
+    extraPoints: 4,
+  });
+  await expect(updateRole(ctx, swordsman.id, { extraPoints: 0 })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Điểm mỗi lần của chỉ số phụ phải từ 1 đến 100' });
+  await expect(updateRole(ctx, swordsman.id, { extraMaxPerGame: 101 })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Tối đa mỗi trận của chỉ số phụ phải từ 1 đến 100' });
+  await expect(updateRole(ctx, swordsman.id, { extraMetricLabel: '' })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Tên chỉ số phụ phải từ 1 đến 60 ký tự' });
+  // Tắt từng phần → lỗi (ba trường cùng null hoặc cùng có).
+  await expect(updateRole(ctx, swordsman.id, { extraPoints: null })).rejects.toMatchObject({ code: 'VALIDATION', message: EXTRA_INCOMPLETE });
+  expect(await roleByKey(testDb, 'swordsman')).toMatchObject({ extraMetricLabel: 'Số lần chém ba', extraMaxPerGame: 5, extraPoints: 4 });
+
+  // Tắt khi chưa có lần khai dùng chỉ số phụ: được (lần khai với extraValue = 0 không tính).
+  await reportWithExtra(swordsman.id, 0);
+  expect(await updateRole(ctx, swordsman.id, NO_EXTRA)).toMatchObject(NO_EXTRA);
+  expect(await roleByKey(testDb, 'swordsman')).toMatchObject(NO_EXTRA);
+});
+
+test('updateRole refuses to disable a secondary metric that reports already use', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  const reportId = await reportWithExtra(assassin.id, 2);
+
+  await expect(updateRole(ctx, assassin.id, NO_EXTRA)).rejects.toMatchObject({ code: 'VALIDATION', message: EXTRA_IN_USE });
+  // Kèm trường khác cũng bị chặn, không đổi gì.
+  await expect(updateRole(ctx, assassin.id, { ...NO_EXTRA, nameVi: 'Sát thủ họp' })).rejects.toMatchObject({ code: 'VALIDATION', message: EXTRA_IN_USE });
+  expect(await roleByKey(testDb, 'assassin')).toMatchObject({ nameVi: 'Ám sát', ...EXTRA });
+
+  // Đổi tên/tối đa/điểm vẫn được; lần khai của role khác không ảnh hưởng.
+  expect(await updateRole(ctx, assassin.id, { extraMetricLabel: 'Số lần ám sát', extraMaxPerGame: 3, extraPoints: 4 })).toMatchObject({
+    extraMetricLabel: 'Số lần ám sát',
+    extraMaxPerGame: 3,
+    extraPoints: 4,
+  });
+  const swordsman = await roleByKey(testDb, 'swordsman');
+  await updateRole(ctx, swordsman.id, EXTRA);
+  expect(await updateRole(ctx, swordsman.id, NO_EXTRA)).toMatchObject(NO_EXTRA);
+
+  // Lần khai dùng chỉ số phụ bị xoá → tắt được.
+  await testDb.statReport.delete({ where: { id: reportId } });
+  expect(await updateRole(ctx, assassin.id, NO_EXTRA)).toMatchObject(NO_EXTRA);
 });
 
 // ---------------------------------------------------------------------------
