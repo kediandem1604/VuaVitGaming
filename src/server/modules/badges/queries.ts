@@ -26,7 +26,10 @@ function isId(n: number): boolean {
   return Number.isInteger(n) && n >= 1 && n <= 2_147_483_647;
 }
 
-/** `kind` theo khoá trong danh mục; khoá nào cũng có trong `BADGES`. */
+/**
+ * `kind` theo khoá trong danh mục hiện hành. Dòng `member_badges` là chữ đóng băng và không bao
+ * giờ xoá, nên một khoá sau này có thể rời khỏi `BADGES`; khi đó `kindOf` suy `kind` từ `periodId`.
+ */
 const KIND_BY_KEY: ReadonlyMap<string, BadgeKind> = new Map(BADGES.map((b) => [b.key, b.kind]));
 
 /** Cột đọc cho một dòng danh hiệu kèm người nhận — đúng những gì DTO cần, không hơn. */

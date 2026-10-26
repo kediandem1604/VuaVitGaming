@@ -138,6 +138,33 @@ test('badge wall lists every badge newest first with the frozen text and the mem
   });
 });
 
+test('a row whose key left the catalogue still lists, with kind inferred from periodId', async () => {
+  const { member, sid } = await memberWithSid({ displayName: 'An' });
+  // Khoá không (còn) có trong `BADGES`: chữ đóng băng vẫn hiện, `kind` suy từ `periodId`.
+  const legacy = (badgeKey: string, periodId: string, awardedAt: string) =>
+    testDb.memberBadge.create({
+      data: { memberId: member.id, badgeKey, periodId, title: 'Danh hiệu cũ', icon: '🏅', detail: 'chi tiết cũ', awardedAt: new Date(awardedAt) },
+    });
+  const oldMonthly = await legacy('legacy_monthly', '2026-10', AWARDED_OCT);
+  const oldMilestone = await legacy('legacy_milestone', '', AWARDED_MILESTONE);
+  expect(BADGES.some((def) => def.key === 'legacy_monthly' || def.key === 'legacy_milestone')).toBe(false);
+
+  const wall = await get('/api/badges', sid);
+  expect(wall.statusCode, wall.body).toBe(200);
+  expect(wall.json<BadgeDto[]>()).toMatchObject([
+    { id: oldMonthly.id, badgeKey: 'legacy_monthly', kind: 'monthly', periodId: '2026-10', title: 'Danh hiệu cũ', icon: '🏅' },
+    { id: oldMilestone.id, badgeKey: 'legacy_milestone', kind: 'milestone', periodId: '', title: 'Danh hiệu cũ', icon: '🏅' },
+  ]);
+
+  // Trang thành viên đi qua cùng `toBadgeDto`.
+  const page = await get(`/api/members/${member.id}`, sid);
+  expect(page.statusCode).toBe(200);
+  expect(page.json<PublicMemberDto>().badges.map((b) => [b.badgeKey, b.kind])).toEqual([
+    ['legacy_monthly', 'monthly'],
+    ['legacy_milestone', 'milestone'],
+  ]);
+});
+
 test('badge wall is empty when nothing has been awarded', async () => {
   const { sid } = await memberWithSid();
   const res = await get('/api/badges', sid);

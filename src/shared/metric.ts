@@ -4,7 +4,8 @@
  * "3 Số mạng đã giết". Nhãn không bắt đầu bằng "Số" giữ nguyên.
  */
 export function metricAfterValue(label: string): string {
-  const trimmed = label.trim();
+  // NFC trước khi so: nhãn gõ ở dạng tổ hợp (NFD, "ô" = "o" + dấu mũ) vẫn phải khớp "số".
+  const trimmed = label.trim().normalize('NFC');
   const rest = trimmed.replace(/^số\s+/iu, '');
   return rest.length > 0 ? rest : trimmed;
 }
