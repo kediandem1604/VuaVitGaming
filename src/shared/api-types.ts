@@ -177,6 +177,35 @@ export interface LeaderboardRowDto {
   lastApprovedAt: string;
 }
 
+/**
+ * Một dòng "Top 3 mỗi phe" (`GET /api/leaderboard/factions`): một cặp (người, role) trong
+ * một mùa. `value` là tổng giá trị thô của các lần khai đã duyệt; `weight` là hệ số của
+ * role (5 khi role tối đa 1 mỗi trận, còn lại 1); `points = value × weight` là điểm dùng
+ * để xếp hạng trong phe. Một người có thể có nhiều dòng (mỗi role một dòng). Hạng 1..n
+ * liên tiếp, không đồng hạng. `role` chỉ gồm những gì cần để vẽ dòng và dẫn tới bảng của
+ * role đó.
+ */
+export interface FactionTopRowDto {
+  rank: number;
+  memberId: number;
+  displayName: string;
+  avatarUrl: string | null;
+  role: { id: number; nameVi: string; icon: string; metricLabel: string; faction: Faction };
+  value: number;
+  weight: number;
+  points: number;
+  games: number;
+}
+
+/**
+ * Top mỗi phe của một mùa (`seasonId` dạng `YYYY-MM`): mọi role tính cho phe của chính
+ * nó (kể cả role chế độ đặc biệt và role đã tắt). Phe chưa có cặp nào điểm > 0 → mảng rỗng.
+ */
+export interface FactionTopDto {
+  seasonId: string;
+  factions: Record<Faction, FactionTopRowDto[]>;
+}
+
 /** Người đang hoá thân một role trong Đại sảnh (top 1 của mùa, điểm > 0). */
 export interface HallHolderDto {
   memberId: number;

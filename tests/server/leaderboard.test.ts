@@ -3,9 +3,9 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../src/server/ctx.js';
 import { listRoles } from '../../src/server/modules/roles/service.js';
 import { ensureSeason } from '../../src/server/modules/seasons/service.js';
-import { getHall, getHeldRoles, getRoleLeaderboard, getSeasonLeaders } from '../../src/server/modules/stats/leaderboard.js';
+import { getFactionTop, getHall, getHeldRoles, getRoleLeaderboard, getSeasonLeaders, rolePointWeight } from '../../src/server/modules/stats/leaderboard.js';
 import { reviewReport, submitReport, updateOwnReport } from '../../src/server/modules/stats/reports.js';
-import type { HallDto } from '../../src/shared/api-types.js';
+import type { FactionTopRowDto, HallDto } from '../../src/shared/api-types.js';
 import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
 import { createMember, roleByKey } from '../helpers/factories.js';
@@ -226,6 +226,152 @@ test('getRoleLeaderboard validates season, limit and role', async () => {
   expect(await getRoleLeaderboard(ctx, duck.id, '2026-10', 2)).toHaveLength(2);
   expect(await getRoleLeaderboard(ctx, duck.id, '2026-10', 100)).toHaveLength(12);
   expect(await getRoleLeaderboard(ctx, duck.id, '2026-10', 101)).toHaveLength(12);
+});
+
+// ---------------------------------------------------------------------------
+// Top 3 mỗi phe
+// ---------------------------------------------------------------------------
+
+test('rolePointWeight is 5 for a role capped at 1 per game and 1 otherwise', () => {
+  expect(rolePointWeight({ maxPerGame: 1 })).toBe(5);
+  expect(rolePointWeight({ maxPerGame: 2 })).toBe(1);
+  expect(rolePointWeight({ maxPerGame: 10 })).toBe(1);
+  expect(rolePointWeight({ maxPerGame: 100 })).toBe(1);
+});
+
+/** Phần role trong một dòng top phe, lấy từ dữ liệu mẫu. */
+const roleOf = (role: Role): FactionTopRowDto['role'] => ({
+  id: role.id,
+  nameVi: role.nameVi,
+  icon: role.icon,
+  metricLabel: role.metricLabel,
+  faction: role.faction,
+});
+
+test('faction top: a max-1 role weighs x5, one member may hold several rows, factions are separate', async () => {
+  const goose = await roleByKey(testDb, 'goose'); // tối đa 10 → hệ số 1
+  const vigilante = await roleByKey(testDb, 'vigilante'); // tối đa 1 → hệ số 5
+  expect(vigilante.maxPerGame).toBe(1);
+  // An: Ngỗng 9 vote (×1 = 9); Dân phòng 2 phát (×5 = 10) → dòng Dân phòng xếp trên dù giá trị thô nhỏ hơn.
+  await approved(a.id, { roleId: goose.id, value: 9, at: '2026-10-10T02:00:00Z' });
+  await approved(a.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T03:00:00Z' });
+  await approved(a.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T04:00:00Z' });
+  // Bình: Ngỗng 3 (phe Ngỗng) và Vịt 7 (phe Vịt).
+  await approved(b.id, { roleId: goose.id, value: 3, at: '2026-10-10T04:30:00Z' });
+  await approved(b.id, { value: 7, at: '2026-10-10T05:00:00Z' });
+
+  const top = await getFactionTop(ctx, '2026-10');
+  expect(top.seasonId).toBe('2026-10');
+  expect(top.factions.goose).toEqual([
+    { rank: 1, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(vigilante), value: 2, weight: 5, points: 10, games: 2 },
+    { rank: 2, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(goose), value: 9, weight: 1, points: 9, games: 1 },
+    { rank: 3, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(goose), value: 3, weight: 1, points: 3, games: 1 },
+  ]);
+  expect(top.factions.duck).toEqual([
+    { rank: 1, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(duck), value: 7, weight: 1, points: 7, games: 1 },
+  ]);
+  expect(top.factions.neutral).toEqual([]);
+  expect(roleOf(duck)).toEqual({ id: duck.id, nameVi: 'Vịt', icon: '🦆', metricLabel: 'Số mạng đã giết', faction: 'duck' });
+});
+
+test('faction top ties: earlier approval first, then member id, then role id', async () => {
+  const c = await createMember(testDb, { displayName: 'Cường' });
+  expect(duck.id).toBeLessThan(swordsman.id);
+  // Phe Vịt: Bình đạt 5 ở Vịt lúc 02:00, An đạt 5 ở Vịt lúc 03:00 → Bình trên dù id lớn hơn.
+  await approved(b.id, { value: 5, at: '2026-10-10T02:00:00Z' });
+  await approved(a.id, { value: 5, at: '2026-10-10T03:00:00Z' });
+  // Cùng mốc duyệt (cùng đồng hồ): An và Bình ở Kiếm sĩ 5 → id thành viên nhỏ trước.
+  setNow('2026-10-10T04:00:00Z');
+  const ra = await submit(a.id, { roleId: swordsman.id, value: 5 });
+  const rb = await submit(b.id, { roleId: swordsman.id, value: 5 });
+  await reviewReport(ctx, modR(), rb, { approve: true });
+  await reviewReport(ctx, modR(), ra, { approve: true });
+  // Cùng người, cùng mốc, hai role cùng điểm → id role nhỏ trước.
+  setNow('2026-10-10T05:00:00Z');
+  const cSword = await submit(c.id, { roleId: swordsman.id, value: 2 });
+  const cDuck = await submit(c.id, { value: 2 });
+  await reviewReport(ctx, modR(), cSword, { approve: true });
+  await reviewReport(ctx, modR(), cDuck, { approve: true });
+
+  const rows = (await getFactionTop(ctx, '2026-10', 10)).factions.duck;
+  expect(rows.map((r) => [r.rank, r.memberId, r.role.id, r.points])).toEqual([
+    [1, b.id, duck.id, 5],
+    [2, a.id, duck.id, 5],
+    [3, a.id, swordsman.id, 5],
+    [4, b.id, swordsman.id, 5],
+    [5, c.id, duck.id, 2],
+    [6, c.id, swordsman.id, 2],
+  ]);
+});
+
+test('faction top counts only approved reports played in the season, with value > 0', async () => {
+  await approved(a.id, { value: 5 }); // Vịt, mùa 10
+  await submit(a.id, { value: 7 }); // chờ duyệt
+  const rejected = await submit(a.id, { value: 3 });
+  await reviewReport(ctx, modR(), rejected, { approve: false, reason: 'Trùng' });
+  await approved(b.id, { roleId: swordsman.id, value: 0 }); // 0 điểm: không lên bảng
+  // Trận 30/09 duyệt đầu tháng 10 tính cho mùa 9.
+  setNow('2026-10-01T05:00:00Z');
+  await approved(b.id, { value: 4, playedOn: '2026-09-30' });
+
+  const oct = await getFactionTop(ctx, '2026-10');
+  expect(oct.factions.duck.map((r) => [r.memberId, r.value, r.points, r.games])).toEqual([[a.id, 5, 5, 1]]);
+  expect(oct.factions.goose).toEqual([]);
+  expect(oct.factions.neutral).toEqual([]);
+  const sep = await getFactionTop(ctx, '2026-09');
+  expect(sep.factions.duck.map((r) => [r.memberId, r.value])).toEqual([[b.id, 4]]);
+  expect(await getFactionTop(ctx, '2026-08')).toEqual({ seasonId: '2026-08', factions: { goose: [], duck: [], neutral: [] } });
+});
+
+test('faction top takes `limit` rows per faction (default 3) with ranks 1..n, and keeps roles turned off later', async () => {
+  const goose = await roleByKey(testDb, 'goose');
+  const vigilante = await roleByKey(testDb, 'vigilante');
+  const members = [a, b, await createMember(testDb, { displayName: 'Cường' }), await createMember(testDb, { displayName: 'Dũng' })];
+  for (const [i, m] of members.entries()) await approved(m.id, { roleId: goose.id, value: i + 1 }); // Ngỗng 1..4
+  // Role tắt sau khi đã có điểm vẫn tính (lịch sử), như bảng xếp hạng theo role.
+  await approved(a.id, { roleId: vigilante.id, value: 1 }); // ×5 = 5
+  await testDb.role.update({ where: { id: vigilante.id }, data: { active: false } });
+
+  const top = await getFactionTop(ctx, '2026-10');
+  expect(top.factions.goose.map((r) => [r.rank, r.displayName, r.role.id, r.points])).toEqual([
+    [1, 'An', vigilante.id, 5],
+    [2, 'Dũng', goose.id, 4],
+    [3, 'Cường', goose.id, 3],
+  ]);
+  expect((await getFactionTop(ctx, '2026-10', 1)).factions.goose.map((r) => r.displayName)).toEqual(['An']);
+  expect((await getFactionTop(ctx, '2026-10', 100)).factions.goose).toHaveLength(5);
+  expect((await getFactionTop(ctx, '2026-10', 101)).factions.goose).toHaveLength(5);
+});
+
+test('faction top validates season and limit, and uses one grouped query', async () => {
+  for (const bad of ['2026-13', '2026-00', '2026-1', '2026/10', '', '2026-10-01']) {
+    await expect(getFactionTop(ctx, bad)).rejects.toMatchObject({ code: 'VALIDATION', message: 'Mùa không hợp lệ' });
+  }
+  for (const bad of [0, -1, 1.5, Number.NaN]) {
+    await expect(getFactionTop(ctx, '2026-10', bad)).rejects.toMatchObject({ code: 'VALIDATION', message: 'Giới hạn không hợp lệ' });
+  }
+
+  await approved(a.id, { value: 5 });
+  await approved(b.id, { roleId: cuckoo.id, value: 2 });
+  let groupByCalls = 0;
+  const restore = patchDelegate(
+    testDb.statReport,
+    'groupBy',
+    (original) =>
+      ((args: never) => {
+        groupByCalls += 1;
+        return original(args);
+      }) as never,
+  );
+  try {
+    const top = await getFactionTop(ctx, '2026-10');
+    expect(groupByCalls).toBe(1);
+    expect(top.factions.duck.map((r) => r.memberId)).toEqual([a.id]);
+    expect(top.factions.neutral.map((r) => [r.memberId, r.role.id])).toEqual([[b.id, cuckoo.id]]);
+    expect(top.factions.goose).toEqual([]);
+  } finally {
+    restore();
+  }
 });
 
 // ---------------------------------------------------------------------------

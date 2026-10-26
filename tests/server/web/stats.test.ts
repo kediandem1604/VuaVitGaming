@@ -8,7 +8,7 @@ import type { Ctx } from '../../../src/server/ctx.js';
 import type { OAuthClient } from '../../../src/server/modules/auth/oauth.js';
 import { createWebSession } from '../../../src/server/modules/auth/sessions.js';
 import { ensureSeason } from '../../../src/server/modules/seasons/service.js';
-import type { HallDto, HeldRoleDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../src/shared/api-types.js';
+import type { FactionTopDto, HallDto, HeldRoleDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../src/shared/api-types.js';
 import { buildApp } from '../../../src/server/web/app.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
@@ -213,6 +213,7 @@ test('every stats route needs a login', async () => {
     () => get('/api/admin/reports?status=pending'),
     () => review(undefined, 1, { approve: true }),
     () => get(`/api/leaderboard?roleId=${swordsman.id}`),
+    () => get('/api/leaderboard/factions'),
     () => get('/api/hall'),
     () => get('/api/seasons'),
     () => get('/api/reports/highlight-config'),
@@ -482,6 +483,51 @@ test('leaderboard query validation and limit', async () => {
   const missing = await get('/api/leaderboard?roleId=9999', sid);
   expect(missing.statusCode).toBe(404);
   expect(missing.json()).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
+});
+
+test('faction top 3 API: three factions for the season, same season parsing as the leaderboard', async () => {
+  const { member: me, sid } = await memberWithSid({ displayName: 'An' });
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
+  const empty = (seasonId: string): FactionTopDto => ({ seasonId, factions: { goose: [], duck: [], neutral: [] } });
+  const r = await submit(sid, 5);
+  // Chưa duyệt: ba phe trống, mùa mặc định là mùa hiện tại.
+  expect((await get('/api/leaderboard/factions', sid)).json()).toEqual(empty('2026-10'));
+
+  setNow('2026-10-22T13:00:00Z');
+  expect((await review(modSid, r.id, { approve: true })).statusCode).toBe(204);
+  const res = await get('/api/leaderboard/factions', sid);
+  expect(res.statusCode).toBe(200);
+  expect(res.json<FactionTopDto>()).toEqual({
+    seasonId: '2026-10',
+    factions: {
+      goose: [],
+      duck: [
+        {
+          rank: 1,
+          memberId: me.id,
+          displayName: 'An',
+          avatarUrl: null,
+          role: { id: swordsman.id, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém', faction: 'duck' },
+          value: 5,
+          weight: 1,
+          points: 5,
+          games: 1,
+        },
+      ],
+      neutral: [],
+    },
+  });
+  expect((await get('/api/leaderboard/factions?season=2026-10', sid)).json()).toEqual(res.json());
+  expect((await get('/api/leaderboard/factions?season=2026-09', sid)).json()).toEqual(empty('2026-09'));
+  for (const season of ['2026-13', '202610', '2026-1', '10/2026', 'abc', '']) {
+    const bad = await get(`/api/leaderboard/factions?season=${encodeURIComponent(season)}`, sid);
+    expect(bad.statusCode, season).toBe(400);
+    expect(bad.json(), season).toEqual(INVALID);
+  }
+  // Route con không che route bảng xếp hạng theo role.
+  const board = await get(`/api/leaderboard?roleId=${swordsman.id}`, sid);
+  expect(board.statusCode).toBe(200);
+  expect(board.json<LeaderboardRowDto[]>()).toHaveLength(1);
 });
 
 test('hall lists 71 main roles', async () => {

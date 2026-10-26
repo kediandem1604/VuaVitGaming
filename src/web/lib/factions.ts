@@ -14,6 +14,16 @@ export const FACTION_LABEL: Record<Faction, string> = {
   neutral: 'Phe thứ 3',
 };
 
+/**
+ * Nền băng/nhãn phe mang chữ trắng (thẻ role, khối "Top 3 mỗi phe"): dùng `-strong` để chữ
+ * trắng đủ tương phản — không đặt chữ trắng thẳng lên `goose`/`duck` (spec §5.3).
+ */
+export const FACTION_BAND: Record<Faction, string> = {
+  goose: 'bg-goose-strong',
+  duck: 'bg-duck-strong',
+  neutral: 'bg-third',
+};
+
 export const SPECIAL_LABEL = 'Chế độ đặc biệt';
 
 export function isSpecialRole(role: RoleDto): boolean {

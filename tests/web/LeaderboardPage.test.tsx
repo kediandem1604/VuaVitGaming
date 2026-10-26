@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { LeaderboardRowDto, RoleDto, SeasonDto } from '../../src/shared/api-types';
+import type { FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleDto, SeasonDto } from '../../src/shared/api-types';
 import { LeaderboardPage } from '../../src/web/pages/LeaderboardPage';
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'icon' | 'metricLabel'> & Partial<RoleDto>): RoleDto => ({
@@ -53,22 +53,66 @@ const boards: Record<string, LeaderboardRowDto[]> = {
   '70@2026-10': [row(1, 7, 'Ngỗng Bảy', 9, 3), row(2, 8, 'Vịt Tám', 6, 2), row(3, 9, 'Ngỗng Chín', 2, 1), row(4, 10, 'Vịt Mười', 1, 1)],
 };
 
+/** Phần role của một dòng "Top 3 mỗi phe". */
+const topRole = (id: number, nameVi: string, icon: string, metricLabel: string, faction: FactionTopRowDto['role']['faction']) => ({
+  id,
+  nameVi,
+  icon,
+  metricLabel,
+  faction,
+});
+const VIGILANTE = topRole(4, 'Dân phòng', '🔫', 'Số phát bắn trúng kẻ xấu', 'goose');
+const GOOSE = topRole(1, 'Ngỗng', '🪿', 'Số lần vote trúng Vịt', 'goose');
+const SWORDSMAN = topRole(61, 'Kiếm sĩ', '⚔️', 'Số mạng chém', 'duck');
+
+const topRow = (rank: number, memberId: number, displayName: string, role: FactionTopRowDto['role'], value: number, weight: number, games: number): FactionTopRowDto => ({
+  rank,
+  memberId,
+  displayName,
+  avatarUrl: null,
+  role,
+  value,
+  weight,
+  points: value * weight,
+  games,
+});
+
+const emptyTop = (seasonId: string): FactionTopDto => ({ seasonId, factions: { goose: [], duck: [], neutral: [] } });
+
+/** Top 3 mỗi phe có dữ liệu: cùng một người giữ hai dòng Phe Ngỗng (Dân phòng ×5 trên Ngỗng ×1), Phe thứ 3 trống. */
+const factionTops: Record<string, FactionTopDto> = {
+  '2026-10': {
+    seasonId: '2026-10',
+    factions: {
+      goose: [topRow(1, 1, 'Ngỗng Một', VIGILANTE, 2, 5, 2), topRow(2, 1, 'Ngỗng Một', GOOSE, 9, 1, 3), topRow(3, 3, 'Ngỗng Ba', GOOSE, 4, 1, 1)],
+      duck: [topRow(1, 2, 'Vịt Hai', SWORDSMAN, 11, 1, 5)],
+      neutral: [],
+    },
+  },
+  '2026-09': { seasonId: '2026-09', factions: { goose: [], duck: [topRow(1, 2, 'Vịt Hai', SWORDSMAN, 12, 1, 5)], neutral: [] } },
+};
+
 /** Các mục trên bục vinh danh (tối đa 3, thứ tự DOM theo hạng). */
 const podiumItems = () => within(screen.getByRole('list', { name: 'Bục vinh danh' })).getAllByRole('listitem');
 /** Các hàng của bảng đầy đủ bên dưới bục (mọi hạng, kể cả top 3). */
 const boardItems = () => within(screen.getByRole('list', { name: 'Mọi hạng' })).getAllByRole('listitem');
 const findBoard = () => screen.findByRole('list', { name: 'Mọi hạng' });
+/** Danh sách của một khối phe trong "Top 3 mỗi phe". */
+const factionList = (label: string) => screen.getByRole('list', { name: `Top 3 ${label}` });
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-function stubFetch() {
+/** Mặc định "Top 3 mỗi phe" trống ở mọi mùa; truyền `tops` để có dữ liệu. */
+function stubFetch(tops: Record<string, FactionTopDto> = {}) {
   const fetchMock = vi.fn((input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url === '/api/seasons') return Promise.resolve(json(200, seasons));
     if (url === '/api/roles') return Promise.resolve(json(200, roles));
     const match = /^\/api\/leaderboard\?roleId=(\d+)&season=(\d{4}-\d{2})&limit=50$/.exec(url);
     if (match) return Promise.resolve(json(200, boards[`${match[1]}@${match[2]}`] ?? []));
+    const top = /^\/api\/leaderboard\/factions\?season=(\d{4}-\d{2})$/.exec(url);
+    if (top?.[1]) return Promise.resolve(json(200, tops[top[1]] ?? emptyTop(top[1])));
     throw new Error(`Không có tuyến giả cho ${url}`);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -282,12 +326,78 @@ test('changing the selects updates the URL and loads the new board', async () =>
   expect(screen.getByTestId('location')).toHaveTextContent('/bang-xep-hang?role=61&mua=2026-09');
 });
 
+test('Top 3 mỗi phe: three faction blocks, rows in rank order with medal, role, raw value and weighted points', async () => {
+  const fetchMock = stubFetch(factionTops);
+  renderAt('/bang-xep-hang');
+  await findBoard();
+
+  expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/factions?season=2026-10', expect.anything());
+  expect(screen.getByRole('heading', { level: 2, name: 'Top 3 mỗi phe' })).toBeInTheDocument();
+  expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual(['Phe Ngỗng', 'Phe Vịt', 'Phe thứ 3']);
+
+  const goose = within(factionList('Phe Ngỗng')).getAllByRole('listitem');
+  expect(goose).toHaveLength(3);
+  const [first, second, third] = goose as [HTMLElement, HTMLElement, HTMLElement];
+  // Hạng 1: Dân phòng 2 phát × 5 = 10 điểm, xếp trên Ngỗng 9 vote của chính người đó.
+  expect(within(first).getByTitle('Hạng 1')).toHaveTextContent('🥇');
+  expect(first).toHaveTextContent('Ngỗng Một');
+  expect(first).toHaveTextContent('Dân phòng · 2 Số phát bắn trúng kẻ xấu');
+  expect(first).toHaveTextContent('10 điểm');
+  expect(first).toHaveTextContent('2 × 5');
+  expect(within(first).getByRole('link', { name: /Dân phòng/ })).toHaveAttribute('href', '/bang-xep-hang?role=4&mua=2026-10');
+  // Cùng một người ở hạng 2 với role khác; hệ số 1 thì không ghi phép nhân.
+  expect(within(second).getByTitle('Hạng 2')).toHaveTextContent('🥈');
+  expect(second).toHaveTextContent('Ngỗng Một');
+  expect(second).toHaveTextContent('Ngỗng · 9 Số lần vote trúng Vịt');
+  expect(second).toHaveTextContent('9 điểm');
+  expect(second).not.toHaveTextContent('×');
+  expect(within(second).getByRole('link', { name: /Ngỗng/ })).toHaveAttribute('href', '/bang-xep-hang?role=1&mua=2026-10');
+  expect(within(third).getByTitle('Hạng 3')).toHaveTextContent('🥉');
+  expect(third).toHaveTextContent('Ngỗng Ba');
+  expect(third).toHaveTextContent('4 điểm');
+
+  const duck = within(factionList('Phe Vịt')).getAllByRole('listitem');
+  expect(duck).toHaveLength(1);
+  expect(duck[0]).toHaveTextContent('Vịt Hai');
+  expect(duck[0]).toHaveTextContent('Kiếm sĩ · 11 Số mạng chém');
+  expect(duck[0]).toHaveTextContent('11 điểm');
+
+  // Phe chưa có ai: không có danh sách, chỉ câu trống.
+  expect(screen.queryByRole('list', { name: 'Top 3 Phe thứ 3' })).toBeNull();
+  expect(screen.getByText('Chưa có ai')).toBeInTheDocument();
+
+  // Bảng theo role bên dưới vẫn như cũ.
+  expect(boardItems()).toHaveLength(2);
+  expect(podiumItems()).toHaveLength(2);
+  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveValue('1');
+});
+
+test('Top 3 mỗi phe follows ?mua= and the season select', async () => {
+  const fetchMock = stubFetch(factionTops);
+  renderAt('/bang-xep-hang?role=61&mua=2026-09');
+  await findBoard();
+
+  expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/factions?season=2026-09', expect.anything());
+  expect(fetchMock).not.toHaveBeenCalledWith('/api/leaderboard/factions?season=2026-10', expect.anything());
+  expect(within(factionList('Phe Vịt')).getAllByRole('listitem')).toHaveLength(1);
+  expect(factionList('Phe Vịt')).toHaveTextContent('12 điểm');
+  expect(within(factionList('Phe Vịt')).getByRole('link', { name: /Kiếm sĩ/ })).toHaveAttribute('href', '/bang-xep-hang?role=61&mua=2026-09');
+  expect(screen.getAllByText('Chưa có ai')).toHaveLength(2);
+
+  fireEvent.change(screen.getByRole('combobox', { name: 'Mùa' }), { target: { value: '2026-10' } });
+  expect(within(await screen.findByRole('list', { name: 'Top 3 Phe Ngỗng' })).getAllByRole('listitem')).toHaveLength(3);
+  expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/factions?season=2026-10', expect.anything());
+  expect(screen.getByTestId('location')).toHaveTextContent('/bang-xep-hang?role=61&mua=2026-10');
+});
+
 test('a failed board load shows the message and Thử lại recovers', async () => {
   let fail = true;
   const fetchMock = vi.fn((input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url === '/api/seasons') return Promise.resolve(json(200, seasons));
     if (url === '/api/roles') return Promise.resolve(json(200, roles));
+    // Chỉ bảng theo role lỗi; "Top 3 mỗi phe" vẫn tải được.
+    if (url.startsWith('/api/leaderboard/factions?')) return Promise.resolve(json(200, emptyTop('2026-10')));
     if (fail) return Promise.resolve(json(500, { error: { code: 'INTERNAL', message: 'Có lỗi xảy ra, thử lại sau' } }));
     return Promise.resolve(json(200, boards['1@2026-10']));
   });

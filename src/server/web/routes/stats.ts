@@ -11,13 +11,13 @@
 
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { HallDto, HeldRoleDto, HighlightConfigDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../shared/api-types.js';
+import type { FactionTopDto, HallDto, HeldRoleDto, HighlightConfigDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../shared/api-types.js';
 import { HIGHLIGHT_CONTENT_TYPES, highlightLimitMessage } from '../../../shared/highlight.js';
 import { appError } from '../../lib/errors.js';
 import { seasonIdOf, toVnDate } from '../../lib/time.js';
 import { listSeasons } from '../../modules/seasons/service.js';
 import { attachHighlight, highlightConfig } from '../../modules/stats/highlight.js';
-import { getHall, getHeldRoles, getRoleLeaderboard } from '../../modules/stats/leaderboard.js';
+import { getFactionTop, getHall, getHeldRoles, getRoleLeaderboard } from '../../modules/stats/leaderboard.js';
 import type { LeaderboardRow } from '../../modules/stats/leaderboard.js';
 import {
   getReportDto,
@@ -81,7 +81,8 @@ const mineQuery = z.object({ limit: limitQuery });
 /** Hàng chờ duyệt là danh sách duy nhất có — trạng thái khác chưa hỗ trợ. */
 const pendingQuery = z.object({ status: z.literal('pending') });
 const leaderboardQuery = z.object({ roleId: z.coerce.number().int().positive().max(2_147_483_647), season: seasonQueryParam, limit: limitQuery });
-const hallQuery = z.object({ season: seasonQueryParam });
+/** Top mỗi phe và Đại sảnh chỉ nhận mùa (số dòng mỗi phe do service cố định). */
+const seasonOnlyQuery = z.object({ season: seasonQueryParam });
 
 /** Duyệt: `reason` chỉ có nghĩa khi từ chối; khi duyệt thì bỏ qua (kể cả chuỗi rỗng). */
 const reviewBody = z.object({ approve: z.boolean(), reason: z.string().optional() }).strict();
@@ -186,8 +187,14 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
     return rows.map(toLeaderboardRowDto);
   });
 
+  // Đường dẫn tĩnh riêng, không đụng `/api/leaderboard` (route đó không có tham số đường dẫn).
+  app.get('/api/leaderboard/factions', { preHandler: requireMember }, async (request): Promise<FactionTopDto> => {
+    const { season } = seasonOnlyQuery.parse(request.query);
+    return getFactionTop(app.ctx, season ?? currentSeason());
+  });
+
   app.get('/api/hall', { preHandler: requireMember }, async (request): Promise<HallDto> => {
-    const { season } = hallQuery.parse(request.query);
+    const { season } = seasonOnlyQuery.parse(request.query);
     return getHall(app.ctx, season ?? currentSeason());
   });
 

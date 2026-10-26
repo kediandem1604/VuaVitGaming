@@ -1,15 +1,21 @@
 /**
- * Bảng xếp hạng (spec §8, §6): chọn role (nhóm theo phe, role chế độ đặc biệt thành nhóm
- * riêng) và mùa, rồi top 50 của role đó trong mùa đó: bục vinh danh 1-2-3 (`Podium`) và
- * bên dưới bảng đầy đủ mọi hạng (👑 cho hạng 1), avatar, tên, điểm, số trận.
+ * Bảng xếp hạng (spec §8, §6): chọn mùa ở đầu trang, rồi hai phần cho mùa đó.
  *
- * Role trong `?role={id}`, mùa trong `?mua=YYYY-MM` (Đại sảnh dẫn tới đây với cả
- * hai); giá trị lạ về mặc định (role đầu danh mục, mùa mới nhất), không gửi lên API.
+ * "Top 3 mỗi phe": ba khối Phe Ngỗng / Phe Vịt / Phe thứ 3 (cạnh nhau từ `md`, xếp dọc ở
+ * điện thoại), mỗi dòng là một cặp (người, role) với điểm = giá trị thô × hệ số của role
+ * (server tính, `FactionTopDto`); cùng một người có thể có nhiều dòng. Phe trống → "Chưa có ai".
+ *
+ * Bên dưới: chọn role (nhóm theo phe, role chế độ đặc biệt thành nhóm riêng) rồi top 50 của
+ * role đó trong mùa đó: bục vinh danh 1-2-3 (`Podium`) và bảng đầy đủ mọi hạng (👑 cho hạng
+ * 1), avatar, tên, điểm, số trận.
+ *
+ * Role trong `?role={id}`, mùa trong `?mua=YYYY-MM` (Đại sảnh và dòng "Top 3 mỗi phe" dẫn
+ * tới đây với cả hai); giá trị lạ về mặc định (role đầu danh mục, mùa mới nhất), không gửi lên API.
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router';
-import type { LeaderboardRowDto, RoleDto } from '../../shared/api-types';
+import { Link, useSearchParams } from 'react-router';
+import type { Faction, FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleDto } from '../../shared/api-types';
 import { apiGet } from '../api';
 import { Avatar } from '../components/Avatar';
 import { EmptyState } from '../components/EmptyState';
@@ -17,7 +23,9 @@ import { Podium } from '../components/Podium';
 import { QueryState } from '../components/QueryState';
 import { SeasonSelect } from '../components/SeasonSelect';
 import { resolveSeason, SEASON_PARAM, useSeasons } from '../hooks/useSeasons';
-import { FACTION_LABEL, FACTIONS, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
+import { cx } from '../lib/cx';
+import { FACTION_BAND, FACTION_LABEL, FACTIONS, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
+import { formatSeasonLabel } from '../lib/format';
 
 const ROLE_PARAM = 'role';
 const LIMIT = 50;
@@ -47,41 +55,60 @@ export function LeaderboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Tiêu đề 30px ≥ 18px nên dùng được chữ nổi `text-raised` (spec §3.2). */}
-      <h1 className="text-raised text-3xl leading-none font-extrabold text-white">Bảng xếp hạng</h1>
-
-      <QueryState query={roles}>
-        {(list) => (
-          <QueryState query={seasons}>
-            {(seasonList) =>
-              role === null || season === null ? (
-                <EmptyState>
-                  <p>{role === null ? 'Chưa có role nào đang bật' : 'Chưa có mùa nào'}</p>
-                </EmptyState>
-              ) : (
-                <>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                    <RoleSelect roles={list} value={role.id} onChange={(id) => setParam(ROLE_PARAM, String(id))} />
-                    <SeasonSelect seasons={seasonList} value={season.id} onChange={(id) => setParam(SEASON_PARAM, id)} />
-                    {season.closed && <span className="chip self-start sm:self-center">Mùa đã chốt</span>}
-                  </div>
-
-                  <section className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-0.5">
-                      {/* Emoji role chỉ trang trí: tiêu đề đọc là tên role. */}
-                      <h2 className="text-xl leading-tight font-extrabold text-white">
-                        <span aria-hidden="true">{role.icon}</span> {role.nameVi}
-                      </h2>
-                      {role.description && <p className="text-sm text-night-200">{role.description}</p>}
-                      <p className="text-sm text-night-300">Chỉ số: {role.metricLabel}</p>
-                    </div>
-                    <QueryState query={board}>{(rows) => <Board role={role} rows={rows} />}</QueryState>
-                  </section>
-                </>
-              )
-            }
-          </QueryState>
+      {/* Ô chọn mùa ở đầu trang vì cả "Top 3 mỗi phe" và bảng theo role bên dưới đều theo mùa này (như Đại sảnh). */}
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-1.5">
+          {/* Tiêu đề 30px ≥ 18px nên dùng được chữ nổi `text-raised` (spec §3.2). */}
+          <h1 className="text-raised text-3xl leading-none font-extrabold text-white">Bảng xếp hạng</h1>
+          {season && (
+            <p className="flex flex-wrap items-center gap-2 text-night-300">
+              <span>{formatSeasonLabel(season.id)}</span>
+              {season.closed && <span className="chip">Mùa đã chốt</span>}
+            </p>
+          )}
+        </div>
+        {seasons.data && season && (
+          <SeasonSelect seasons={seasons.data} value={season.id} onChange={(id) => setParam(SEASON_PARAM, id)} />
         )}
+      </header>
+
+      <QueryState query={seasons}>
+        {() =>
+          season === null ? (
+            <EmptyState>
+              <p>Chưa có mùa nào</p>
+            </EmptyState>
+          ) : (
+            <>
+              <FactionTop seasonId={season.id} />
+
+              <QueryState query={roles}>
+                {(list) =>
+                  role === null ? (
+                    <EmptyState>
+                      <p>Chưa có role nào đang bật</p>
+                    </EmptyState>
+                  ) : (
+                    <section className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                        <RoleSelect roles={list} value={role.id} onChange={(id) => setParam(ROLE_PARAM, String(id))} />
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        {/* Emoji role chỉ trang trí: tiêu đề đọc là tên role. */}
+                        <h2 className="text-xl leading-tight font-extrabold text-white">
+                          <span aria-hidden="true">{role.icon}</span> {role.nameVi}
+                        </h2>
+                        {role.description && <p className="text-sm text-night-200">{role.description}</p>}
+                        <p className="text-sm text-night-300">Chỉ số: {role.metricLabel}</p>
+                      </div>
+                      <QueryState query={board}>{(rows) => <Board role={role} rows={rows} />}</QueryState>
+                    </section>
+                  )
+                }
+              </QueryState>
+            </>
+          )
+        }
       </QueryState>
     </div>
   );
@@ -93,6 +120,109 @@ function resolveRole(requested: string | null, roles: RoleDto[] | undefined): Ro
   const id = requested !== null && ROLE_ID.test(requested) ? Number(requested) : null;
   return roles.find((role) => role.id === id) ?? roles[0] ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Top 3 mỗi phe
+// ---------------------------------------------------------------------------
+
+/** Huy chương theo hạng 1-2-3 (server trả tối đa 3 dòng mỗi phe; nhiều hơn thì ghi số). */
+const MEDALS = ['🥇', '🥈', '🥉'] as const;
+
+/** Ba khối phe cho mùa đang xem; tải riêng với bảng theo role để lỗi/chờ của phần này không che phần kia. */
+function FactionTop({ seasonId }: { seasonId: string }) {
+  const top = useQuery({
+    queryKey: ['leaderboard-factions', seasonId],
+    queryFn: () => apiGet<FactionTopDto>(`/api/leaderboard/factions?season=${seasonId}`),
+  });
+
+  return (
+    <section aria-labelledby="faction-top-heading" className="flex flex-col gap-3">
+      <h2 id="faction-top-heading" className="text-xl leading-tight font-extrabold text-white">
+        Top 3 mỗi phe
+      </h2>
+      <QueryState query={top}>
+        {(data) => (
+          // Xếp dọc ở điện thoại, ba cột từ `md` (768px).
+          <div className="grid gap-3 md:grid-cols-3">
+            {FACTIONS.map((faction) => (
+              <FactionBlock key={faction} faction={faction} rows={data.factions[faction]} seasonId={seasonId} />
+            ))}
+          </div>
+        )}
+      </QueryState>
+    </section>
+  );
+}
+
+interface FactionBlockProps {
+  faction: Faction;
+  rows: FactionTopRowDto[];
+  seasonId: string;
+}
+
+/** Một khối phe: panel có băng phe trên cùng (như thẻ role), rồi các dòng hoặc "Chưa có ai". */
+function FactionBlock({ faction, rows, seasonId }: FactionBlockProps) {
+  const label = FACTION_LABEL[faction];
+  return (
+    // `p-0 overflow-hidden` để băng phe chạm sát mép và bị cắt theo góc bo.
+    <div className="panel flex flex-col overflow-hidden p-0">
+      <h3 className={cx('px-3 py-1.5 text-sm font-extrabold tracking-wide text-white', FACTION_BAND[faction])}>{label}</h3>
+      {rows.length === 0 ? (
+        <p className="px-3 py-3 text-sm text-night-300">Chưa có ai</p>
+      ) : (
+        <ol aria-label={`Top 3 ${label}`} className="divide-y divide-night-700">
+          {rows.map((row) => (
+            <FactionRow key={`${row.memberId}-${row.role.id}`} row={row} seasonId={seasonId} />
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Một dòng: huy chương, avatar, rồi hai dòng chữ — tên người với `{điểm} điểm` bên phải
+ * (role có hệ số ghi thêm `{giá trị} × {hệ số}` nhỏ bên dưới), và `{icon} {role} · {giá trị
+ * thô} {chỉ số}` với tên role là link tới bảng của role đó trong mùa đang xem. Hai dòng để
+ * nhãn chỉ số dài (tới 40 ký tự) xuống dòng thay vì tràn ngang ở 320px.
+ */
+function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string }) {
+  return (
+    <li className="flex items-start gap-2 px-3 py-2">
+      {/* Emoji huy chương chỉ trang trí; trình đọc màn hình đọc "Hạng N". */}
+      <span className="w-7 shrink-0 pt-0.5 text-center text-lg leading-none" title={`Hạng ${row.rank}`}>
+        <span aria-hidden="true">{MEDALS[row.rank - 1] ?? row.rank}</span>
+        <span className="sr-only">Hạng {row.rank}</span>
+      </span>
+      {/* Avatar chỉ trang trí: tên viết ngay bên cạnh. */}
+      <Avatar name={row.displayName} url={row.avatarUrl} className="size-8 text-sm" />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="min-w-0 truncate font-bold text-white">{row.displayName}</span>
+          <span className="shrink-0 text-right">
+            <span className="font-bold text-gold tabular-nums">{row.points} điểm</span>
+            {row.weight !== 1 && (
+              <span className="block text-xs text-night-300 tabular-nums" title="Role tối đa 1 mỗi trận: nhân hệ số">
+                {row.value} × {row.weight}
+              </span>
+            )}
+          </span>
+        </div>
+        <p className="text-sm break-words text-night-300">
+          <Link to={`/bang-xep-hang?${ROLE_PARAM}=${row.role.id}&${SEASON_PARAM}=${seasonId}`} className="font-bold text-night-200 hover:underline">
+            <span aria-hidden="true">{row.role.icon}</span> {row.role.nameVi}
+          </Link>
+          {' · '}
+          <span className="tabular-nums">{row.value}</span> {row.role.metricLabel}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bảng theo role
+// ---------------------------------------------------------------------------
 
 interface RoleSelectProps {
   roles: RoleDto[];

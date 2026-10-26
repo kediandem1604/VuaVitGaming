@@ -1,11 +1,13 @@
 /**
- * Bảng xếp hạng theo role và Đại sảnh hoá thân (spec §4.6, §4.7).
+ * Bảng xếp hạng theo role, top mỗi phe và Đại sảnh hoá thân (spec §4.6, §4.7).
  *
  * Điểm của một người ở một role trong một mùa = tổng giá trị các lần khai đã duyệt có
  * ngày chơi thuộc mùa đó — theo `playedOn`, không theo ngày duyệt, nên trận cuối tháng
  * duyệt đầu tháng sau vẫn tính cho mùa cũ. `games` = số lần khai đã duyệt. Xếp theo điểm
  * giảm dần; hoà thì ai đạt mức điểm đó trước (lần duyệt gần nhất sớm hơn) xếp trên; vẫn
  * hoà thì theo id thành viên để thứ tự luôn xác định. Hạng 1..n liên tiếp, không đồng hạng.
+ * Top mỗi phe (`getFactionTop`) xếp các cặp (người, role) của cùng phe theo điểm × hệ số
+ * của role (`rolePointWeight`), cùng cách phân hoà, thêm id role ở cuối.
  *
  * Chỉ người có điểm > 0 mới lên bảng: role mà mọi lần khai đã duyệt đều 0 thì chưa ai hoá
  * thân (§4.7 chỉ lưu top 1 "có điểm > 0"), và nhờ vậy `getRoleLeaderboard(...)[0]` luôn
@@ -18,8 +20,8 @@
  * import hai chiều với file đó chỉ gồm lời gọi hàm lúc chạy, không dùng gì ở cấp module).
  */
 
-import type { Prisma, PrismaClient } from '@prisma/client';
-import type { HallDto, HallHolderDto, HallPreviousDto, RoleDto } from '../../../shared/api-types.js';
+import type { Faction, Prisma, PrismaClient } from '@prisma/client';
+import type { FactionTopDto, FactionTopRowDto, HallDto, HallHolderDto, HallPreviousDto, RoleDto } from '../../../shared/api-types.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dateOnlyToDb, seasonDateRange } from '../../lib/time.js';
@@ -181,6 +183,97 @@ export async function getHeldRoles(ctx: Ctx, memberId: number, seasonId: string)
     const leader = leaders.get(role.id);
     return leader && leader.memberId === memberId ? [{ role, score: leader.score }] : [];
   });
+}
+
+// ---------------------------------------------------------------------------
+// Top mỗi phe
+// ---------------------------------------------------------------------------
+
+/** Hệ số điểm của role tối đa 1 mỗi trận (Dân phòng, Vệ sĩ, Chim đa đa…). */
+const SINGLE_PER_GAME_WEIGHT = 5;
+
+/**
+ * Hệ số nhân điểm của một role khi xếp hạng chung trong phe: role chỉ ghi được tối đa 1
+ * mỗi trận (`maxPerGame === 1`) nhân 5, còn lại nhân 1 — để một phát bắn trúng của Dân
+ * phòng không thua một mạng chém của Kiếm sĩ. Quy tắc đi theo `maxPerGame` nên admin đổi
+ * giới hạn của role là hệ số đổi theo. Đây là nơi DUY NHẤT định nghĩa hệ số.
+ */
+export function rolePointWeight(role: { maxPerGame: number }): number {
+  return role.maxPerGame === 1 ? SINGLE_PER_GAME_WEIGHT : 1;
+}
+
+const FACTIONS: readonly Faction[] = ['goose', 'duck', 'neutral'];
+
+/** Một ô (role, người) đã gộp, kèm role và điểm có hệ số — để xếp hạng trong phe. */
+interface WeightedAgg extends Agg {
+  role: FactionTopRowDto['role'];
+  weight: number;
+  points: number;
+}
+
+/** Điểm có hệ số giảm dần → đạt trước xếp trên → id thành viên nhỏ trước → id role nhỏ trước. */
+function compareWeighted(x: WeightedAgg, y: WeightedAgg): number {
+  return y.points - x.points || x.lastApprovedAt.getTime() - y.lastApprovedAt.getTime() || x.memberId - y.memberId || x.roleId - y.roleId;
+}
+
+/**
+ * Top `limit` của mỗi phe trong một mùa (mặc định 3, tối đa 100 — lớn hơn bị cắt; không
+ * nguyên hoặc < 1 → `VALIDATION`). Mỗi dòng là một cặp (người, role) có điểm thô > 0, điểm
+ * xếp hạng = tổng giá trị thô × `rolePointWeight(role)`; một người có thể có nhiều dòng
+ * trong cùng phe. Mọi role tính cho phe của chính nó, kể cả role chế độ đặc biệt và role
+ * đã tắt (lịch sử). Đúng một truy vấn gộp lần khai (`aggregateSeason` không lọc role).
+ */
+export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Promise<FactionTopDto> {
+  checkSeasonId(seasonId);
+  if (!Number.isInteger(limit) || limit < 1) throw appError('VALIDATION', 'Giới hạn không hợp lệ');
+  const take = Math.min(limit, MAX_LIMIT);
+
+  const aggs = await aggregateSeason(ctx.db, seasonId);
+  const roles = await ctx.db.role.findMany({
+    where: { id: { in: [...new Set(aggs.map((x) => x.roleId))] } },
+    select: { id: true, faction: true, maxPerGame: true, nameVi: true, icon: true, metricLabel: true },
+  });
+  const roleById = new Map(roles.map((r) => [r.id, r]));
+
+  const perFaction: Record<Faction, WeightedAgg[]> = { goose: [], duck: [], neutral: [] };
+  for (const agg of aggs) {
+    // Khoá ngoại đảm bảo role luôn có; phòng hờ dữ liệu lạ thì bỏ ô đó.
+    const role = roleById.get(agg.roleId);
+    if (!role) continue;
+    const weight = rolePointWeight(role);
+    perFaction[role.faction].push({
+      ...agg,
+      role: { id: role.id, nameVi: role.nameVi, icon: role.icon, metricLabel: role.metricLabel, faction: role.faction },
+      weight,
+      points: agg.score * weight,
+    });
+  }
+  for (const faction of FACTIONS) perFaction[faction] = perFaction[faction].sort(compareWeighted).slice(0, take);
+
+  const shown = FACTIONS.flatMap((faction) => perFaction[faction]);
+  const members = await membersById(ctx.db, [...new Set(shown.map((x) => x.memberId))]);
+  const toFactionRow = (x: WeightedAgg, i: number): FactionTopRowDto => {
+    const m = members.get(x.memberId);
+    return {
+      rank: i + 1,
+      memberId: x.memberId,
+      displayName: m?.displayName ?? '',
+      avatarUrl: m?.avatarUrl ?? null,
+      role: x.role,
+      value: x.score,
+      weight: x.weight,
+      points: x.points,
+      games: x.games,
+    };
+  };
+  return {
+    seasonId,
+    factions: {
+      goose: perFaction.goose.map(toFactionRow),
+      duck: perFaction.duck.map(toFactionRow),
+      neutral: perFaction.neutral.map(toFactionRow),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

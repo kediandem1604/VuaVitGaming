@@ -14,7 +14,7 @@
 import type { ReactNode } from 'react';
 import type { Faction, RoleDto } from '../../shared/api-types';
 import { cx } from '../lib/cx';
-import { FACTION_LABEL } from '../lib/factions';
+import { FACTION_BAND, FACTION_LABEL } from '../lib/factions';
 import { Character, type CharacterVariant } from './Character';
 
 interface RoleCardProps {
@@ -32,12 +32,6 @@ interface RoleCardProps {
 }
 
 const CLAIM_TEXT = 'Khai điểm để giành';
-
-const BAND: Record<Faction, string> = {
-  goose: 'bg-goose-strong',
-  duck: 'bg-duck-strong',
-  neutral: 'bg-third',
-};
 
 /** Băng phe nhạt cho role trống: nền mờ 60% trên `night-800` ra màu tối hơn, chữ trắng vẫn ≥ 4.5:1. */
 const BAND_EMPTY: Record<Faction, string> = {
@@ -58,7 +52,7 @@ export function RoleCard({ role, holderName, variant, score, extra, characterSiz
         className,
       )}
     >
-      <p className={cx('w-full px-2 py-1 text-xs font-extrabold tracking-wide text-white', (empty ? BAND_EMPTY : BAND)[role.faction])}>
+      <p className={cx('w-full px-2 py-1 text-xs font-extrabold tracking-wide text-white', (empty ? BAND_EMPTY : FACTION_BAND)[role.faction])}>
         {FACTION_LABEL[role.faction].toLocaleUpperCase('vi')}
       </p>
 
