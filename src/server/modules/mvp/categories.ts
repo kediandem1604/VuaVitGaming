@@ -8,7 +8,7 @@
  * Thứ tự hiển thị mọi nơi: `sortOrder` rồi `id`.
  */
 
-import type { AwardCategory, CategoryScope, Prisma } from '@prisma/client';
+import type { AwardCategory, BadgeGroup, CategoryScope, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
@@ -82,6 +82,8 @@ export interface CategoryInput {
   description?: string | null;
   /** Mặc định khi tạo: sau hạng mục cuối cùng hiện có. */
   sortOrder?: number;
+  /** Tính cho danh hiệu tháng: `mvp` (Khen), `fun` (Vui), `none` (không tính — mặc định khi tạo). */
+  badgeGroup?: BadgeGroup;
 }
 
 export interface CategoryPatch extends Partial<CategoryInput> {
@@ -89,6 +91,7 @@ export interface CategoryPatch extends Partial<CategoryInput> {
 }
 
 const scopeSchema = z.enum(['always', 'mode', 'optional']);
+const badgeGroupSchema = z.enum(['mvp', 'fun', 'none']);
 const modeIdSchema = z.number().int().nullish();
 const nameSchema = z
   .string()
@@ -104,6 +107,7 @@ const createSchema = z.object({
   name: nameSchema,
   description: descriptionSchema,
   sortOrder: sortOrderSchema.optional(),
+  badgeGroup: badgeGroupSchema.optional(),
 });
 
 const patchSchema = z.object({
@@ -113,6 +117,7 @@ const patchSchema = z.object({
   description: descriptionSchema,
   sortOrder: sortOrderSchema.optional(),
   active: z.boolean().optional(),
+  badgeGroup: badgeGroupSchema.optional(),
 });
 
 /** Lỗi zod không có thông báo riêng (sai kiểu…) → thông báo chung tiếng Việt. */
@@ -122,7 +127,7 @@ const defaultErrorMap: z.ZodErrorMap = () => ({ message: 'Dữ liệu không h�
 export async function createCategory(ctx: Ctx, input: CategoryInput): Promise<AwardCategoryWithMode> {
   const parsed = createSchema.safeParse(input, { errorMap: defaultErrorMap });
   if (!parsed.success) throw appError('VALIDATION', parsed.error.issues[0]?.message);
-  const { scope, name, description, sortOrder } = parsed.data;
+  const { scope, name, description, sortOrder, badgeGroup } = parsed.data;
   const modeId = parsed.data.modeId ?? null;
 
   checkScopeMode(scope, modeId);
@@ -135,6 +140,7 @@ export async function createCategory(ctx: Ctx, input: CategoryInput): Promise<Aw
       name,
       description: emptyToNull(description),
       sortOrder: sortOrder ?? (await nextSortOrder(ctx)),
+      badgeGroup: badgeGroup ?? 'none',
     },
     include: WITH_MODE,
   });
@@ -163,6 +169,7 @@ export async function updateCategory(ctx: Ctx, id: number, patch: CategoryPatch)
   if (p.description !== undefined) data.description = emptyToNull(p.description);
   if (p.sortOrder !== undefined) data.sortOrder = p.sortOrder;
   if (p.active !== undefined) data.active = p.active;
+  if (p.badgeGroup !== undefined) data.badgeGroup = p.badgeGroup;
 
   return ctx.db.awardCategory.update({ where: { id }, data, include: WITH_MODE });
 }

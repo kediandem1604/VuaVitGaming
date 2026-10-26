@@ -10,9 +10,9 @@ const modes: ModeDto[] = [
 ];
 
 const categories: AwardCategoryDto[] = [
-  { id: 1, scope: 'always', mode: null, name: 'Giết nhiều nhất', description: null, active: true, sortOrder: 1 },
-  { id: 4, scope: 'mode', mode: modes[1] as ModeDto, name: 'Ngỗng chạy giỏi nhất', description: 'Chỉ Săn ngỗng', active: true, sortOrder: 4 },
-  { id: 5, scope: 'optional', mode: null, name: 'Pha đẻ trứng lộ liễu nhất (Cò gáy)', description: null, active: false, sortOrder: 5 },
+  { id: 1, scope: 'always', mode: null, name: 'Giết nhiều nhất', description: null, active: true, sortOrder: 1, badgeGroup: 'mvp' },
+  { id: 4, scope: 'mode', mode: modes[1] as ModeDto, name: 'Ngỗng chạy giỏi nhất', description: 'Chỉ Săn ngỗng', active: true, sortOrder: 4, badgeGroup: 'mvp' },
+  { id: 5, scope: 'optional', mode: null, name: 'Pha đẻ trứng lộ liễu nhất (Cò gáy)', description: null, active: false, sortOrder: 5, badgeGroup: 'fun' },
 ];
 
 const json = (status: number, body: unknown) =>
@@ -98,7 +98,7 @@ test('a mode category needs a mode; creating one posts scope, modeId and name', 
     ...baseRoutes,
     'POST /api/admin/categories': (init) => {
       posted = JSON.parse(String(init?.body));
-      return json(201, { id: 9, scope: 'mode', mode: modes[0], name: 'Sống sót lâu nhất', description: null, active: true, sortOrder: 7 });
+      return json(201, { id: 9, scope: 'mode', mode: modes[0], name: 'Sống sót lâu nhất', description: null, active: true, sortOrder: 7, badgeGroup: 'none' });
     },
   });
   renderTab();

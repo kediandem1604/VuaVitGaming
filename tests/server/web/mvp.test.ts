@@ -379,6 +379,7 @@ test('category admin only and validated', async () => {
     description: null,
     active: true,
     sortOrder: 1,
+    badgeGroup: 'mvp',
   });
   expect(categories[3]).toEqual({
     id: runner.id,
@@ -388,6 +389,7 @@ test('category admin only and validated', async () => {
     description: null,
     active: true,
     sortOrder: 4,
+    badgeGroup: 'mvp',
   });
 
   // Tạo: cắt khoảng trắng, sortOrder mặc định sau cùng.
@@ -406,6 +408,7 @@ test('category admin only and validated', async () => {
     description: 'Dành cho vịt',
     active: true,
     sortOrder: 7,
+    badgeGroup: 'none', // không gửi → không tính cho danh hiệu
   });
   const modeCat = await post('/api/admin/categories', sid, { scope: 'mode', modeId: gooseMode.id, name: 'Vịt săn giỏi nhất', sortOrder: 2 });
   expect(modeCat.statusCode).toBe(201);
@@ -472,4 +475,46 @@ test('category admin only and validated', async () => {
   expect((await patch('/api/admin/categories/abc', sid, { name: 'X' })).statusCode).toBe(400);
   expect((await patch(`/api/admin/categories/${kills.id}`, modSid, { name: 'X' })).statusCode).toBe(403);
   expect((await category('Giết nhiều nhất')).id).toBe(kills.id);
+});
+
+test('category badge group is listed, stored on create, patched and validated', async () => {
+  const { sid } = await memberWithSid({ accessLevel: 'admin' });
+
+  // Danh sách: nhóm của sáu hạng mục mẫu theo tên (spec huy hiệu §4).
+  const seeded = (await get('/api/admin/categories', sid)).json<AwardCategoryDto[]>();
+  expect(Object.fromEntries(seeded.map((c) => [c.name, c.badgeGroup]))).toEqual({
+    'Giết nhiều nhất': 'mvp',
+    'Ngỗng chạy giỏi nhất': 'mvp',
+    'Pha xử lý ngu nhất': 'fun',
+    'Pha dí người ngu nhất': 'fun',
+    'Pha đẻ trứng lộ liễu nhất (Cò gáy)': 'fun',
+    'Pha chém lố nhất (Kiếm sĩ)': 'fun',
+  });
+
+  // Tạo kèm nhóm.
+  const created = await post('/api/admin/categories', sid, { scope: 'optional', name: 'Pha troll vui nhất', badgeGroup: 'fun' });
+  expect(created.statusCode).toBe(201);
+  const dto = created.json<AwardCategoryDto>();
+  expect(dto.badgeGroup).toBe('fun');
+  expect((await testDb.awardCategory.findUniqueOrThrow({ where: { id: dto.id } })).badgeGroup).toBe('fun');
+
+  // Sửa nhóm — chỉ trường đó đổi.
+  const patched = await patch(`/api/admin/categories/${dto.id}`, sid, { badgeGroup: 'mvp' });
+  expect(patched.statusCode).toBe(200);
+  expect(patched.json<AwardCategoryDto>()).toEqual({ ...dto, badgeGroup: 'mvp' });
+  expect((await testDb.awardCategory.findUniqueOrThrow({ where: { id: dto.id } })).badgeGroup).toBe('mvp');
+  const listed = (await get('/api/admin/categories', sid)).json<AwardCategoryDto[]>();
+  expect(listed.find((c) => c.id === dto.id)?.badgeGroup).toBe('mvp');
+
+  // Giá trị lạ / sai kiểu → 400 chung, không ghi gì.
+  for (const badgeGroup of ['khen', 'MVP', '', 1, null]) {
+    const bad = await post('/api/admin/categories', sid, { scope: 'always', name: 'X', badgeGroup });
+    expect(bad.statusCode, JSON.stringify(badgeGroup)).toBe(400);
+    expect(bad.json(), JSON.stringify(badgeGroup)).toEqual(INVALID);
+    const badPatch = await patch(`/api/admin/categories/${dto.id}`, sid, { badgeGroup });
+    expect(badPatch.statusCode, JSON.stringify(badgeGroup)).toBe(400);
+    expect(badPatch.json(), JSON.stringify(badgeGroup)).toEqual(INVALID);
+  }
+  expect(await testDb.awardCategory.count()).toBe(7);
+  expect((await testDb.awardCategory.findUniqueOrThrow({ where: { id: dto.id } })).badgeGroup).toBe('mvp');
 });

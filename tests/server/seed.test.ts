@@ -47,6 +47,9 @@ test('modes and categories', async () => {
     name: 'Ngỗng chạy giỏi nhất',
     mode: { key: 'goose_hunt' },
   });
+  // Nhóm tính cho danh hiệu theo tên (spec huy hiệu §4): hai hạng mục Khen, bốn hạng mục Vui.
+  const groups = await testDb.awardCategory.findMany({ select: { name: true, badgeGroup: true }, orderBy: { sortOrder: 'asc' } });
+  expect(groups.map((c) => c.badgeGroup)).toEqual(['mvp', 'fun', 'fun', 'mvp', 'fun', 'fun']);
 });
 
 test('reseed keeps admin edits and adds nothing', async () => {

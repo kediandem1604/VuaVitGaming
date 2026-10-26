@@ -83,7 +83,13 @@ export interface HallOfDayDto {
 /** Phạm vi hạng mục tri ân: buổi nào cũng có / chỉ một chế độ chơi / theo role (admin tick thêm khi kết thúc). */
 export type CategoryScope = 'always' | 'mode' | 'optional';
 
-/** Hạng mục tri ân cho trang quản trị (`/api/admin/categories`); `mode` chỉ có khi `scope = 'mode'`. */
+/** Hạng mục tính cho danh hiệu tháng nào: `mvp` (Khen → SMVP), `fun` (Vui → Vua tấu hài), `none` (không tính). */
+export type BadgeGroupDto = 'mvp' | 'fun' | 'none';
+
+/**
+ * Hạng mục tri ân cho trang quản trị (`/api/admin/categories`); `mode` chỉ có khi
+ * `scope = 'mode'`. `badgeGroup` là ô "Tính cho danh hiệu"; tạo mà không gửi → `none`.
+ */
 export interface AwardCategoryDto {
   id: number;
   scope: CategoryScope;
@@ -92,6 +98,7 @@ export interface AwardCategoryDto {
   description: string | null;
   active: boolean;
   sortOrder: number;
+  badgeGroup: BadgeGroupDto;
 }
 
 /** Phe của role: Ngỗng, Vịt, Phe thứ 3. */

@@ -12,6 +12,8 @@ import { idParams, int32Id } from '../schemas.js';
 const listQuery = z.object({ all: z.literal('1').optional() });
 
 const scopeSchema = z.enum(['always', 'mode', 'optional']);
+/** Ô "Tính cho danh hiệu": Khen / Vui / Không tính. */
+const badgeGroupSchema = z.enum(['mvp', 'fun', 'none']);
 
 // Chỉ kiểm tra dạng ở đây; cắt khoảng trắng, độ dài và quy tắc phạm vi ⇔ chế độ do
 // service kiểm tra (có thông báo riêng).
@@ -22,6 +24,7 @@ const createBody = z
     name: z.string(),
     description: z.string().nullish(),
     sortOrder: z.number().int().optional(),
+    badgeGroup: badgeGroupSchema.optional(),
   })
   .strict();
 
@@ -33,6 +36,7 @@ const patchBody = z
     description: z.string().nullish(),
     sortOrder: z.number().int().optional(),
     active: z.boolean().optional(),
+    badgeGroup: badgeGroupSchema.optional(),
   })
   .strict();
 
@@ -45,6 +49,7 @@ export function toCategoryDto(c: AwardCategoryWithMode): AwardCategoryDto {
     description: c.description,
     active: c.active,
     sortOrder: c.sortOrder,
+    badgeGroup: c.badgeGroup,
   };
 }
 

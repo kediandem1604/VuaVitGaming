@@ -66,6 +66,13 @@ enum ReportStatus {
   rejected
 }
 
+/// Nhóm hạng mục tri ân tính cho danh hiệu tháng: `mvp` (Khen → SMVP), `fun` (Vui → Vua tấu hài), `none` (không tính).
+enum BadgeGroup {
+  mvp
+  fun
+  none
+}
+
 // ---------------------------------------------------------------------------
 // Thành viên và đăng nhập
 // ---------------------------------------------------------------------------
@@ -94,6 +101,7 @@ model Member {
   statReports     StatReport[]      @relation("ReportMember")
   reviewedReports StatReport[]      @relation("ReportReviewer")
   roleTitles      RoleTitle[]
+  badges          MemberBadge[]
 
   @@map("members")
 }
@@ -190,6 +198,8 @@ model AwardCategory {
   description String?
   active      Boolean       @default(true)
   sortOrder   Int           @map("sort_order")
+  /// Tính cho danh hiệu tháng nào (spec huy hiệu §4); luôn đọc giá trị hiện tại lúc trao.
+  badgeGroup  BadgeGroup    @default(none) @map("badge_group")
 
   mode         GameMode?     @relation(fields: [modeId], references: [id])
   voteMessages VoteMessage[]
@@ -342,6 +352,42 @@ model RoleTitle {
 
   @@id([seasonId, roleId])
   @@map("role_titles")
+}
+
+// ---------------------------------------------------------------------------
+// Huy hiệu (danh hiệu vĩnh viễn) — spec 2026-10-26-badges-design.md §5
+// ---------------------------------------------------------------------------
+
+/// Một danh hiệu đã trao. Chữ hiện (`title`, `icon`, `detail`) đóng băng lúc trao;
+/// app không bao giờ sửa hay xoá dòng này (danh hiệu không mất).
+model MemberBadge {
+  id        Int      @id @default(autoincrement())
+  memberId  Int      @map("member_id")
+  /// Khoá trong danh mục `src/shared/badges.ts` (vd `smvp`, `games_50`).
+  badgeKey  String   @map("badge_key")
+  /// `YYYY-MM` với danh hiệu tháng; `''` với cột mốc.
+  periodId  String   @map("period_id")
+  title     String
+  icon      String
+  detail    String
+  awardedAt DateTime @map("awarded_at") @db.Timestamptz(3)
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@unique([badgeKey, periodId, memberId])
+  @@index([awardedAt, id])
+  @@index([memberId, awardedAt])
+  @@map("member_badges")
+}
+
+/// Tháng (`YYYY-MM`) đã trao danh hiệu xong — chốt chặn để không trao trùng khi chạy lại hay chạy song song.
+model BadgeMonth {
+  periodId  String   @id @map("period_id")
+  awardedAt DateTime @map("awarded_at") @db.Timestamptz(3)
+  /// Đã trao nhưng chưa đăng được tin tổng kết vào kênh thông báo — lượt sau đăng bù.
+  announcePending Boolean @map("announce_pending")
+
+  @@map("badge_months")
 }
 
 // ---------------------------------------------------------------------------
