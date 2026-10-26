@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { HeldRoleDto, MeDto, RoleDto } from '../../src/shared/api-types';
+import type { BadgeDto, HeldRoleDto, MeDto, PublicMemberDto, RoleDto } from '../../src/shared/api-types';
 import { ProfilePage } from '../../src/web/pages/ProfilePage';
 
 const me: MeDto = {
@@ -33,24 +33,50 @@ const titles: HeldRoleDto[] = [
   { role: role({ id: 1, key: 'goose', faction: 'goose', nameVi: 'Ngỗng', icon: '🪿', metricLabel: 'Số lần vote trúng Vịt' }), score: 7 },
 ];
 
+const badge = (id: number, awardedAt: string, over: Partial<BadgeDto> = {}): BadgeDto => ({
+  id,
+  badgeKey: 'smvp',
+  kind: 'monthly',
+  periodId: '2026-10',
+  title: 'SMVP tháng 10/2026',
+  icon: '👑',
+  detail: '7 lần MVP',
+  awardedAt,
+  member: { id: me.id, displayName: me.displayName, avatarUrl: null },
+  ...over,
+});
+
+/** Trang công khai của chính tôi (`GET /api/members/1`) với các danh hiệu đã cho. */
+const publicMe = (badges: BadgeDto[]): PublicMemberDto => ({
+  id: me.id,
+  displayName: me.displayName,
+  avatarUrl: null,
+  joinedAt: '2026-01-05T03:00:00.000Z',
+  left: false,
+  badges,
+});
+
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-/** fetch giả: `/api/me/titles` trả `body`; `PATCH /api/me` (nếu có `onPatch`) ghi lại body gửi lên và trả `me` đã cập nhật. */
-function stubApi(body: HeldRoleDto[], onPatch?: (patch: Partial<MeDto>) => void) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url === '/api/me/titles') return Promise.resolve(json(200, body));
-      if (url === '/api/me' && init?.method === 'PATCH' && onPatch) {
-        const patch = JSON.parse(String(init.body)) as Partial<MeDto>;
-        onPatch(patch);
-        return Promise.resolve(json(200, { ...me, ...patch }));
-      }
-      throw new Error(`Không có tuyến giả cho ${init?.method ?? 'GET'} ${url}`);
-    }),
-  );
+/**
+ * fetch giả: `/api/me/titles` trả `body`; `/api/members/1` trả trang công khai của tôi với `badges`
+ * (mặc định chưa có danh hiệu); `PATCH /api/me` (nếu có `onPatch`) ghi lại body gửi lên và trả `me` đã cập nhật.
+ */
+function stubApi(body: HeldRoleDto[], onPatch?: (patch: Partial<MeDto>) => void, badges: BadgeDto[] = []) {
+  const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url === '/api/me/titles') return Promise.resolve(json(200, body));
+    if (url === `/api/members/${me.id}`) return Promise.resolve(json(200, publicMe(badges)));
+    if (url === '/api/me' && init?.method === 'PATCH' && onPatch) {
+      const patch = JSON.parse(String(init.body)) as Partial<MeDto>;
+      onPatch(patch);
+      return Promise.resolve(json(200, { ...me, ...patch }));
+    }
+    throw new Error(`Không có tuyến giả cho ${init?.method ?? 'GET'} ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
 }
 
 /** Trang nằm trong Outlet có context `me` như trong App; trả `queryClient` để xem cache `['me']` sau khi PATCH. */
@@ -146,4 +172,38 @@ test('holding nothing shows the empty copy', async () => {
   expect(await screen.findByText('Chưa giữ role nào mùa này')).toBeInTheDocument();
   expect(screen.queryByRole('img')).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Xem lịch sử khai điểm' })).toBeInTheDocument();
+});
+
+test('Danh hiệu của tôi lists my badges from the public member endpoint and links to the public page', async () => {
+  const fetchMock = stubApi([], undefined, [
+    badge(12, '2026-11-10T03:00:00.000Z', { badgeKey: 'games_50', kind: 'milestone', periodId: '', title: 'Lão làng', icon: '🏅', detail: 'Đã đi 50 trận' }),
+    badge(11, '2026-11-03T17:05:00.000Z'),
+  ]);
+  renderPage();
+
+  expect(screen.getByRole('heading', { level: 2, name: 'Danh hiệu của tôi' })).toBeInTheDocument();
+  const list = await screen.findByRole('list', { name: 'Danh hiệu của tôi' });
+  expect(fetchMock).toHaveBeenCalledWith('/api/members/1', expect.anything());
+
+  // Cùng dữ liệu và cùng thứ tự (mới nhất trước) với trang thành viên; ngày trao theo giờ Việt Nam.
+  const items = within(list).getAllByRole('listitem');
+  expect(items).toHaveLength(2);
+  const [first, second] = items as [HTMLElement, HTMLElement];
+  expect(first).toHaveTextContent('Lão làng');
+  expect(first).toHaveTextContent('Đã đi 50 trận');
+  expect(second).toHaveTextContent('SMVP tháng 10/2026');
+  expect(second).toHaveTextContent('7 lần MVP');
+  expect(second).toHaveTextContent('04/11/2026');
+  // Là hồ sơ của chính mình: thẻ không lặp tên / không link về chính mình; link công khai nằm ngoài danh sách.
+  expect(within(list).queryByRole('link')).toBeNull();
+  expect(screen.getByRole('link', { name: 'Xem trang công khai' })).toHaveAttribute('href', '/thanh-vien/1');
+});
+
+test('no badges yet shows the empty copy and still offers the public page', async () => {
+  stubApi([]);
+  renderPage();
+
+  expect(await screen.findByText('Chưa có danh hiệu nào')).toBeInTheDocument();
+  expect(screen.queryByRole('list', { name: 'Danh hiệu của tôi' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Xem trang công khai' })).toHaveAttribute('href', '/thanh-vien/1');
 });

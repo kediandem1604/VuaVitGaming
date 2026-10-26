@@ -351,7 +351,8 @@ test('Top 3 mỗi phe: three faction blocks, rows in rank order with medal, role
   expect(second).toHaveTextContent('Ngỗng · 9 lần vote trúng Vịt');
   expect(second).toHaveTextContent('9 điểm');
   expect(second).not.toHaveTextContent('×');
-  expect(within(second).getByRole('link', { name: /Ngỗng/ })).toHaveAttribute('href', '/bang-xep-hang?role=1&mua=2026-10');
+  // Tên khớp đúng "Ngỗng": dòng còn có link tên người "Ngỗng Một" tới trang thành viên.
+  expect(within(second).getByRole('link', { name: 'Ngỗng' })).toHaveAttribute('href', '/bang-xep-hang?role=1&mua=2026-10');
   expect(within(third).getByTitle('Hạng 3')).toHaveTextContent('🥉');
   expect(third).toHaveTextContent('Ngỗng Ba');
   expect(third).toHaveTextContent('4 điểm');
@@ -388,6 +389,36 @@ test('Top 3 mỗi phe follows ?mua= and the season select', async () => {
   expect(within(await screen.findByRole('list', { name: 'Top 3 Phe Ngỗng' })).getAllByRole('listitem')).toHaveLength(3);
   expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/factions?season=2026-10', expect.anything());
   expect(screen.getByTestId('location')).toHaveTextContent('/bang-xep-hang?role=61&mua=2026-10');
+});
+
+test('member names link to the public member page while role links stay', async () => {
+  stubFetch(factionTops);
+  renderAt('/bang-xep-hang?role=70');
+  await findBoard();
+
+  // Top 3 mỗi phe: tên người là link tới trang thành viên; link role trên dòng dưới vẫn như cũ.
+  const [first, second] = within(factionList('Phe Ngỗng')).getAllByRole('listitem') as [HTMLElement, HTMLElement];
+  expect(within(first).getByRole('link', { name: 'Ngỗng Một' })).toHaveAttribute('href', '/thanh-vien/1');
+  expect(within(first).getByRole('link', { name: /Dân phòng/ })).toHaveAttribute('href', '/bang-xep-hang?role=4&mua=2026-10');
+  expect(within(second).getByRole('link', { name: 'Ngỗng Một' })).toHaveAttribute('href', '/thanh-vien/1');
+  expect(within(factionList('Phe Vịt')).getByRole('link', { name: 'Vịt Hai' })).toHaveAttribute('href', '/thanh-vien/2');
+
+  // Bục: hạng 1 là nhân vật (tên trên bảng tên) nằm trong link; hạng 2–3 avatar + tên là một link.
+  const [gold, silver, bronze] = podiumItems() as [HTMLElement, HTMLElement, HTMLElement];
+  const goldLink = within(gold).getByRole('link', { name: /Ngỗng Bảy/ });
+  expect(goldLink).toHaveAttribute('href', '/thanh-vien/7');
+  expect(within(goldLink).getByRole('img', { name: 'Chim đa đa: Ngỗng Bảy' })).toBeInTheDocument();
+  expect(within(gold).queryByText('Ngỗng Bảy', { selector: 'p' })).toBeNull();
+  expect(within(silver).getByRole('link', { name: 'Vịt Tám' })).toHaveAttribute('href', '/thanh-vien/8');
+  expect(within(bronze).getByRole('link', { name: 'Ngỗng Chín' })).toHaveAttribute('href', '/thanh-vien/9');
+
+  // Bảng đầy đủ: mọi hàng, kể cả hàng ngoài bục.
+  const rows = boardItems();
+  expect(within(rows[0] as HTMLElement).getByRole('link', { name: 'Ngỗng Bảy' })).toHaveAttribute('href', '/thanh-vien/7');
+  expect(within(rows[3] as HTMLElement).getByRole('link', { name: 'Vịt Mười' })).toHaveAttribute('href', '/thanh-vien/10');
+
+  // Không có link lồng trong link ở bất kỳ đâu trên trang.
+  for (const link of screen.getAllByRole('link')) expect(within(link).queryByRole('link')).toBeNull();
 });
 
 test('a failed board load shows the message and Thử lại recovers', async () => {

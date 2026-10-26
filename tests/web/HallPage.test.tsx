@@ -94,6 +94,10 @@ const renderAt = (url: string) => {
 };
 
 const characters = () => screen.queryAllByRole('img').map((node) => node.getAttribute('aria-label'));
+const href = (link: HTMLElement) => link.getAttribute('href');
+/** Link của ô (tới bảng xếp hạng của role) — tách khỏi link tên người giữ (tới trang thành viên). */
+const roleLinks = () => screen.getAllByRole('link').filter((link) => href(link)?.startsWith('/bang-xep-hang'));
+const memberLinks = () => screen.getAllByRole('link').filter((link) => href(link)?.startsWith('/thanh-vien/'));
 
 afterEach(() => {
   cleanup();
@@ -160,7 +164,7 @@ test('inside a tab, roles with a holder come first, each group keeping the catal
     'Dân phòng: Ngỗng Chín (mùa trước)',
   ]);
   // Link của mỗi ô vẫn là của chính role đó.
-  expect(screen.getAllByRole('link').map((tile) => tile.getAttribute('href'))).toEqual([
+  expect(roleLinks().map(href)).toEqual([
     '/bang-xep-hang?role=5&mua=2026-10',
     '/bang-xep-hang?role=6&mua=2026-10',
     '/bang-xep-hang?role=1&mua=2026-10',
@@ -212,7 +216,7 @@ test('each hall tile is a role card inside the leaderboard link', async () => {
   await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
 
   // Mỗi ô là một link (lớp `lift`) bọc thẻ role có băng phe; không có link lồng trong link.
-  const tiles = screen.getAllByRole('link');
+  const tiles = roleLinks();
   expect(tiles).toHaveLength(2);
   for (const tile of tiles) {
     expect(tile).toHaveTextContent('PHE NGỖNG');
@@ -228,6 +232,29 @@ test('each hall tile is a role card inside the leaderboard link', async () => {
   expect(duckTile).toHaveTextContent('PHE VỊT');
   // Có người giữ mùa trước: không phải ô trống.
   expect(duckTile).not.toHaveTextContent('Khai điểm để giành');
+});
+
+test('holder names are links to the public member page, outside the role link of the same tile', async () => {
+  stubFetch();
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+
+  // Ô có người: link role (cả thẻ) và một link tên riêng; ô trống không có link tên.
+  const holder = screen.getByRole('link', { name: 'Ngỗng Một' });
+  expect(holder).toHaveAttribute('href', '/thanh-vien/1');
+  expect(memberLinks()).toEqual([holder]);
+  expect(roleLinks().map(href)).toEqual(['/bang-xep-hang?role=1&mua=2026-10', '/bang-xep-hang?role=3&mua=2026-10']);
+  // Link tên nằm cùng ô lưới với thẻ của role đó, không nằm trong thẻ.
+  const tile = screen.getByRole('link', { name: /Ngỗng: Ngỗng Một/ });
+  expect(holder.closest('li')).toBe(tile.closest('li'));
+  expect(tile).not.toContainElement(holder);
+  for (const link of screen.getAllByRole('link')) expect(within(link).queryByRole('link')).toBeNull();
+
+  // Người giữ mùa trước cũng là link tới trang thành viên; link role của ô vẫn như cũ.
+  fireEvent.click(screen.getByRole('button', { name: 'Phe Vịt' }));
+  expect(screen.getByRole('link', { name: 'Vịt Hai' })).toHaveAttribute('href', '/thanh-vien/2');
+  expect(screen.getByRole('link', { name: /Kiếm sĩ/ })).toHaveAttribute('href', '/bang-xep-hang?role=61&mua=2026-10');
+  expect(memberLinks()).toHaveLength(1);
 });
 
 test('faction tabs are chips coloured by the selected faction', async () => {

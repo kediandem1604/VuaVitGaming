@@ -1,22 +1,25 @@
 /**
  * Hồ sơ của chính mình (spec §6 "Hồ sơ"): thẻ "hộ chiếu" (avatar, tên, mã thành viên
  * trong chip vàng kèm nút sao chép), các role đang hoá thân mùa này (`/api/me/titles`,
- * mỗi role một `RoleCard` mang tên mình), email (lưu bằng PATCH) và hai công tắc nhắc
- * giờ (PATCH ngay khi bật/tắt). Kết quả PATCH được ghi thẳng vào cache `['me']` nên cả
- * trang cập nhật theo.
+ * mỗi role một `RoleCard` mang tên mình), "Danh hiệu của tôi" (spec huy hiệu §9: cùng dữ
+ * liệu `GET /api/members/{id của tôi}` với trang thành viên công khai, kèm link "Xem trang
+ * công khai"), email (lưu bằng PATCH) và hai công tắc nhắc giờ (PATCH ngay khi bật/tắt).
+ * Kết quả PATCH được ghi thẳng vào cache `['me']` nên cả trang cập nhật theo.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy } from 'lucide-react';
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useId, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import type { HeldRoleDto, MeDto } from '../../shared/api-types';
+import type { HeldRoleDto, MeDto, PublicMemberDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { Avatar } from '../components/Avatar';
+import { BadgeCard } from '../components/BadgeCard';
 import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
 import { RoleCard } from '../components/RoleCard';
 import { ME_QUERY_KEY, useCurrentMember } from '../hooks/useMe';
+import { memberPath } from '../lib/links';
 
 const TITLES_QUERY_KEY = ['me', 'titles'] as const;
 
@@ -50,6 +53,7 @@ export function ProfilePage() {
 
       <Passport me={me} />
       <HeldRolesSection me={me} />
+      <MyBadgesSection me={me} />
       <EmailSection me={me} />
       <NotifySection me={me} />
     </div>
@@ -98,6 +102,50 @@ function HeldRolesSection({ me }: { me: MeDto }) {
       </QueryState>
       <Link to="/khai-diem" className="btn-secondary self-start">
         Xem lịch sử khai điểm
+      </Link>
+    </section>
+  );
+}
+
+/**
+ * Danh hiệu của tôi: đúng dữ liệu trang thành viên công khai của chính mình (`GET /api/members/{id}`,
+ * mới nhất trước), thẻ ghi ngày trao (không ghi tên: cả mục đã là của tôi). Khoá cache trùng với
+ * `MemberPage` (`['member', id dạng chuỗi]`) nên bấm "Xem trang công khai" không tải lại.
+ */
+function MyBadgesSection({ me }: { me: MeDto }) {
+  const headingId = useId();
+  const member = useQuery({
+    queryKey: ['member', String(me.id)],
+    queryFn: () => apiGet<PublicMemberDto>(`/api/members/${me.id}`),
+  });
+
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id={headingId} className={HEADING_CLASS}>
+          Danh hiệu của tôi
+        </h2>
+        {member.data && member.data.badges.length > 0 && <span className="chip tabular-nums">{member.data.badges.length}</span>}
+      </div>
+      <QueryState query={member}>
+        {(data) =>
+          data.badges.length === 0 ? (
+            <EmptyState>
+              <p>Chưa có danh hiệu nào</p>
+            </EmptyState>
+          ) : (
+            <ul aria-labelledby={headingId} className="grid gap-3 sm:grid-cols-2">
+              {data.badges.map((badge) => (
+                <li key={badge.id} className="flex">
+                  <BadgeCard badge={badge} showDate className="w-full" />
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </QueryState>
+      <Link to={memberPath(me.id)} className="btn-secondary self-start">
+        Xem trang công khai
       </Link>
     </section>
   );

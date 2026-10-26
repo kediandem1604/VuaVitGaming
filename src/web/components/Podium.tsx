@@ -7,11 +7,17 @@
  * trang trí kèm tên bên dưới (ruling R13: avatar không mang nhãn để trình đọc màn hình không
  * đọc tên hai lần). Mọi mục ghi `{điểm} {chỉ số}`; số trận chỉ có ở bảng đầy đủ bên dưới.
  * Không có hàng nào thì trang không vẽ bục.
+ *
+ * Phần "người" của mỗi mục là một link tới trang thành viên công khai (spec huy hiệu §9):
+ * hạng 1 là cả nhân vật (tên link đọc theo nhãn nhân vật "{role}: {tên}"), hạng 2–3 là avatar
+ * + tên (tên link chỉ là tên người). Điểm và mặt bục nằm ngoài link.
  */
 
+import { Link } from 'react-router';
 import type { LeaderboardRowDto, RoleDto } from '../../shared/api-types';
 import { metricAfterValue } from '../../shared/metric';
 import { cx } from '../lib/cx';
+import { memberPath } from '../lib/links';
 import { Avatar } from './Avatar';
 import { Character } from './Character';
 
@@ -42,13 +48,17 @@ export function Podium({ role, rows }: PodiumProps) {
         return (
           <li key={row.memberId} className={cx('flex min-w-0 max-w-44 flex-1 flex-col items-center gap-1 text-center', order[index])}>
             {index === 0 ? (
-              <Character role={role} holderName={row.displayName} variant="current" />
+              // `flex justify-center` để nhân vật (`w-full`, tối đa 120px) vẫn đứng giữa cột như khi chưa có link.
+              <Link to={memberPath(row.memberId)} className="flex w-full justify-center rounded-xl">
+                <Character role={role} holderName={row.displayName} variant="current" />
+              </Link>
             ) : (
-              <>
+              // Một link cho cả avatar và tên: avatar không nhãn nên tên link chỉ là tên người; gạch chân tên khi rê chuột.
+              <Link to={memberPath(row.memberId)} className="flex w-full flex-col items-center gap-1 rounded-xl hover:underline">
                 <Avatar name={row.displayName} url={row.avatarUrl} className="size-14 text-xl" />
                 {/* Tên xuống dòng thay vì cắt "…": cột chỉ ~90px ở 320px, cắt thì mất cả tên ngắn. */}
                 <p className="w-full px-1 leading-tight font-bold break-words text-white">{row.displayName}</p>
-              </>
+              </Link>
             )}
             <p className="px-1 text-sm leading-tight font-bold break-words text-gold">
               <span className="text-base tabular-nums">{row.score}</span> {metricAfterValue(role.metricLabel)}

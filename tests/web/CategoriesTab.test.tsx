@@ -88,7 +88,7 @@ test('moving a category off scope mode sends modeId: null in the same PATCH', as
   fireEvent.click(within(item).getByRole('button', { name: 'Lưu' }));
 
   await waitFor(() =>
-    expect(patched).toEqual({ scope: 'optional', modeId: null, name: 'Ngỗng chạy giỏi nhất', description: 'Chỉ Săn ngỗng' }),
+    expect(patched).toEqual({ scope: 'optional', modeId: null, name: 'Ngỗng chạy giỏi nhất', description: 'Chỉ Săn ngỗng', badgeGroup: 'mvp' }),
   );
 });
 
@@ -113,7 +113,53 @@ test('a mode category needs a mode; creating one posts scope, modeId and name', 
 
   fireEvent.change(within(form).getByRole('combobox', { name: 'Chế độ chơi' }), { target: { value: '1' } });
   fireEvent.click(within(form).getByRole('button', { name: 'Thêm hạng mục' }));
-  await waitFor(() => expect(posted).toEqual({ scope: 'mode', modeId: 1, name: 'Sống sót lâu nhất' }));
+  await waitFor(() => expect(posted).toEqual({ scope: 'mode', modeId: 1, name: 'Sống sót lâu nhất', badgeGroup: 'none' }));
+});
+
+test('Tính cho danh hiệu offers Khen / Vui / Không tính and is sent on create and edit', async () => {
+  let posted: unknown = null;
+  let patched: unknown = null;
+  stubFetch({
+    ...baseRoutes,
+    'POST /api/admin/categories': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return json(201, { id: 9, scope: 'always', mode: null, name: 'Pha hụt đáng tiếc nhất', description: null, active: true, sortOrder: 7, badgeGroup: 'fun' });
+    },
+    'PATCH /api/admin/categories/1': (init) => {
+      patched = JSON.parse(String(init?.body));
+      return json(200, { ...(categories[0] as AwardCategoryDto), badgeGroup: 'none' });
+    },
+  });
+  renderTab();
+  const items = await screen.findAllByRole('listitem');
+
+  // Hàng ghi nhóm đang tính (không ghi gì khi "Không tính").
+  expect(items[0]).toHaveTextContent('Danh hiệu: Khen');
+  expect(items[1]).toHaveTextContent('Danh hiệu: Khen');
+  expect(items[2]).toHaveTextContent('Danh hiệu: Vui');
+
+  // Form thêm: mặc định "Không tính"; ba lựa chọn đúng giá trị API.
+  const form = screen.getByRole('form', { name: 'Thêm hạng mục' });
+  const group = within(form).getByRole('combobox', { name: 'Tính cho danh hiệu' });
+  expect(group).toHaveValue('none');
+  expect(within(group).getAllByRole('option').map((option) => [option.getAttribute('value'), option.textContent])).toEqual([
+    ['mvp', 'Khen'],
+    ['fun', 'Vui'],
+    ['none', 'Không tính'],
+  ]);
+  fireEvent.change(within(form).getByRole('textbox', { name: 'Tên hạng mục' }), { target: { value: 'Pha hụt đáng tiếc nhất' } });
+  fireEvent.change(group, { target: { value: 'fun' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm hạng mục' }));
+  await waitFor(() => expect(posted).toEqual({ scope: 'always', name: 'Pha hụt đáng tiếc nhất', badgeGroup: 'fun' }));
+
+  // Form sửa: hiện nhóm hiện tại của hạng mục; đổi rồi Lưu gửi `badgeGroup` cùng các trường khác.
+  const item = screen.getAllByRole('listitem')[0] as HTMLElement;
+  fireEvent.click(within(item).getByRole('button', { name: 'Sửa' }));
+  const editGroup = within(item).getByRole('combobox', { name: 'Tính cho danh hiệu' });
+  expect(editGroup).toHaveValue('mvp');
+  fireEvent.change(editGroup, { target: { value: 'none' } });
+  fireEvent.click(within(item).getByRole('button', { name: 'Lưu' }));
+  await waitFor(() => expect(patched).toEqual({ scope: 'always', modeId: null, name: 'Giết nhiều nhất', description: null, badgeGroup: 'none' }));
 });
 
 test('the active switch patches only active', async () => {

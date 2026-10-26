@@ -7,7 +7,8 @@
  *
  * Bên dưới: chọn role (nhóm theo phe, role chế độ đặc biệt thành nhóm riêng) rồi top 50 của
  * role đó trong mùa đó: bục vinh danh 1-2-3 (`Podium`) và bảng đầy đủ mọi hạng (👑 cho hạng
- * 1), avatar, tên, điểm, số trận.
+ * 1), avatar, tên, điểm, số trận. Tên người ở mọi chỗ (dòng phe, bục, bảng) là link tới trang
+ * thành viên công khai (spec huy hiệu §9).
  *
  * Role trong `?role={id}`, mùa trong `?mua=YYYY-MM` (Đại sảnh và dòng "Top 3 mỗi phe" dẫn
  * tới đây với cả hai); giá trị lạ về mặc định (role đầu danh mục, mùa mới nhất), không gửi lên API.
@@ -27,6 +28,7 @@ import { resolveSeason, SEASON_PARAM, useSeasons } from '../hooks/useSeasons';
 import { cx } from '../lib/cx';
 import { FACTION_BAND, FACTION_LABEL, FACTIONS, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
 import { formatSeasonLabel } from '../lib/format';
+import { memberPath } from '../lib/links';
 
 const ROLE_PARAM = 'role';
 const LIMIT = 50;
@@ -182,10 +184,11 @@ function FactionBlock({ faction, rows, seasonId }: FactionBlockProps) {
 }
 
 /**
- * Một dòng: huy chương, avatar, rồi hai dòng chữ — tên người với `{điểm} điểm` bên phải
- * (role có hệ số ghi thêm `{giá trị} × {hệ số}` nhỏ bên dưới), và `{icon} {role} · {giá trị
- * thô} {chỉ số}` với tên role là link tới bảng của role đó trong mùa đang xem. Hai dòng để
- * nhãn chỉ số dài (tới 40 ký tự) xuống dòng thay vì tràn ngang ở 320px.
+ * Một dòng: huy chương, avatar, rồi hai dòng chữ — tên người (link tới trang thành viên) với
+ * `{điểm} điểm` bên phải (role có hệ số ghi thêm `{giá trị} × {hệ số}` nhỏ bên dưới), và
+ * `{icon} {role} · {giá trị thô} {chỉ số}` với tên role là link tới bảng của role đó trong mùa
+ * đang xem. Hai link tách dòng, không lồng nhau. Hai dòng để nhãn chỉ số dài (tới 40 ký tự)
+ * xuống dòng thay vì tràn ngang ở 320px.
  */
 function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string }) {
   return (
@@ -199,7 +202,9 @@ function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string
       <Avatar name={row.displayName} url={row.avatarUrl} className="size-8 text-sm" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="min-w-0 truncate font-bold text-white">{row.displayName}</span>
+          <Link to={memberPath(row.memberId)} className="min-w-0 truncate font-bold text-white hover:underline">
+            {row.displayName}
+          </Link>
           <span className="shrink-0 text-right">
             <span className="font-bold text-gold tabular-nums">{row.points} điểm</span>
             {row.weight !== 1 && (
@@ -262,7 +267,7 @@ function RoleSelect({ roles, value, onChange }: RoleSelectProps) {
   );
 }
 
-/** Bục vinh danh rồi bảng đầy đủ mọi hạng (kể cả top 3), hàng kẻ `night-700`. */
+/** Bục vinh danh rồi bảng đầy đủ mọi hạng (kể cả top 3), hàng kẻ `night-700`; tên mỗi hàng là link tới trang thành viên. */
 function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
   if (rows.length === 0) {
     return (
@@ -283,7 +288,9 @@ function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
               {row.rank === 1 ? '👑' : row.rank}
             </span>
             <Avatar name={row.displayName} url={row.avatarUrl} className="size-9 text-sm" />
-            <span className="min-w-0 flex-1 truncate font-bold text-white">{row.displayName}</span>
+            <Link to={memberPath(row.memberId)} className="min-w-0 flex-1 truncate font-bold text-white hover:underline">
+              {row.displayName}
+            </Link>
             {/* Chỉ số đã ghi một lần trên đầu ("Chỉ số: …") và trên bục; dòng chỉ ghi số để không tràn ở 320px với nhãn dài. */}
             <span className="flex shrink-0 flex-col items-end leading-tight">
               <span className="font-bold text-gold tabular-nums" title={role.metricLabel}>

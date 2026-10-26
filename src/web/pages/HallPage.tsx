@@ -5,6 +5,8 @@
  * đứng trước thẻ trống (giữ thứ tự danh mục trong mỗi nhóm). Mỗi ô là link (nhích lên khi
  * rê chuột) tới bảng xếp hạng của role đó trong mùa đó; thẻ ghi người dẫn đầu trên bảng tên,
  * tên role, `{điểm} {chỉ số}`, ghi chú bản đồ, và "mùa trước" khi mùa này chưa ai hoá thân.
+ * Dưới thẻ có người, tên người đó là một link riêng tới trang thành viên công khai (spec huy
+ * hiệu §9) — tách khỏi link của thẻ để không lồng link trong link.
  *
  * Mùa trong `?mua=YYYY-MM`, tab trong `?phe=goose|duck|neutral|special` để chia sẻ
  * được; giá trị lạ thì về mặc định (mùa mới nhất, Phe Ngỗng) và không gửi lên API.
@@ -23,6 +25,7 @@ import { resolveSeason, SEASON_PARAM, useSeasons } from '../hooks/useSeasons';
 import { cx } from '../lib/cx';
 import { FACTION_LABEL, isFaction, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
 import { formatSeasonLabel } from '../lib/format';
+import { memberPath } from '../lib/links';
 
 const TAB_PARAM = 'phe';
 
@@ -133,7 +136,9 @@ function HallGrid({ data, requestedTab, onTab }: HallGridProps) {
         // 2 cột ở 320px, 3 từ `sm` (768px có 3), 4 từ `lg`, 5 từ `xl` (1280px) — spec §6.
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {shown.map((entry) => (
-            <li key={entry.role.id} className="flex">
+            // Mỗi ô chiếm hai hàng lưới theo subgrid — hàng thẻ rồi hàng link tên người giữ — nên thẻ
+            // cùng hàng luôn cao bằng nhau dù ô bên cạnh không có link tên (ô trống) hay tên dài hai dòng.
+            <li key={entry.role.id} className="row-span-2 grid grid-rows-subgrid gap-1">
               <HallTile entry={entry} seasonId={data.seasonId} />
             </li>
           ))}
@@ -161,12 +166,17 @@ function resolveTab(requested: string | null, hasSpecial: boolean): HallTab {
  * Một ô lưới: link tới bảng xếp hạng của role trong mùa đang xem, bọc `RoleCard` (thẻ không
  * tự là link, spec §5.3). Chưa ai hoá thân mùa này thì hiện người giữ mùa đã chốt trước đó
  * (mờ, kèm dòng "mùa trước"); không có cả hai thì `variant = 'empty'` để thẻ vẽ ô trống.
+ *
+ * Người đang hiện trên thẻ (mùa này hoặc mùa trước) có thêm link tên bên dưới thẻ tới trang
+ * thành viên. Link này nằm ngoài link của thẻ (lồng `a` trong `a` là sai HTML) nên ô trả về hai
+ * phần tử anh em cho hai hàng subgrid của `li` bọc ngoài (xem `HallGrid`).
  */
 function HallTile({ entry, seasonId }: { entry: HallRoleDto; seasonId: string }) {
   const { role, holder, previous } = entry;
+  const shown = holder ?? previous;
   const variant: CharacterVariant = holder ? 'current' : previous ? 'previous' : 'empty';
-  const name = holder?.displayName ?? previous?.displayName ?? null;
-  const score = holder?.score ?? previous?.score ?? null;
+  const name = shown?.displayName ?? null;
+  const score = shown?.score ?? null;
   const fromPrevious = holder === null && previous !== null;
 
   const extra =
@@ -178,9 +188,20 @@ function HallTile({ entry, seasonId }: { entry: HallRoleDto; seasonId: string })
     ) : undefined;
 
   return (
-    // `flex` để `lift` (transform) có tác dụng — thẻ `a` inline không nhận transform; bo góc theo panel cho viền focus.
-    <Link to={`/bang-xep-hang?role=${role.id}&${SEASON_PARAM}=${seasonId}`} className="lift flex w-full rounded-2xl">
-      <RoleCard role={role} holderName={name} variant={variant} score={score} extra={extra} className="w-full" />
-    </Link>
+    <>
+      {/* `flex` để `lift` (transform) có tác dụng — thẻ `a` inline không nhận transform; bo góc theo panel cho viền focus. */}
+      <Link to={`/bang-xep-hang?role=${role.id}&${SEASON_PARAM}=${seasonId}`} className="lift flex w-full rounded-2xl">
+        <RoleCard role={role} holderName={name} variant={variant} score={score} extra={extra} className="w-full" />
+      </Link>
+      {shown && (
+        // Giữa cột, sát dưới thẻ; tên dài xuống dòng (cột chỉ ~140px ở 320px), `max-w-full` để không kéo ô lưới rộng ra.
+        <Link
+          to={memberPath(shown.memberId)}
+          className="max-w-full justify-self-center self-start px-1 text-center text-sm leading-tight font-bold break-words text-gold hover:underline"
+        >
+          {shown.displayName}
+        </Link>
+      )}
+    </>
   );
 }

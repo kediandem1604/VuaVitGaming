@@ -2,7 +2,9 @@
  * Tab Hạng mục MVP (spec §4.5, chỉ admin): danh sách kể cả hạng mục đã ẩn, công tắc
  * bật/ẩn, form thêm và form sửa dùng chung. Phạm vi `mode` cần chế độ chơi; khi đổi
  * phạm vi khỏi `mode`, PATCH gửi kèm `modeId: null` trong cùng một yêu cầu (service
- * kiểm tra quy tắc phạm vi ⇔ chế độ trên dòng đã gộp).
+ * kiểm tra quy tắc phạm vi ⇔ chế độ trên dòng đã gộp). Ô "Tính cho danh hiệu" (spec huy
+ * hiệu §4: Khen / Vui / Không tính) gửi `badgeGroup` ở cả thêm và sửa; hàng ghi nhóm đang
+ * tính bằng chip (không ghi khi "Không tính").
  *
  * Giao diện Sảnh đêm (spec §6 Quản trị): form thêm trong `panel`; danh sách kiểu bảng
  * (một panel, hàng kẻ `night-700`, chữ 14px) với công tắc `Switch` ở cuối mỗi hàng.
@@ -10,7 +12,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
-import type { AwardCategoryDto, CategoryScope, ModeDto } from '../../../shared/api-types';
+import type { AwardCategoryDto, BadgeGroupDto, CategoryScope, ModeDto } from '../../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { QueryState } from '../../components/QueryState';
@@ -26,6 +28,11 @@ const DESCRIPTION_MAX = 200;
 const SCOPE_LABEL: Record<CategoryScope, string> = { always: 'Luôn có', mode: 'Theo chế độ', optional: 'Tuỳ chọn' };
 const SCOPES: readonly CategoryScope[] = ['always', 'mode', 'optional'];
 
+/** Nhóm danh hiệu của hạng mục: Khen → SMVP, Vui → Vua tấu hài, Không tính → không vào danh hiệu nào. */
+const BADGE_GROUP_LABEL: Record<BadgeGroupDto, string> = { mvp: 'Khen', fun: 'Vui', none: 'Không tính' };
+const BADGE_GROUPS: readonly BadgeGroupDto[] = ['mvp', 'fun', 'none'];
+const BADGE_GROUP_HINT = 'Khen tính cho SMVP và các cột mốc MVP; Vui tính cho Vua tấu hài.';
+
 const H2_CLASS = 'text-xl leading-tight font-extrabold text-white';
 const LABEL_CLASS = 'text-sm font-bold text-night-200';
 const HINT_CLASS = 'text-sm text-night-300';
@@ -37,6 +44,7 @@ interface CategoryValues {
   scope: CategoryScope;
   /** Id chế độ dạng chuỗi của `<select>`; rỗng = chưa chọn. */
   modeId: string;
+  badgeGroup: BadgeGroupDto;
 }
 
 interface CreateBody {
@@ -44,6 +52,7 @@ interface CreateBody {
   modeId?: number;
   name: string;
   description?: string;
+  badgeGroup: BadgeGroupDto;
 }
 
 interface PatchBody {
@@ -51,6 +60,7 @@ interface PatchBody {
   modeId: number | null;
   name: string;
   description: string | null;
+  badgeGroup: BadgeGroupDto;
 }
 
 function scopeText(category: AwardCategoryDto): string {
@@ -105,7 +115,7 @@ function CreateCategory({ modes }: { modes: ModeDto[] }) {
         key={create.data?.id ?? 'new'}
         formLabel="Thêm hạng mục"
         modes={modes}
-        initial={{ name: '', description: '', scope: 'always', modeId: '' }}
+        initial={{ name: '', description: '', scope: 'always', modeId: '', badgeGroup: 'none' }}
         submitLabel="Thêm hạng mục"
         pending={create.isPending}
         error={create.isError ? errorMessage(create.error) : null}
@@ -120,6 +130,7 @@ function CreateCategory({ modes }: { modes: ModeDto[] }) {
             ...(values.scope === 'mode' ? { modeId: Number(values.modeId) } : {}),
             name: values.name.trim(),
             ...(description !== '' ? { description } : {}),
+            badgeGroup: values.badgeGroup,
           });
         }}
       />
@@ -150,6 +161,7 @@ function CategoryRow({ category, modes }: { category: AwardCategoryDto; modes: M
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-base font-bold text-white">{category.name}</span>
         <Chip tone={category.scope === 'mode' ? 'goose' : category.scope === 'optional' ? 'third' : 'neutral'}>{scopeText(category)}</Chip>
+        {category.badgeGroup !== 'none' && <Chip>Danh hiệu: {BADGE_GROUP_LABEL[category.badgeGroup]}</Chip>}
         {!category.active && <Chip tone="duck">Đã ẩn</Chip>}
         <Switch
           id={switchId}
@@ -172,6 +184,7 @@ function CategoryRow({ category, modes }: { category: AwardCategoryDto; modes: M
             description: category.description ?? '',
             scope: category.scope,
             modeId: category.mode ? String(category.mode.id) : '',
+            badgeGroup: category.badgeGroup,
           }}
           submitLabel="Lưu"
           pending={patch.isPending}
@@ -189,6 +202,7 @@ function CategoryRow({ category, modes }: { category: AwardCategoryDto; modes: M
               modeId: values.scope === 'mode' ? Number(values.modeId) : null,
               name: values.name.trim(),
               description: description === '' ? null : description,
+              badgeGroup: values.badgeGroup,
             });
           }}
         />
@@ -299,6 +313,24 @@ function CategoryForm({ formLabel, modes, initial, submitLabel, pending, error, 
           </select>
         </div>
       )}
+      <div className="flex flex-col gap-1">
+        <label htmlFor={`${id}-badge-group`} className={LABEL_CLASS}>
+          Tính cho danh hiệu
+        </label>
+        <select
+          id={`${id}-badge-group`}
+          className="field"
+          value={values.badgeGroup}
+          onChange={(e) => update({ badgeGroup: e.target.value as BadgeGroupDto })}
+        >
+          {BADGE_GROUPS.map((group) => (
+            <option key={group} value={group}>
+              {BADGE_GROUP_LABEL[group]}
+            </option>
+          ))}
+        </select>
+        <p className={HINT_CLASS}>{BADGE_GROUP_HINT}</p>
+      </div>
       <div className="flex flex-col gap-2 sm:col-span-2">
         <div className="flex flex-wrap gap-2">
           <button type="submit" className="btn-primary" disabled={pending}>
