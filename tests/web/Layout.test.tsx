@@ -81,10 +81,24 @@ test('navigation uses drawn icons, not emoji', () => {
     // Emoji hiện mỗi máy một kiểu (spec §3.4) — thanh điều hướng chỉ còn chữ và icon vẽ.
     expect(nav.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
     const links = within(nav).getAllByRole('link');
-    expect(links).toHaveLength(7);
+    expect(links).toHaveLength(8);
     for (const link of links) {
       expect(link.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(1);
     }
+  }
+});
+
+test('Huy hiệu sits right after Tri ân in both navs and links to /huy-hieu', () => {
+  renderLayout(me);
+  const navs = screen.getAllByRole('navigation', { name: 'Điều hướng chính' });
+  expect(navs).toHaveLength(2);
+  for (const nav of navs) {
+    const links = within(nav).getAllByRole('link');
+    const names = links.map((link) => link.textContent);
+    const index = names.indexOf('Tri ân');
+    expect(index).toBeGreaterThan(-1);
+    expect(names[index + 1]).toBe('Huy hiệu');
+    expect(links[index + 1]).toHaveAttribute('href', '/huy-hieu');
   }
 });
 

@@ -7,16 +7,18 @@
  *
  * Vì sao `lg`, và vì sao tên người dùng ẩn từ `lg`: khung tối đa `max-w-5xl` cho 992px dùng
  * được ở MỌI màn hình từ 1056px (ở 1024 còn 977 vì thanh cuộn dọc). Đo bằng Baloo 2 đậm
- * 14px: 7 viên thuốc (icon 16 + nhãn, `px-2`, cách nhau 2px) ≈ 655px, logo 119, hai khoảng
- * cách 24, chip avatar + nút Đăng xuất 138 → ≈ 935px, còn ~45px dư ở 1024 và ~60px từ 1056.
- * Thêm tên cắt ở 128px thì cụm người dùng lên ~280px → ≈ 1080px, không bao giờ vừa; nên tên
- * chỉ hiện dưới `lg` (nơi thanh trên không có hàng link) và chip mang `title` để rê chuột
- * vẫn thấy tên. Hàng link vẫn có `overflow-x-auto` làm lưới an toàn: phông chữ rộng hơn dự
- * tính thì hàng này cuộn trong nó, không đè lên cụm người dùng, không cuộn trang.
- * Ở 768–1023 thanh dock vẫn thừa chỗ (≥ 110px mỗi mục).
+ * 14px: 7 viên thuốc của thành viên thường (icon 16 + nhãn, `px-2`, cách nhau 2px) ≈ 645px,
+ * logo 119, hai khoảng cách 24, chip avatar + nút Đăng xuất 138 → ≈ 925px, còn ~50px dư ở 1024
+ * và ~65px từ 1056. Mod/admin có thêm viên "Quản trị" (8 viên ≈ 740px → ≈ 1020px): từ ~1090px
+ * mới vừa hẳn, dưới đó hàng link cuộn trong nó vài chục px (lưới an toàn bên dưới). Thêm tên cắt
+ * ở 128px thì cụm người dùng lên ~280px → ≈ 1070px, không bao giờ vừa; nên tên chỉ hiện dưới
+ * `lg` (nơi thanh trên không có hàng link) và chip mang `title` để rê chuột vẫn thấy tên. Hàng
+ * link có `overflow-x-auto` làm lưới an toàn: phông chữ rộng hơn dự tính (hay 8 viên) thì hàng
+ * này cuộn trong nó, không đè lên cụm người dùng, không cuộn trang.
+ * Ở 768–1023 thanh dock vẫn thừa chỗ (≥ 96px mỗi mục với 8 mục).
  */
 
-import { ChartColumn, Crown, House, PenLine, Trophy, User, Wrench, type LucideIcon } from 'lucide-react';
+import { Award, ChartColumn, Crown, House, PenLine, Trophy, User, Wrench, type LucideIcon } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router';
 import type { MeDto } from '../../shared/api-types';
@@ -40,6 +42,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/dai-sanh', icon: Crown, label: 'Đại sảnh' },
   { to: '/bang-xep-hang', icon: ChartColumn, label: 'Bảng xếp hạng', short: 'Xếp hạng' },
   { to: '/tri-an', icon: Trophy, label: 'Tri ân' },
+  { to: '/huy-hieu', icon: Award, label: 'Huy hiệu' },
   { to: '/khai-diem', icon: PenLine, label: 'Khai điểm' },
   { to: '/ho-so', icon: User, label: 'Hồ sơ' },
   { to: '/quan-tri', icon: Wrench, label: 'Quản trị', staffOnly: true },
@@ -172,9 +175,10 @@ export function Layout({ me, children }: LayoutProps) {
                     <span aria-hidden="true" className={cx('size-1.5 rounded-full', isActive ? 'bg-gold' : 'bg-transparent')} />
                     <Icon aria-hidden="true" className="size-[22px] shrink-0" strokeWidth={2.25} />
                     {/*
-                      320px / 7 mục ≈ 46px, trừ lề còn 42px cho nhãn: nhãn dài cắt bằng "…" thay vì
-                      tràn. `tracking-tight` (−0,275px mỗi chữ ở 11px) để "Hôm nay", "Đại sảnh" vừa
-                      ở 320px và cả "Khai điểm" (49px) vừa từ 360px.
+                      320px / 7 mục ≈ 46px (mod/admin 8 mục ≈ 40px), trừ lề còn 42px (36px) cho nhãn:
+                      nhãn dài cắt bằng "…" thay vì tràn. `tracking-tight` (−0,275px mỗi chữ ở 11px)
+                      để "Hôm nay", "Đại sảnh", "Huy hiệu" vừa ở 320px và cả "Khai điểm" (49px) vừa
+                      từ 360px với 7 mục.
                     */}
                     <span className="max-w-full truncate tracking-tight">{item.short ?? item.label}</span>
                   </>

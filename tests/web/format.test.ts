@@ -8,6 +8,7 @@ import {
   formatSeasonLabel,
   formatTime,
   isIsoDate,
+  vnMonthOf,
   vnTodayIso,
 } from '../../src/web/lib/format';
 
@@ -52,6 +53,14 @@ test('vnTodayIso is the Vietnam calendar day, not UTC', () => {
   expect(vnTodayIso(new Date('2026-10-22T17:30:00.000Z'))).toBe('2026-10-23');
   expect(vnTodayIso(new Date('2026-12-31T17:00:00.000Z'))).toBe('2027-01-01');
   expect(vnTodayIso()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('vnMonthOf is the Vietnam calendar month of an instant, as a YYYY-MM season id', () => {
+  expect(vnMonthOf('2026-10-22T12:00:00.000Z')).toBe('2026-10');
+  // 17:30Z ngày 30/9 đã là 00:30 ngày 1/10 ở Việt Nam.
+  expect(vnMonthOf('2026-09-30T17:30:00.000Z')).toBe('2026-10');
+  expect(vnMonthOf('2026-12-31T17:00:00.000Z')).toBe('2027-01');
+  expect(vnMonthOf('2026-10-31T16:59:00.000Z')).toBe('2026-10');
 });
 
 test('addDaysIso shifts a YYYY-MM-DD across month and year boundaries', () => {

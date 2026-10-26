@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { MeDto } from '../../src/shared/api-types';
+import type { MeDto, PublicMemberDto } from '../../src/shared/api-types';
 import { App } from '../../src/web/App';
 
 const me: MeDto = {
@@ -58,6 +58,53 @@ test('a failed background refetch keeps the layout when me is already loaded', a
   expect(screen.getByRole('button', { name: 'Đăng xuất' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Thử lại' })).not.toBeInTheDocument();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+const stubRoutes = (routes: Record<string, unknown>) =>
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url in routes) return Promise.resolve(json(200, routes[url]));
+      throw new Error(`Không có tuyến giả cho ${url}`);
+    }),
+  );
+
+test('/huy-hieu opens the Huy hiệu page inside the layout', async () => {
+  window.history.replaceState({}, '', '/huy-hieu');
+  const queryClient = makeClient();
+  queryClient.setQueryData(['me'], me);
+  stubRoutes({ '/api/badges?limit=50': [] });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>,
+  );
+
+  expect(screen.getByRole('heading', { level: 1, name: 'Huy hiệu' })).toBeInTheDocument();
+  expect(await screen.findByText('Chưa có danh hiệu nào — đầu tháng sau sẽ có SMVP đầu tiên!')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Đăng xuất' })).toBeInTheDocument();
+});
+
+test('/thanh-vien/:id opens the public member page inside the layout', async () => {
+  window.history.replaceState({}, '', '/thanh-vien/7');
+  const queryClient = makeClient();
+  queryClient.setQueryData(['me'], me);
+  const seven: PublicMemberDto = { id: 7, displayName: 'Ngỗng Bảy', avatarUrl: null, joinedAt: '2026-10-21T17:30:00.000Z', left: false, badges: [] };
+  stubRoutes({ '/api/members/7': seven });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByRole('heading', { level: 1, name: 'Ngỗng Bảy' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Đăng xuất' })).toBeInTheDocument();
 });
 
 test('without any me data a failed load shows the full-screen error', async () => {

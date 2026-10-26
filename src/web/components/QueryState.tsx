@@ -1,10 +1,20 @@
-import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { errorMessage } from '../api';
 import { MiniGoose } from './goose/MiniGoose';
 
+/**
+ * Phần kết quả truy vấn mà khối này cần. Kết quả của `useQuery` lẫn `useInfiniteQuery` đều
+ * thoả (kiểu `refetch` của hai hook khác nhau nên không dùng thẳng `UseQueryResult`).
+ */
+interface QueryLike<T> {
+  data: T | undefined;
+  isError: boolean;
+  error: unknown;
+  refetch: () => Promise<unknown>;
+}
+
 interface QueryStateProps<T> {
-  query: UseQueryResult<T>;
+  query: QueryLike<T>;
   children: (data: T) => ReactNode;
 }
 

@@ -98,6 +98,15 @@ export function formatSeasonLabel(seasonId: string): string {
   return `Tháng ${Number(month)}/${year}`;
 }
 
+/**
+ * Tháng Việt Nam `YYYY-MM` (cùng dạng mã mùa) của một mốc ISO 8601 (UTC) — để nhóm danh hiệu
+ * theo tháng trao: 17:30Z ngày 30/9 đã là ngày 1/10 ở Việt Nam nên thuộc `2026-10`.
+ */
+export function vnMonthOf(iso: string): string {
+  const { month, year } = parts(dateFormat, new Date(iso));
+  return `${year}-${month}`;
+}
+
 /** Ngày hôm nay theo giờ Việt Nam, dạng `YYYY-MM-DD` — cho giá trị mặc định / giới hạn của ô chọn ngày. */
 export function vnTodayIso(now: Date = new Date()): string {
   const { day, month, year } = parts(dateFormat, now);

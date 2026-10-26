@@ -14,6 +14,8 @@ import { LeaderboardPage } from './pages/LeaderboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { MvpPage } from './pages/MvpPage';
 import { AdminPage } from './pages/admin/AdminPage';
+import { BadgesPage } from './pages/BadgesPage';
+import { MemberPage } from './pages/MemberPage';
 import { ForbiddenPage, NotFoundPage } from './pages/PlaceholderPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { ReportPage } from './pages/ReportPage';
@@ -29,6 +31,8 @@ export function App() {
           <Route path="dai-sanh" element={<HallPage />} />
           <Route path="bang-xep-hang" element={<LeaderboardPage />} />
           <Route path="tri-an" element={<MvpPage />} />
+          <Route path="huy-hieu" element={<BadgesPage />} />
+          <Route path="thanh-vien/:id" element={<MemberPage />} />
           <Route path="khai-diem" element={<ReportPage />} />
           <Route path="ho-so" element={<ProfilePage />} />
           <Route
