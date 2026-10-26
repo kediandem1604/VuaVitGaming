@@ -134,7 +134,8 @@ function MyBadgesSection({ me }: { me: MeDto }) {
               <p>Chưa có danh hiệu nào</p>
             </EmptyState>
           ) : (
-            <ul aria-labelledby={headingId} className="grid gap-3 sm:grid-cols-2">
+            // `grid-cols-1`: cột `minmax(0,1fr)` không nở theo nội dung thẻ, thẻ không bao giờ rộng quá 320px.
+            <ul aria-labelledby={headingId} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {data.badges.map((badge) => (
                 <li key={badge.id} className="flex">
                   <BadgeCard badge={badge} showDate className="w-full" />

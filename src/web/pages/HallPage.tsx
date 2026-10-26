@@ -138,7 +138,9 @@ function HallGrid({ data, requestedTab, onTab }: HallGridProps) {
           {shown.map((entry) => (
             // Mỗi ô chiếm hai hàng lưới theo subgrid — hàng thẻ rồi hàng link tên người giữ — nên thẻ
             // cùng hàng luôn cao bằng nhau dù ô bên cạnh không có link tên (ô trống) hay tên dài hai dòng.
-            <li key={entry.role.id} className="row-span-2 grid grid-rows-subgrid gap-1">
+            // `grid-cols-1` (= `minmax(0,1fr)`): cột của `li` không nở theo tên không có dấu cách, nên thẻ
+            // và link tên luôn nằm gọn trong ô lưới ngoài thay vì đè lên ô bên cạnh.
+            <li key={entry.role.id} className="row-span-2 grid grid-cols-1 grid-rows-subgrid gap-1">
               <HallTile entry={entry} seasonId={data.seasonId} />
             </li>
           ))}
@@ -194,10 +196,12 @@ function HallTile({ entry, seasonId }: { entry: HallRoleDto; seasonId: string })
         <RoleCard role={role} holderName={name} variant={variant} score={score} extra={extra} className="w-full" />
       </Link>
       {shown && (
-        // Giữa cột, sát dưới thẻ; tên dài xuống dòng (cột chỉ ~140px ở 320px), `max-w-full` để không kéo ô lưới rộng ra.
+        // Giữa cột, sát dưới thẻ; tên dài xuống dòng (cột chỉ ~140px ở 320px), `max-w-full` để không kéo ô lưới
+        // rộng ra; `wrap-anywhere` (overflow-wrap: anywhere) để tên không có dấu cách cũng bẻ được và không
+        // tính vào bề rộng tối thiểu của ô.
         <Link
           to={memberPath(shown.memberId)}
-          className="max-w-full justify-self-center self-start px-1 text-center text-sm leading-tight font-bold break-words text-gold hover:underline"
+          className="max-w-full justify-self-center self-start px-1 text-center text-sm leading-tight font-bold wrap-anywhere text-gold hover:underline"
         >
           {shown.displayName}
         </Link>

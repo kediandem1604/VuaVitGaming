@@ -107,8 +107,8 @@ function MonthGroup({ monthId, badges }: { monthId: string; badges: BadgeDto[] }
       <h2 id={headingId} className={HEADING_CLASS}>
         {monthHeading(monthId)}
       </h2>
-      {/* Một cột ở điện thoại, hai từ `sm`, ba từ `lg`. */}
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Một cột ở điện thoại (`grid-cols-1` = `minmax(0,1fr)`: cột không nở theo tên dài trong thẻ, để `truncate` cắt được), hai từ `sm`, ba từ `lg`. */}
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {badges.map((badge) => (
           <li key={badge.id} className="flex">
             <BadgeCard badge={badge} showMember className="w-full" />
