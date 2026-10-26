@@ -1,8 +1,8 @@
 import type { Member, Prisma, Role } from '@prisma/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../src/server/ctx.js';
-import { listRoles } from '../../src/server/modules/roles/service.js';
-import { ensureSeason } from '../../src/server/modules/seasons/service.js';
+import { listRoles, updateRole } from '../../src/server/modules/roles/service.js';
+import { closeSeason, ensureSeason } from '../../src/server/modules/seasons/service.js';
 import { getFactionTop, getHall, getHeldRoles, getRoleLeaderboard, getSeasonLeaders, rolePointWeight } from '../../src/server/modules/stats/leaderboard.js';
 import { reviewReport, submitReport, updateOwnReport } from '../../src/server/modules/stats/reports.js';
 import type { FactionTopRowDto, HallDto } from '../../src/shared/api-types.js';
@@ -41,11 +41,16 @@ afterEach(() => vi.restoreAllMocks());
 
 const modR = () => ({ id: mod.id, accessLevel: mod.accessLevel });
 
-type ReportSpec = { roleId?: number; value: number; playedOn?: string };
+type ReportSpec = { roleId?: number; value: number; extraValue?: number; playedOn?: string };
 
-/** Khai một lần (mặc định Vịt, ngày 10/10); trả về id. */
+/** Khai một lần (mặc định Vịt, ngày 10/10, không chỉ số phụ); trả về id. */
 async function submit(memberId: number, o: ReportSpec): Promise<number> {
-  const r = await submitReport(ctx, memberId, { roleId: o.roleId ?? duck.id, value: o.value, playedOn: o.playedOn ?? '2026-10-10' });
+  const r = await submitReport(ctx, memberId, {
+    roleId: o.roleId ?? duck.id,
+    value: o.value,
+    playedOn: o.playedOn ?? '2026-10-10',
+    ...(o.extraValue !== undefined ? { extraValue: o.extraValue } : {}),
+  });
   return r.id;
 }
 
@@ -229,6 +234,108 @@ test('getRoleLeaderboard validates season, limit and role', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Chỉ số phụ: điểm mùa = Σ value + Σ extraValue × extraPoints
+// ---------------------------------------------------------------------------
+
+test('an extra-metric role scores value + extraValue × extraPoints, summed over the season', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  expect(assassin.extraPoints).toBe(3);
+
+  // An: 4 mạng + 2 ám sát họp = 10.
+  await approved(a.id, { roleId: assassin.id, value: 4, extraValue: 2, at: '2026-10-10T02:00:00Z' });
+  expect(await getRoleLeaderboard(ctx, assassin.id, '2026-10')).toEqual([
+    { rank: 1, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, score: 10, games: 1, lastApprovedAt: new Date('2026-10-10T02:00:00Z') },
+  ]);
+  expect(notifier.announcements).toEqual(['👑 An đã hoá thân Ám sát mùa 2026-10!']);
+
+  // Hai lần khai cộng dồn: + (1 + 1 × 3) = 14; số trận = 2.
+  await approved(a.id, { roleId: assassin.id, value: 1, extraValue: 1, at: '2026-10-10T03:00:00Z' });
+  // Bình: 9 mạng, không ám sát họp = 9 → dưới An; lần chỉ có chỉ số phụ (0 + 1 × 3) vẫn lên bảng.
+  await approved(b.id, { roleId: assassin.id, value: 9, at: '2026-10-10T04:00:00Z' });
+  const c = await createMember(testDb, { displayName: 'Cường' });
+  await approved(c.id, { roleId: assassin.id, value: 0, extraValue: 1, at: '2026-10-10T05:00:00Z' });
+  expect((await getRoleLeaderboard(ctx, assassin.id, '2026-10')).map((r) => [r.rank, r.memberId, r.score, r.games])).toEqual([
+    [1, a.id, 14, 2],
+    [2, b.id, 9, 1],
+    [3, c.id, 3, 1],
+  ]);
+  expect(notifier.announcements).toHaveLength(1);
+
+  // Mọi nơi dùng điểm mùa đi theo: hoá thân, Đại sảnh, role đang giữ.
+  expect((await getSeasonLeaders(ctx, '2026-10')).get(assassin.id)).toMatchObject({ memberId: a.id, score: 14 });
+  expect(hallRole(await getHall(ctx, '2026-10'), 'assassin').holder).toEqual({ memberId: a.id, displayName: 'An', score: 14 });
+  expect((await getHeldRoles(ctx, a.id, '2026-10')).map((h) => [h.role.key, h.score])).toEqual([['assassin', 14]]);
+
+  // Lần khai chỉ số phụ chờ duyệt không tính; role thường không đổi cách tính.
+  await submit(b.id, { roleId: assassin.id, value: 0, extraValue: 2 });
+  await approved(b.id, { value: 6 });
+  expect((await getRoleLeaderboard(ctx, assassin.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([
+    [a.id, 14],
+    [b.id, 9],
+    [c.id, 3],
+  ]);
+  expect((await getRoleLeaderboard(ctx, duck.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([[b.id, 6]]);
+});
+
+test('changing extraPoints re-scores an open season and its holder; a closed season keeps role_titles.score', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  // An: 4 + 2 × 3 = 10 (02:00); Bình: 9 (03:00) → An dẫn.
+  await approved(a.id, { roleId: assassin.id, value: 4, extraValue: 2, at: '2026-10-10T02:00:00Z' });
+  await approved(b.id, { roleId: assassin.id, value: 9, at: '2026-10-10T03:00:00Z' });
+  expect((await getRoleLeaderboard(ctx, assassin.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([
+    [a.id, 10],
+    [b.id, 9],
+  ]);
+
+  // Admin hạ điểm mỗi lần ám sát họp xuống 1: An còn 6 → Bình dẫn, không cần duyệt lại gì.
+  await updateRole(ctx, assassin.id, { extraPoints: 1 });
+  expect((await getRoleLeaderboard(ctx, assassin.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([
+    [b.id, 9],
+    [a.id, 6],
+  ]);
+  expect((await getSeasonLeaders(ctx, '2026-10')).get(assassin.id)).toMatchObject({ memberId: b.id, score: 9 });
+  expect(hallRole(await getHall(ctx, '2026-10'), 'assassin').holder).toEqual({ memberId: b.id, displayName: 'Bình', score: 9 });
+  expect(await getHeldRoles(ctx, a.id, '2026-10')).toEqual([]);
+  expect((await getHeldRoles(ctx, b.id, '2026-10')).map((h) => h.role.key)).toEqual(['assassin']);
+
+  // Nâng lên 10: An 24 → An dẫn lại.
+  await updateRole(ctx, assassin.id, { extraPoints: 10 });
+  expect((await getRoleLeaderboard(ctx, assassin.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([
+    [a.id, 24],
+    [b.id, 9],
+  ]);
+
+  // Chốt mùa với điểm hiện tại; đổi điểm sau đó không đụng tới danh hiệu đã chốt.
+  setNow('2026-11-04T00:00:00Z');
+  await closeSeason(ctx, '2026-10');
+  expect(await testDb.roleTitle.findMany({ where: { seasonId: '2026-10', roleId: assassin.id } })).toMatchObject([{ memberId: a.id, score: 24 }]);
+  await updateRole(ctx, assassin.id, { extraPoints: 1 });
+  const closed = await getHall(ctx, '2026-10');
+  expect(closed.closed).toBe(true);
+  expect(hallRole(closed, 'assassin').holder).toEqual({ memberId: a.id, displayName: 'An', score: 24 });
+  expect(hallRole(await getHall(ctx, '2026-11'), 'assassin')).toMatchObject({
+    holder: null,
+    previous: { memberId: a.id, displayName: 'An', score: 24, seasonId: '2026-10' },
+  });
+});
+
+test('a stored extraValue on a role whose extra metric is gone scores 0 points', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  await approved(a.id, { roleId: assassin.id, value: 4, extraValue: 2 });
+  await approved(b.id, { roleId: assassin.id, value: 0, extraValue: 1 });
+  expect((await getRoleLeaderboard(ctx, assassin.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([
+    [a.id, 10],
+    [b.id, 3],
+  ]);
+
+  // Service chặn tắt khi đã có lần khai dùng chỉ số phụ; tắt thẳng trong DB (CHECK cho phép cả ba null)
+  // để xem cách tính: phần phụ tính 0 điểm, người chỉ có chỉ số phụ rời bảng.
+  await testDb.role.update({ where: { id: assassin.id }, data: { extraMetricLabel: null, extraMaxPerGame: null, extraPoints: null } });
+  expect((await getRoleLeaderboard(ctx, assassin.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([[a.id, 4]]);
+  expect((await getFactionTop(ctx, '2026-10')).factions.duck.map((r) => [r.memberId, r.value, r.points])).toEqual([[a.id, 4, 4]]);
+});
+
+// ---------------------------------------------------------------------------
 // Top 3 mỗi phe
 // ---------------------------------------------------------------------------
 
@@ -245,7 +352,39 @@ const roleOf = (role: Role): FactionTopRowDto['role'] => ({
   nameVi: role.nameVi,
   icon: role.icon,
   metricLabel: role.metricLabel,
+  extraMetricLabel: role.extraMetricLabel,
+  extraPoints: role.extraPoints,
   faction: role.faction,
+});
+
+test('faction top ranks an extra-metric role by its season points (Ám sát 4 + 2 → 10)', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  expect(assassin.faction).toBe('duck');
+  expect(assassin.maxPerGame).toBe(15); // hệ số 1
+  await approved(a.id, { roleId: assassin.id, value: 4, extraValue: 2, at: '2026-10-10T02:00:00Z' });
+  await approved(b.id, { value: 9, at: '2026-10-10T03:00:00Z' }); // Vịt 9 < 10
+
+  const top = await getFactionTop(ctx, '2026-10');
+  expect(top.factions.duck).toEqual([
+    { rank: 1, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(assassin), value: 10, weight: 1, points: 10, games: 1 },
+    { rank: 2, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(duck), value: 9, weight: 1, points: 9, games: 1 },
+  ]);
+  expect(roleOf(assassin)).toEqual({
+    id: assassin.id,
+    nameVi: 'Ám sát',
+    icon: '🗡️',
+    metricLabel: 'Số mạng đã giết',
+    extraMetricLabel: 'Số lần ám sát trong cuộc họp',
+    extraPoints: 3,
+    faction: 'duck',
+  });
+
+  // Đổi điểm mỗi lần → top phe đổi theo (An 4 + 2 × 1 = 6 < 9).
+  await updateRole(ctx, assassin.id, { extraPoints: 1 });
+  expect((await getFactionTop(ctx, '2026-10')).factions.duck.map((r) => [r.memberId, r.value, r.points, r.role.extraPoints])).toEqual([
+    [b.id, 9, 9, null],
+    [a.id, 6, 6, 1],
+  ]);
 });
 
 test('faction top: a max-1 role weighs x5, one member may hold several rows, factions are separate', async () => {
@@ -271,7 +410,7 @@ test('faction top: a max-1 role weighs x5, one member may hold several rows, fac
     { rank: 1, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(duck), value: 7, weight: 1, points: 7, games: 1 },
   ]);
   expect(top.factions.neutral).toEqual([]);
-  expect(roleOf(duck)).toEqual({ id: duck.id, nameVi: 'Vịt', icon: '🦆', metricLabel: 'Số mạng đã giết', faction: 'duck' });
+  expect(roleOf(duck)).toEqual({ id: duck.id, nameVi: 'Vịt', icon: '🦆', metricLabel: 'Số mạng đã giết', extraMetricLabel: null, extraPoints: null, faction: 'duck' });
 });
 
 test('faction top ties: earlier approval first, then member id, then role id', async () => {

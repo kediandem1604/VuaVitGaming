@@ -64,6 +64,8 @@ const reportBody = z
     roleId: int32Id,
     // Chỉ cần là số: lẻ/âm/quá giới hạn do service báo riêng kèm giới hạn của role.
     value: z.number(),
+    // Chỉ số phụ, không bắt buộc (service mặc định 0); giới hạn và "role không có chỉ số phụ" do service báo.
+    extraValue: z.number().optional(),
     playedOn: z.string().regex(VN_DATE),
     sessionId: int32Id.nullish(),
     note: z.string().nullish(),

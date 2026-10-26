@@ -91,16 +91,16 @@ async function octoberSeason(): Promise<{ pendingId: number }> {
   return { pendingId };
 }
 
-/** Bảng tổng kết mong đợi của `octoberSeason` — theo phe, trong phe theo thứ tự danh mục. */
+/** Bảng tổng kết mong đợi của `octoberSeason` — theo phe, trong phe theo thứ tự danh mục; điểm kèm nhãn chỉ số. */
 const OCTOBER_SUMMARY = [
   '📜 Tổng kết mùa 10/2026',
   '🪿 Phe Ngỗng',
-  '• Ngỗng: Bình (3)',
+  '• Ngỗng: Bình (3 lần vote trúng Vịt)',
   '🦆 Phe Vịt',
-  '• Vịt: An (5)',
-  '• Kiếm sĩ: Bình (4)',
+  '• Vịt: An (5 mạng đã giết)',
+  '• Kiếm sĩ: Bình (4 mạng chém)',
   '🐦 Phe thứ 3',
-  '• Cò gáy: An (2)',
+  '• Cò gáy: An (2 trứng không bị đập)',
 ].join('\n');
 
 function octoberTitles(): { seasonId: string; roleId: number; memberId: number; score: number }[] {
@@ -355,7 +355,15 @@ test('a summary that fails midway is reposted whole on the next run', async () =
   await testDb.roleTitle.createMany({ data: roles.map((r, i) => ({ seasonId: '2026-09', roleId: r.id, memberId: long.id, score: i + 1 })) });
   const expected = buildSeasonSummary(
     '2026-09',
-    roles.map((r, i) => ({ faction: r.faction, roleName: r.nameVi, displayName: long.displayName, score: i + 1 })),
+    roles.map((r, i) => ({
+      faction: r.faction,
+      roleName: r.nameVi,
+      displayName: long.displayName,
+      score: i + 1,
+      metricLabel: r.metricLabel,
+      extraMetricLabel: r.extraMetricLabel,
+      extraPoints: r.extraPoints,
+    })),
   );
   expect(expected.length).toBeGreaterThanOrEqual(2);
 
@@ -441,15 +449,15 @@ test('seasons are handled oldest first and a failing season does not block the o
   expect(await isSeasonClosed(ctx, '2026-08')).toBe(false);
   expect(await isSeasonClosed(ctx, '2026-09')).toBe(true);
   expect(notifier.announcements).toEqual([
-    '📜 Tổng kết mùa 07/2026\n🪿 Phe Ngỗng\n• Ngỗng: An (2)',
-    '📜 Tổng kết mùa 09/2026\n🐦 Phe thứ 3\n• Cò gáy: An (4)',
+    '📜 Tổng kết mùa 07/2026\n🪿 Phe Ngỗng\n• Ngỗng: An (2 lần vote trúng Vịt)',
+    '📜 Tổng kết mùa 09/2026\n🐦 Phe thứ 3\n• Cò gáy: An (4 trứng không bị đập)',
   ]);
 
   // Lượt sau chốt nốt mùa 08.
   await runSeasonJobs(ctx);
   expect(await isSeasonClosed(ctx, '2026-08')).toBe(true);
   expect(notifier.announcements).toHaveLength(3);
-  expect(notifier.announcements[2]).toBe('📜 Tổng kết mùa 08/2026\n🦆 Phe Vịt\n• Vịt: Bình (3)');
+  expect(notifier.announcements[2]).toBe('📜 Tổng kết mùa 08/2026\n🦆 Phe Vịt\n• Vịt: Bình (3 mạng đã giết)');
   expect(await testDb.roleTitle.count()).toBe(3);
 });
 
@@ -535,8 +543,14 @@ function manyTitles(n: number): SeasonTitle[] {
     roleName: `Role số ${i + 1}`,
     displayName: `Người chơi có tên khá dài số ${i + 1}`,
     score: i + 1,
+    metricLabel: 'Số mạng đã giết',
+    extraMetricLabel: null,
+    extraPoints: null,
   }));
 }
+
+/** Role thường trong `SeasonTitle`: không có chỉ số phụ. */
+const plain = (metricLabel: string) => ({ metricLabel, extraMetricLabel: null, extraPoints: null });
 
 test('summary split under Discord limit', () => {
   const titles = manyTitles(120);
@@ -555,7 +569,7 @@ test('summary split under Discord limit', () => {
     ['duck', '🦆 Phe Vịt'],
     ['neutral', '🐦 Phe thứ 3'],
   ] as const) {
-    expectedLines.push(heading, ...titles.filter((t) => t.faction === faction).map((t) => `• ${t.roleName}: ${t.displayName} (${t.score})`));
+    expectedLines.push(heading, ...titles.filter((t) => t.faction === faction).map((t) => `• ${t.roleName}: ${t.displayName} (${t.score} mạng đã giết)`));
   }
   expect(parts.flatMap((p) => p.split('\n'))).toEqual(expectedLines);
   for (const p of parts) expect(p).toMatch(/^\S[\s\S]*\S$/); // không bắt đầu/kết thúc bằng xuống dòng
@@ -564,15 +578,40 @@ test('summary split under Discord limit', () => {
 test('summary groups by faction in order, omits empty factions, and has a one-line empty form', () => {
   expect(
     buildSeasonSummary('2026-01', [
-      { faction: 'neutral', roleName: 'Cò gáy', displayName: 'An', score: 2 },
-      { faction: 'goose', roleName: 'Ngỗng', displayName: 'Bình', score: 3 },
-      { faction: 'goose', roleName: 'Thầy đồng', displayName: 'An', score: 1 },
+      { faction: 'neutral', roleName: 'Cò gáy', displayName: 'An', score: 2, ...plain('Số trứng không bị đập') },
+      { faction: 'goose', roleName: 'Ngỗng', displayName: 'Bình', score: 3, ...plain('Số lần vote trúng Vịt') },
+      { faction: 'goose', roleName: 'Thầy đồng', displayName: 'An', score: 1, ...plain('Số xác ẩn được bạn phát hiện') },
     ]),
-  ).toEqual(['📜 Tổng kết mùa 01/2026\n🪿 Phe Ngỗng\n• Ngỗng: Bình (3)\n• Thầy đồng: An (1)\n🐦 Phe thứ 3\n• Cò gáy: An (2)']);
-  expect(buildSeasonSummary('2026-12', [{ faction: 'duck', roleName: 'Vịt', displayName: 'An', score: 15 }])).toEqual([
-    '📜 Tổng kết mùa 12/2026\n🦆 Phe Vịt\n• Vịt: An (15)',
+  ).toEqual([
+    '📜 Tổng kết mùa 01/2026\n🪿 Phe Ngỗng\n• Ngỗng: Bình (3 lần vote trúng Vịt)\n• Thầy đồng: An (1 xác ẩn được bạn phát hiện)\n🐦 Phe thứ 3\n• Cò gáy: An (2 trứng không bị đập)',
+  ]);
+  expect(buildSeasonSummary('2026-12', [{ faction: 'duck', roleName: 'Vịt', displayName: 'An', score: 15, ...plain('Số mạng đã giết') }])).toEqual([
+    '📜 Tổng kết mùa 12/2026\n🦆 Phe Vịt\n• Vịt: An (15 mạng đã giết)',
   ]);
   expect(buildSeasonSummary('2026-10', [])).toEqual(['📜 Tổng kết mùa 10/2026: chưa có ai hoá thân.']);
+});
+
+test('summary writes "N điểm" for a role with an extra metric', () => {
+  const assassin = { metricLabel: 'Số mạng đã giết', extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraPoints: 3 };
+  expect(
+    buildSeasonSummary('2026-10', [
+      { faction: 'duck', roleName: 'Ám sát', displayName: 'An', score: 10, ...assassin },
+      { faction: 'duck', roleName: 'Vịt', displayName: 'Bình', score: 5, ...plain('Số mạng đã giết') },
+    ]),
+  ).toEqual(['📜 Tổng kết mùa 10/2026\n🦆 Phe Vịt\n• Ám sát: An (10 điểm)\n• Vịt: Bình (5 mạng đã giết)']);
+});
+
+test('closing a season writes extra-metric points to role_titles and the summary reads "N điểm"', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  // An: 4 + 2 × 3 = 10; Bình: 9 → An hoá thân Ám sát với 10 điểm.
+  await reviewReport(ctx, modR(), (await submitReport(ctx, a.id, { roleId: assassin.id, value: 4, extraValue: 2, playedOn: '2026-10-21' })).id, { approve: true });
+  await reviewReport(ctx, modR(), (await submitReport(ctx, b.id, { roleId: assassin.id, value: 9, playedOn: '2026-10-21' })).id, { approve: true });
+  notifier.announcements = [];
+
+  setNow(CLOSE_AT);
+  expect(await closeSeason(ctx, '2026-10')).toEqual({ titles: 1, autoRejected: 0 });
+  expect(await titleRows('2026-10')).toMatchObject([{ roleId: assassin.id, memberId: a.id, score: 10 }]);
+  expect(notifier.announcements).toEqual(['📜 Tổng kết mùa 10/2026\n🦆 Phe Vịt\n• Ám sát: An (10 điểm)']);
 });
 
 // ---------------------------------------------------------------------------

@@ -148,15 +148,35 @@ export interface EndOptionDto {
 export type ReportStatus = 'pending' | 'approved' | 'rejected';
 
 /**
+ * Phần role kèm trong một lần khai: đủ để vẽ dòng, giới hạn ô nhập khi sửa (`maxPerGame`,
+ * `extraMaxPerGame`) và đọc "x + y" / điểm (`metricLabel`, `extraMetricLabel`, `extraPoints`).
+ * Ba trường chỉ số phụ cùng có hoặc cùng null (role không có chỉ số phụ).
+ */
+export interface ReportRoleDto {
+  id: number;
+  nameVi: string;
+  icon: string;
+  metricLabel: string;
+  maxPerGame: number;
+  extraMetricLabel: string | null;
+  extraMaxPerGame: number | null;
+  extraPoints: number | null;
+}
+
+/**
  * Một lần khai điểm (lịch sử của tôi, hàng chờ duyệt). `playedOn` dạng `YYYY-MM-DD`
  * (ngày VN), `createdAt` ISO 8601 (UTC). `rejectReason` chỉ có khi `status = 'rejected'`.
  * `highlightUrl` là link tới tin Discord chứa highlight (mở tab mới), `null` khi chưa kèm.
+ * `extraValue` là chỉ số phụ (0 với role không có); `points = value + extraValue × extraPoints`
+ * theo điểm mỗi lần hiện tại của role (spec chỉ số phụ §3).
  */
 export interface ReportDto {
   id: number;
   member: { id: number; displayName: string };
-  role: { id: number; nameVi: string; icon: string; metricLabel: string };
+  role: ReportRoleDto;
   value: number;
+  extraValue: number;
+  points: number;
   playedOn: string;
   sessionId: number | null;
   note: string | null;
@@ -193,18 +213,19 @@ export interface LeaderboardRowDto {
 
 /**
  * Một dòng "Top 3 mỗi phe" (`GET /api/leaderboard/factions`): một cặp (người, role) trong
- * một mùa. `value` là tổng giá trị thô của các lần khai đã duyệt; `weight` là hệ số của
- * role (5 khi role tối đa 1 mỗi trận, còn lại 1); `points = value × weight` là điểm dùng
- * để xếp hạng trong phe. Một người có thể có nhiều dòng (mỗi role một dòng). Hạng 1..n
- * liên tiếp, không đồng hạng. `role` chỉ gồm những gì cần để vẽ dòng và dẫn tới bảng của
- * role đó.
+ * một mùa. `value` là điểm mùa của cặp đó (tổng điểm các lần khai đã duyệt — với role có
+ * chỉ số phụ đã gồm `extraValue × extraPoints`); `weight` là hệ số của role (5 khi role tối
+ * đa 1 mỗi trận, còn lại 1); `points = value × weight` là điểm dùng để xếp hạng trong phe.
+ * Một người có thể có nhiều dòng (mỗi role một dòng). Hạng 1..n liên tiếp, không đồng hạng.
+ * `role` chỉ gồm những gì cần để vẽ dòng (kể cả đọc `value` là "N điểm" hay "N {nhãn}") và
+ * dẫn tới bảng của role đó.
  */
 export interface FactionTopRowDto {
   rank: number;
   memberId: number;
   displayName: string;
   avatarUrl: string | null;
-  role: { id: number; nameVi: string; icon: string; metricLabel: string; faction: Faction };
+  role: { id: number; nameVi: string; icon: string; metricLabel: string; extraMetricLabel: string | null; extraPoints: number | null; faction: Faction };
   value: number;
   weight: number;
   points: number;

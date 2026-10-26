@@ -4,10 +4,14 @@
  * do, người khai nhận DM khi bị từ chối.
  *
  * Quy tắc khai (kiểm tra theo đúng thứ tự này): role đang bật → giá trị nguyên trong
- * `[0, maxPerGame]` → ngày chơi trong `[hôm nay − 3, hôm nay]` giờ VN → mùa của ngày
+ * `[0, maxPerGame]` → chỉ số phụ nguyên trong `[0, extraMaxPerGame]` (role không có chỉ số
+ * phụ thì phải là 0) → ngày chơi trong `[hôm nay − 3, hôm nay]` giờ VN → mùa của ngày
  * chơi chưa chốt → chưa quá 30 lần khai trong ngày VN hôm nay → ghi chú ≤ 300 ký tự →
  * buổi (nếu có) bắt đầu cùng ngày VN với ngày chơi. Sửa lần khai của mình chạy lại
  * cùng bộ kiểm tra trên giá trị đã gộp, trừ giới hạn 30 lần/ngày.
+ *
+ * Điểm một lần khai = `value + extraValue × extraPoints` (spec chỉ số phụ §3), tính lúc đọc
+ * theo `extraPoints` hiện tại của role — chỉ `value`/`extraValue` được lưu.
  *
  * Duyệt: mod không tự duyệt lần khai của mình (admin thì được — server chỉ có một
  * admin vẫn chạy); đổi trạng thái `pending → approved/rejected` là một cập nhật có
@@ -24,7 +28,7 @@
 import type { Prisma, StatReport } from '@prisma/client';
 import { z } from 'zod';
 import type { AccessLevel, ReportDto } from '../../../shared/api-types.js';
-import { formatMetricValue } from '../../../shared/metric.js';
+import { formatReportValue, reportPoints } from '../../../shared/metric.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import {
@@ -58,6 +62,11 @@ export interface ReportInput {
   roleId: number;
   /** Số nguyên trong `[0, maxPerGame]` của role. */
   value: number;
+  /**
+   * Chỉ số phụ (spec chỉ số phụ §6): số nguyên trong `[0, extraMaxPerGame]` của role; mặc
+   * định 0. Role không có chỉ số phụ chỉ nhận 0.
+   */
+  extraValue?: number;
   /** Ngày chơi theo giờ VN, `YYYY-MM-DD`. */
   playedOn: string;
   /** Buổi chơi (không bắt buộc); phải bắt đầu cùng ngày VN với `playedOn`. */
@@ -84,6 +93,7 @@ const inputSchema = z
   .object({
     roleId: idSchema,
     value: numberSchema,
+    extraValue: numberSchema.optional(),
     playedOn: z.string(),
     sessionId: idSchema.nullish(),
     note: z.string().nullish(),
@@ -108,6 +118,7 @@ function parse<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.infer<T> {
 interface Normalised {
   roleId: number;
   value: number;
+  extraValue: number;
   playedOn: string;
   sessionId: number | null;
   note: string | null;
@@ -140,17 +151,27 @@ async function assertActiveMember(ctx: Ctx, memberId: number): Promise<void> {
 }
 
 /**
- * Bộ kiểm tra của spec, đúng thứ tự: role bật → giá trị → cửa sổ 3 ngày → mùa chưa chốt
- * → (giới hạn ngày, chỉ khi `dailyCap`) → ghi chú → buổi khớp ngày. Mọi mốc "hôm nay"
- * lấy từ `ctx.now()` theo giờ VN.
+ * Bộ kiểm tra của spec, đúng thứ tự: role bật → giá trị → chỉ số phụ → cửa sổ 3 ngày → mùa
+ * chưa chốt → (giới hạn ngày, chỉ khi `dailyCap`) → ghi chú → buổi khớp ngày. Mọi mốc
+ * "hôm nay" lấy từ `ctx.now()` theo giờ VN.
  */
 async function validateReport(ctx: Ctx, memberId: number, r: Normalised, opts: { dailyCap: boolean }): Promise<void> {
-  const role = await ctx.db.role.findUnique({ where: { id: r.roleId }, select: { active: true, maxPerGame: true } });
+  const role = await ctx.db.role.findUnique({
+    where: { id: r.roleId },
+    select: { active: true, maxPerGame: true, extraMaxPerGame: true },
+  });
   if (!role) throw appError('VALIDATION', 'Role không hợp lệ');
   if (!role.active) throw appError('ROLE_INACTIVE');
 
   if (!Number.isInteger(r.value) || r.value < 0 || r.value > role.maxPerGame) {
     throw appError('VALUE_OUT_OF_RANGE', `Giá trị phải từ 0 đến ${role.maxPerGame}`);
+  }
+  // Role không có chỉ số phụ (ba trường phụ null): chỉ nhận 0 — kể cả khi sửa lần khai đổi
+  // sang role này mà còn extraValue cũ.
+  if (role.extraMaxPerGame === null) {
+    if (r.extraValue !== 0) throw appError('VALIDATION', 'Role này không có chỉ số phụ');
+  } else if (!Number.isInteger(r.extraValue) || r.extraValue < 0 || r.extraValue > role.extraMaxPerGame) {
+    throw appError('VALUE_OUT_OF_RANGE', `Chỉ số phụ phải từ 0 đến ${role.extraMaxPerGame}`);
   }
 
   // Chuỗi `YYYY-MM-DD` so sánh theo từ điển đúng bằng so sánh ngày.
@@ -188,6 +209,7 @@ export async function submitReport(ctx: Ctx, memberId: number, input: ReportInpu
   const r: Normalised = {
     roleId: p.roleId,
     value: p.value,
+    extraValue: p.extraValue ?? 0,
     playedOn: checkPlayedOn(p.playedOn),
     sessionId: p.sessionId ?? null,
     note: normaliseNote(p.note),
@@ -204,6 +226,7 @@ export async function submitReport(ctx: Ctx, memberId: number, input: ReportInpu
       sessionId: r.sessionId,
       playedOn: dateOnlyToDb(r.playedOn),
       value: r.value,
+      extraValue: r.extraValue,
       note: r.note,
       // Ghi rõ để đồng hồ của ctx (không phải giờ thật) quyết định "ngày khai".
       createdAt: ctx.now(),
@@ -228,6 +251,7 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
   const merged: Normalised = {
     roleId: p.roleId ?? existing.roleId,
     value: p.value ?? existing.value,
+    extraValue: p.extraValue ?? existing.extraValue,
     playedOn: p.playedOn === undefined ? dbToDateOnly(existing.playedOn) : checkPlayedOn(p.playedOn),
     sessionId: p.sessionId === undefined ? existing.sessionId : p.sessionId,
     note: p.note === undefined ? existing.note : normaliseNote(p.note),
@@ -240,6 +264,7 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
     data: {
       roleId: merged.roleId,
       value: merged.value,
+      extraValue: merged.extraValue,
       playedOn: dateOnlyToDb(merged.playedOn),
       sessionId: merged.sessionId,
       note: merged.note,
@@ -253,9 +278,12 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
 // Duyệt
 // ---------------------------------------------------------------------------
 
+/** Phần role mà DM từ chối cần: tên và cách đọc "x + y" (`MetricRole`). */
+const REVIEW_ROLE_SELECT = { nameVi: true, metricLabel: true, extraMetricLabel: true, extraPoints: true } satisfies Prisma.RoleSelect;
+
 /** Lần khai kèm những gì DM từ chối cần: người khai (discordId), role (tên, chỉ số). */
 type ReviewableReport = Prisma.StatReportGetPayload<{
-  include: { member: { select: { discordId: true } }; role: { select: { nameVi: true; metricLabel: true } } };
+  include: { member: { select: { discordId: true } }; role: { select: typeof REVIEW_ROLE_SELECT } };
 }>;
 
 /**
@@ -276,7 +304,7 @@ export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
   const report = isId(reportId)
     ? await ctx.db.statReport.findUnique({
         where: { id: reportId },
-        include: { member: { select: { discordId: true } }, role: { select: { nameVi: true, metricLabel: true } } },
+        include: { member: { select: { discordId: true } }, role: { select: REVIEW_ROLE_SELECT } },
       })
     : null;
   if (!report) throw appError('NOT_FOUND');
@@ -297,10 +325,17 @@ export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
   const leaderBefore = d.approve ? await getRoleLeader(ctx, report.roleId, seasonId) : null;
 
   const { count } = await ctx.db.statReport.updateMany({
-    // Khoá lạc quan: chỉ ghi khi lần khai vẫn chờ duyệt và vẫn đúng role/ngày/giá trị mod
-    // đã xem — người khai sửa chen vào thì không duyệt nhầm nội dung mới, và `leaderBefore`
-    // ở trên luôn đúng với role/mùa thực sự được duyệt.
-    where: { id: reportId, status: 'pending', roleId: report.roleId, playedOn: report.playedOn, value: report.value },
+    // Khoá lạc quan: chỉ ghi khi lần khai vẫn chờ duyệt và vẫn đúng role/ngày/giá trị/chỉ số
+    // phụ mod đã xem — người khai sửa chen vào thì không duyệt nhầm nội dung mới, và
+    // `leaderBefore` ở trên luôn đúng với role/mùa thực sự được duyệt.
+    where: {
+      id: reportId,
+      status: 'pending',
+      roleId: report.roleId,
+      playedOn: report.playedOn,
+      value: report.value,
+      extraValue: report.extraValue,
+    },
     data: {
       status: d.approve ? 'approved' : 'rejected',
       reviewedById: reviewer.id,
@@ -338,7 +373,7 @@ async function afterApprove(ctx: Ctx, report: ReviewableReport, seasonId: string
 /** DM người khai lý do bị từ chối. Discord lỗi chỉ ghi log — lần khai đã bị từ chối trong DB rồi. */
 async function notifyRejected(ctx: Ctx, report: ReviewableReport, reason: string): Promise<void> {
   const text =
-    `Lần khai ${report.role.nameVi} (${formatMetricValue(report.value, report.role.metricLabel)}) ` +
+    `Lần khai ${report.role.nameVi} (${formatReportValue(report.value, report.extraValue, report.role)}) ` +
     `ngày ${formatVnDay(dbToDateOnly(report.playedOn))} bị từ chối: ${reason}`;
   try {
     await ctx.notifier.sendDm(report.member.discordId, text);
@@ -354,6 +389,7 @@ async function notifyRejected(ctx: Ctx, report: ReviewableReport, reason: string
 const REPORT_SELECT = {
   id: true,
   value: true,
+  extraValue: true,
   playedOn: true,
   sessionId: true,
   note: true,
@@ -363,18 +399,34 @@ const REPORT_SELECT = {
   highlightChannelId: true,
   highlightMessageId: true,
   member: { select: { id: true, displayName: true } },
-  role: { select: { id: true, nameVi: true, icon: true, metricLabel: true } },
+  role: {
+    select: { id: true, nameVi: true, icon: true, metricLabel: true, maxPerGame: true, extraMetricLabel: true, extraMaxPerGame: true, extraPoints: true },
+  },
 } satisfies Prisma.StatReportSelect;
 
 type ReportRow = Prisma.StatReportGetPayload<{ select: typeof REPORT_SELECT }>;
 
-/** DTO của một dòng; `guildId` để dựng link tới tin Discord chứa highlight (hai cột phải cùng có). */
+/**
+ * DTO của một dòng; `guildId` để dựng link tới tin Discord chứa highlight (hai cột phải cùng
+ * có). `points` tính lúc đọc theo `extraPoints` hiện tại của role.
+ */
 function toReportDto(r: ReportRow, guildId: string): ReportDto {
   return {
     id: r.id,
     member: { id: r.member.id, displayName: r.member.displayName },
-    role: { id: r.role.id, nameVi: r.role.nameVi, icon: r.role.icon, metricLabel: r.role.metricLabel },
+    role: {
+      id: r.role.id,
+      nameVi: r.role.nameVi,
+      icon: r.role.icon,
+      metricLabel: r.role.metricLabel,
+      maxPerGame: r.role.maxPerGame,
+      extraMetricLabel: r.role.extraMetricLabel,
+      extraMaxPerGame: r.role.extraMaxPerGame,
+      extraPoints: r.role.extraPoints,
+    },
     value: r.value,
+    extraValue: r.extraValue,
+    points: reportPoints(r.value, r.extraValue, r.role),
     playedOn: dbToDateOnly(r.playedOn),
     sessionId: r.sessionId,
     note: r.note,

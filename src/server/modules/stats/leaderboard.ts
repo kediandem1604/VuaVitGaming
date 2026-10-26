@@ -1,9 +1,12 @@
 /**
  * Bảng xếp hạng theo role, top mỗi phe và Đại sảnh hoá thân (spec §4.6, §4.7).
  *
- * Điểm của một người ở một role trong một mùa = tổng giá trị các lần khai đã duyệt có
- * ngày chơi thuộc mùa đó — theo `playedOn`, không theo ngày duyệt, nên trận cuối tháng
- * duyệt đầu tháng sau vẫn tính cho mùa cũ. `games` = số lần khai đã duyệt. Xếp theo điểm
+ * Điểm của một người ở một role trong một mùa = tổng điểm các lần khai đã duyệt có ngày
+ * chơi thuộc mùa đó — theo `playedOn`, không theo ngày duyệt, nên trận cuối tháng duyệt
+ * đầu tháng sau vẫn tính cho mùa cũ. Điểm một lần khai = `value + extraValue × extraPoints`
+ * (spec chỉ số phụ §3) theo `extraPoints` HIỆN TẠI của role: admin đổi điểm là bảng của
+ * mùa chưa chốt đổi theo; mùa đã chốt giữ `role_titles.score`. `games` = số lần khai đã
+ * duyệt. Xếp theo điểm
  * giảm dần; hoà thì ai đạt mức điểm đó trước (lần duyệt gần nhất sớm hơn) xếp trên; vẫn
  * hoà thì theo id thành viên để thứ tự luôn xác định. Hạng 1..n liên tiếp, không đồng hạng.
  * Top mỗi phe (`getFactionTop`) xếp các cặp (người, role) của cùng phe theo điểm × hệ số
@@ -72,7 +75,10 @@ function compareAgg(x: Agg, y: Agg): number {
 
 /**
  * Gộp các lần khai đã duyệt có ngày chơi trong mùa theo (role, người) bằng MỘT truy vấn
- * GROUP BY; `roleId` để thu hẹp về một role. Bỏ ô 0 điểm; trả về đã sắp theo thứ tự xếp hạng.
+ * GROUP BY (tổng `value` và tổng `extraValue`); `roleId` để thu hẹp về một role. Điểm ô =
+ * Σ value + Σ extraValue × extraPoints hiện tại của role — thêm đúng một truy vấn lấy
+ * `extraPoints` của các role có ô dùng chỉ số phụ (không có ô nào thì không truy vấn). Bỏ ô
+ * 0 điểm; trả về đã sắp theo thứ tự xếp hạng.
  */
 async function aggregateSeason(db: DbClient, seasonId: string, roleId?: number): Promise<Agg[]> {
   const { first, last } = seasonDateRange(seasonId);
@@ -83,21 +89,34 @@ async function aggregateSeason(db: DbClient, seasonId: string, roleId?: number):
       ...(roleId === undefined ? {} : { roleId }),
       playedOn: { gte: dateOnlyToDb(first), lte: dateOnlyToDb(last) },
     },
-    _sum: { value: true },
+    _sum: { value: true, extraValue: true },
     _count: { _all: true },
     _max: { reviewedAt: true },
   });
+  const extraPoints = await extraPointsByRole(
+    db,
+    groups.filter((g) => (g._sum.extraValue ?? 0) > 0).map((g) => g.roleId),
+  );
   return groups
     .map((g) => ({
       roleId: g.roleId,
       memberId: g.memberId,
-      score: g._sum.value ?? 0,
+      // Role đã tắt chỉ số phụ (extraPoints null) mà lần khai còn extraValue: phần phụ tính 0.
+      score: (g._sum.value ?? 0) + (g._sum.extraValue ?? 0) * (extraPoints.get(g.roleId) ?? 0),
       games: g._count._all,
       // Lần khai đã duyệt luôn có reviewedAt (reviewReport ghi cùng lúc); phòng hờ dữ liệu lạ.
       lastApprovedAt: g._max.reviewedAt ?? new Date(0),
     }))
     .filter((g) => g.score > 0)
     .sort(compareAgg);
+}
+
+/** `extraPoints` hiện tại của các role được hỏi (một truy vấn); role không có chỉ số phụ không có trong map. */
+async function extraPointsByRole(db: DbClient, roleIds: number[]): Promise<Map<number, number>> {
+  const ids = [...new Set(roleIds)];
+  if (ids.length === 0) return new Map();
+  const roles = await db.role.findMany({ where: { id: { in: ids } }, select: { id: true, extraPoints: true } });
+  return new Map(roles.flatMap((r) => (r.extraPoints === null ? [] : [[r.id, r.extraPoints] as const])));
 }
 
 type MemberInfo = { displayName: string; avatarUrl: string | null };
@@ -218,10 +237,11 @@ function compareWeighted(x: WeightedAgg, y: WeightedAgg): number {
 
 /**
  * Top `limit` của mỗi phe trong một mùa (mặc định 3, tối đa 100 — lớn hơn bị cắt; không
- * nguyên hoặc < 1 → `VALIDATION`). Mỗi dòng là một cặp (người, role) có điểm thô > 0, điểm
- * xếp hạng = tổng giá trị thô × `rolePointWeight(role)`; một người có thể có nhiều dòng
- * trong cùng phe. Mọi role tính cho phe của chính nó, kể cả role chế độ đặc biệt và role
- * đã tắt (lịch sử). Đúng một truy vấn gộp lần khai (`aggregateSeason` không lọc role).
+ * nguyên hoặc < 1 → `VALIDATION`). Mỗi dòng là một cặp (người, role) có điểm mùa > 0, điểm
+ * xếp hạng = điểm mùa × `rolePointWeight(role)` (`value` của dòng là điểm mùa, đã gồm chỉ
+ * số phụ); một người có thể có nhiều dòng trong cùng phe. Mọi role tính cho phe của chính
+ * nó, kể cả role chế độ đặc biệt và role đã tắt (lịch sử). Đúng một truy vấn gộp lần khai
+ * (`aggregateSeason` không lọc role).
  */
 export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Promise<FactionTopDto> {
   checkSeasonId(seasonId);
@@ -231,7 +251,7 @@ export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Prom
   const aggs = await aggregateSeason(ctx.db, seasonId);
   const roles = await ctx.db.role.findMany({
     where: { id: { in: [...new Set(aggs.map((x) => x.roleId))] } },
-    select: { id: true, faction: true, maxPerGame: true, nameVi: true, icon: true, metricLabel: true },
+    select: { id: true, faction: true, maxPerGame: true, nameVi: true, icon: true, metricLabel: true, extraMetricLabel: true, extraPoints: true },
   });
   const roleById = new Map(roles.map((r) => [r.id, r]));
 
@@ -243,7 +263,15 @@ export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Prom
     const weight = rolePointWeight(role);
     perFaction[role.faction].push({
       ...agg,
-      role: { id: role.id, nameVi: role.nameVi, icon: role.icon, metricLabel: role.metricLabel, faction: role.faction },
+      role: {
+        id: role.id,
+        nameVi: role.nameVi,
+        icon: role.icon,
+        metricLabel: role.metricLabel,
+        extraMetricLabel: role.extraMetricLabel,
+        extraPoints: role.extraPoints,
+        faction: role.faction,
+      },
       weight,
       points: agg.score * weight,
     });

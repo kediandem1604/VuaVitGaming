@@ -24,6 +24,8 @@
 
 import { Prisma } from '@prisma/client';
 import type { Faction } from '../../../shared/api-types.js';
+import { formatSeasonScore } from '../../../shared/metric.js';
+import type { MetricRole } from '../../../shared/metric.js';
 import type { Ctx } from '../../ctx.js';
 import { chunkLines } from '../../lib/chunk.js';
 import { appError } from '../../lib/errors.js';
@@ -159,8 +161,11 @@ export async function closeSeason(ctx: Ctx, seasonId: string): Promise<{ titles:
 // Bảng tổng kết
 // ---------------------------------------------------------------------------
 
-/** Một dòng của bảng tổng kết: người hoá thân một role trong mùa. */
-export interface SeasonTitle {
+/**
+ * Một dòng của bảng tổng kết: người hoá thân một role trong mùa. Mang luôn phần `MetricRole`
+ * của role để đọc điểm đúng cách ("12 mạng chém" / "10 điểm" với role có chỉ số phụ).
+ */
+export interface SeasonTitle extends MetricRole {
   faction: Faction;
   roleName: string;
   displayName: string;
@@ -173,9 +178,10 @@ const FACTION_HEADING: Record<Faction, string> = { goose: '🪿 Phe Ngỗng', du
 /**
  * Văn bản tổng kết mùa, chia thành các phần ≤ 2000 ký tự cắt ở ranh giới dòng: tiêu đề
  * `📜 Tổng kết mùa MM/YYYY`, rồi từng phe theo thứ tự Ngỗng → Vịt → Phe thứ 3 (bỏ phe
- * không có ai) với một dòng `• {role}: {tên} ({điểm})` mỗi danh hiệu, giữ thứ tự `titles`
- * trong phe. Phần sau không lặp lại tiêu đề. Không có danh hiệu nào → đúng một phần
- * `📜 Tổng kết mùa MM/YYYY: chưa có ai hoá thân.`
+ * không có ai) với một dòng `• {role}: {tên} ({điểm mùa})` mỗi danh hiệu — điểm đọc bằng
+ * `formatSeasonScore` ("5 mạng đã giết", role có chỉ số phụ: "10 điểm") — giữ thứ tự
+ * `titles` trong phe. Phần sau không lặp lại tiêu đề. Không có danh hiệu nào → đúng một
+ * phần `📜 Tổng kết mùa MM/YYYY: chưa có ai hoá thân.`
  */
 export function buildSeasonSummary(seasonId: string, titles: SeasonTitle[]): string[] {
   const label = formatSeasonLabel(seasonId);
@@ -185,7 +191,7 @@ export function buildSeasonSummary(seasonId: string, titles: SeasonTitle[]): str
   for (const faction of FACTION_ORDER) {
     const own = titles.filter((t) => t.faction === faction);
     if (own.length === 0) continue;
-    lines.push(FACTION_HEADING[faction], ...own.map((t) => `• ${t.roleName}: ${t.displayName} (${t.score})`));
+    lines.push(FACTION_HEADING[faction], ...own.map((t) => `• ${t.roleName}: ${t.displayName} (${formatSeasonScore(t.score, t)})`));
   }
   return chunkLines(lines);
 }
@@ -194,10 +200,22 @@ export function buildSeasonSummary(seasonId: string, titles: SeasonTitle[]): str
 async function loadTitles(ctx: Ctx, seasonId: string): Promise<SeasonTitle[]> {
   const rows = await ctx.db.roleTitle.findMany({
     where: { seasonId },
-    select: { score: true, role: { select: { faction: true, nameVi: true } }, member: { select: { displayName: true } } },
+    select: {
+      score: true,
+      role: { select: { faction: true, nameVi: true, metricLabel: true, extraMetricLabel: true, extraPoints: true } },
+      member: { select: { displayName: true } },
+    },
     orderBy: [{ role: { sortOrder: 'asc' } }, { roleId: 'asc' }],
   });
-  return rows.map((r) => ({ faction: r.role.faction, roleName: r.role.nameVi, displayName: r.member.displayName, score: r.score }));
+  return rows.map((r) => ({
+    faction: r.role.faction,
+    roleName: r.role.nameVi,
+    displayName: r.member.displayName,
+    score: r.score,
+    metricLabel: r.role.metricLabel,
+    extraMetricLabel: r.role.extraMetricLabel,
+    extraPoints: r.role.extraPoints,
+  }));
 }
 
 /**

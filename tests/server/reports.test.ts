@@ -1,4 +1,4 @@
-import type { Member, Role } from '@prisma/client';
+import type { Member, Prisma, Role } from '@prisma/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../src/server/ctx.js';
 import { dateOnlyToDb } from '../../src/server/lib/time.js';
@@ -15,6 +15,7 @@ import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
 import { createMember, createSession, roleByKey } from '../helpers/factories.js';
 import type { FakeNotifier } from '../helpers/fakes.js';
+import { patchDelegate } from '../helpers/prisma.js';
 
 /** 12:00 ngày 10/10/2026 giờ VN: khai được các trận từ 07/10 đến 10/10. */
 const NOW = '2026-10-10T05:00:00Z';
@@ -40,22 +41,36 @@ type SubmitOverrides = {
   roleKey?: string;
   roleId?: number;
   value?: number;
+  extraValue?: number;
   playedOn?: string;
   sessionId?: number | null;
   note?: string | null;
 };
 
-/** Khai mặc định: Vịt, 3 mạng, ngày 10/10, không buổi, không ghi chú; ghi đè từng trường. */
+/** Khai mặc định: Vịt, 3 mạng, ngày 10/10, không buổi, không ghi chú, không chỉ số phụ; ghi đè từng trường. */
 async function submit(o: SubmitOverrides = {}) {
   const roleId = o.roleId ?? (o.roleKey ? (await roleByKey(testDb, o.roleKey)).id : duck.id);
   return submitReport(ctx, o.memberId ?? member.id, {
     roleId,
     value: o.value ?? 3,
     playedOn: o.playedOn ?? '2026-10-10',
+    ...(o.extraValue !== undefined ? { extraValue: o.extraValue } : {}),
     ...(o.sessionId !== undefined ? { sessionId: o.sessionId } : {}),
     ...(o.note !== undefined ? { note: o.note } : {}),
   });
 }
+
+/** Phần role trong `ReportDto` của một role không có chỉ số phụ. */
+const roleDtoOf = (role: Role): ReportDto['role'] => ({
+  id: role.id,
+  nameVi: role.nameVi,
+  icon: role.icon,
+  metricLabel: role.metricLabel,
+  maxPerGame: role.maxPerGame,
+  extraMetricLabel: role.extraMetricLabel,
+  extraMaxPerGame: role.extraMaxPerGame,
+  extraPoints: role.extraPoints,
+});
 
 const reportRow = (id: number) => testDb.statReport.findUniqueOrThrow({ where: { id } });
 const mod = (displayName = 'Mod') => createMember(testDb, { accessLevel: 'mod', displayName });
@@ -161,6 +176,186 @@ test('value bounds use role max', async () => {
   await expect(submit({ value: 20 })).resolves.toMatchObject({ value: 20 });
   await expect(submit({ value: 21 })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE', message: 'Giá trị phải từ 0 đến 20' });
   expect(await testDb.statReport.count()).toBe(5);
+});
+
+// ---------------------------------------------------------------------------
+// Chỉ số phụ (Ám sát: giết ×1, ám sát trong họp ×3)
+// ---------------------------------------------------------------------------
+
+test('an extra-metric report stores extraValue and the DTO carries points and the role limits', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  expect(assassin).toMatchObject({ maxPerGame: 15, extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraMaxPerGame: 2, extraPoints: 3 });
+
+  const r = await submit({ roleId: assassin.id, value: 4, extraValue: 2 });
+  expect(r).toMatchObject({ value: 4, extraValue: 2, status: 'pending' });
+  expect(await reportRow(r.id)).toMatchObject({ value: 4, extraValue: 2 });
+
+  const [dto] = await listMyReports(ctx, member.id);
+  expect(dto).toEqual({
+    id: r.id,
+    member: { id: member.id, displayName: 'An' },
+    role: {
+      id: assassin.id,
+      nameVi: 'Ám sát',
+      icon: '🗡️',
+      metricLabel: 'Số mạng đã giết',
+      maxPerGame: 15,
+      extraMetricLabel: 'Số lần ám sát trong cuộc họp',
+      extraMaxPerGame: 2,
+      extraPoints: 3,
+    },
+    value: 4,
+    extraValue: 2,
+    points: 10, // 4 + 2 × 3
+    playedOn: '2026-10-10',
+    sessionId: null,
+    note: null,
+    status: 'pending',
+    rejectReason: null,
+    createdAt: '2026-10-10T05:00:00.000Z',
+    highlightUrl: null,
+  });
+
+  // Không gửi extraValue → 0; chỉ chỉ số phụ cũng được (0 + 1 × 3).
+  const bare = await submit({ roleId: assassin.id, value: 5 });
+  expect(bare.extraValue).toBe(0);
+  const onlyExtra = await submit({ roleId: assassin.id, value: 0, extraValue: 1 });
+  expect((await listMyReports(ctx, member.id)).map((d) => [d.id, d.points])).toEqual([
+    [onlyExtra.id, 3],
+    [bare.id, 5],
+    [r.id, 10],
+  ]);
+
+  // Role không có chỉ số phụ: điểm = giá trị, ba trường phụ null, extraValue 0.
+  const plain = await submit({ value: 7 });
+  const plainDto = (await listMyReports(ctx, member.id)).find((d) => d.id === plain.id);
+  expect(plainDto).toMatchObject({ value: 7, extraValue: 0, points: 7, role: roleDtoOf(duck) });
+  expect(plainDto?.role).toEqual({
+    id: duck.id,
+    nameVi: 'Vịt',
+    icon: '🦆',
+    metricLabel: 'Số mạng đã giết',
+    maxPerGame: 15,
+    extraMetricLabel: null,
+    extraMaxPerGame: null,
+    extraPoints: null,
+  });
+
+  // `points` đọc extraPoints HIỆN TẠI của role: admin đổi điểm thì DTO đổi theo.
+  await testDb.role.update({ where: { id: assassin.id }, data: { extraPoints: 5 } });
+  expect((await listMyReports(ctx, member.id)).find((d) => d.id === r.id)).toMatchObject({ points: 14, role: { extraPoints: 5 } });
+});
+
+test('extraValue bounds: 0..extraMaxPerGame on an extra-metric role, exactly 0 elsewhere', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+
+  await expect(submit({ roleId: assassin.id, value: 4, extraValue: 3 })).rejects.toMatchObject({
+    code: 'VALUE_OUT_OF_RANGE',
+    message: 'Chỉ số phụ phải từ 0 đến 2',
+  });
+  await expect(submit({ roleId: assassin.id, extraValue: -1 })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE', message: 'Chỉ số phụ phải từ 0 đến 2' });
+  await expect(submit({ roleId: assassin.id, extraValue: 1.5 })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE' });
+  await expect(submit({ roleId: assassin.id, extraValue: Number.NaN })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE' });
+  // Sai kiểu là dữ liệu không hợp lệ.
+  await expect(submit({ roleId: assassin.id, extraValue: '1' as never })).rejects.toMatchObject({ code: 'VALIDATION' });
+  // Giá trị chính kiểm trước chỉ số phụ.
+  await expect(submit({ roleId: assassin.id, value: 16, extraValue: 9 })).rejects.toMatchObject({
+    code: 'VALUE_OUT_OF_RANGE',
+    message: 'Giá trị phải từ 0 đến 15',
+  });
+
+  // Biên hợp lệ.
+  await expect(submit({ roleId: assassin.id, value: 15, extraValue: 2 })).resolves.toMatchObject({ value: 15, extraValue: 2 });
+  await expect(submit({ roleId: assassin.id, value: 0, extraValue: 0 })).resolves.toMatchObject({ value: 0, extraValue: 0 });
+
+  // Giới hạn đọc từ role hiện tại.
+  await testDb.role.update({ where: { id: assassin.id }, data: { extraMaxPerGame: 4 } });
+  await expect(submit({ roleId: assassin.id, extraValue: 4 })).resolves.toMatchObject({ extraValue: 4 });
+  await expect(submit({ roleId: assassin.id, extraValue: 5 })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE', message: 'Chỉ số phụ phải từ 0 đến 4' });
+
+  // Role không có chỉ số phụ: extraValue phải là 0 (0 hoặc vắng mặt đều được).
+  await expect(submit({ extraValue: 1 })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Role này không có chỉ số phụ' });
+  await expect(submit({ roleKey: 'swordsman', extraValue: 2 })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Role này không có chỉ số phụ' });
+  await expect(submit({ extraValue: 0 })).resolves.toMatchObject({ extraValue: 0 });
+  await expect(submit()).resolves.toMatchObject({ extraValue: 0 });
+  expect(await testDb.statReport.count()).toBe(5);
+});
+
+test('editing keeps the stored extraValue unless sent, and re-checks it against the merged role', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  const r = await submit({ roleId: assassin.id, value: 4, extraValue: 2 });
+
+  // Không gửi extraValue → giữ nguyên; gửi thì đổi và kiểm giới hạn.
+  expect(await updateOwnReport(ctx, member.id, r.id, { value: 5 })).toMatchObject({ value: 5, extraValue: 2 });
+  expect(await updateOwnReport(ctx, member.id, r.id, { note: 'x' })).toMatchObject({ value: 5, extraValue: 2 });
+  expect(await updateOwnReport(ctx, member.id, r.id, { extraValue: 1 })).toMatchObject({ value: 5, extraValue: 1 });
+  await expect(updateOwnReport(ctx, member.id, r.id, { extraValue: 3 })).rejects.toMatchObject({
+    code: 'VALUE_OUT_OF_RANGE',
+    message: 'Chỉ số phụ phải từ 0 đến 2',
+  });
+  await expect(updateOwnReport(ctx, member.id, r.id, { extraValue: -1 })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE' });
+
+  // Đổi sang role không có chỉ số phụ khi còn extraValue > 0 → lỗi; gửi kèm extraValue 0 thì được.
+  await expect(updateOwnReport(ctx, member.id, r.id, { roleId: duck.id })).rejects.toMatchObject({
+    code: 'VALIDATION',
+    message: 'Role này không có chỉ số phụ',
+  });
+  expect(await reportRow(r.id)).toMatchObject({ roleId: assassin.id, value: 5, extraValue: 1 });
+  expect(await updateOwnReport(ctx, member.id, r.id, { roleId: duck.id, extraValue: 0 })).toMatchObject({ roleId: duck.id, value: 5, extraValue: 0 });
+
+  // Role thường không nhận extraValue > 0 khi sửa; đổi về Ám sát kèm extraValue thì được.
+  await expect(updateOwnReport(ctx, member.id, r.id, { extraValue: 1 })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Role này không có chỉ số phụ' });
+  expect(await updateOwnReport(ctx, member.id, r.id, { roleId: assassin.id, extraValue: 2 })).toMatchObject({ roleId: assassin.id, extraValue: 2 });
+  await expect(updateOwnReport(ctx, member.id, r.id, { extraValue: '2' as never })).rejects.toMatchObject({ code: 'VALIDATION' });
+  expect(await reportRow(r.id)).toMatchObject({ roleId: assassin.id, value: 5, extraValue: 2, status: 'pending' });
+});
+
+test('an extraValue edit between the mod reading and approving is refused', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  const m = await mod();
+  const r = await submit({ roleId: assassin.id, value: 4, extraValue: 1 });
+
+  // Người khai sửa chỉ số phụ ngay sau lần đọc đầu tiên của mod (role/ngày/giá trị chính không đổi).
+  let intercepted = false;
+  const restore = patchDelegate(testDb.statReport, 'findUnique', (original) =>
+    (async (args: Prisma.StatReportFindUniqueArgs) => {
+      const row = await original(args);
+      if (!intercepted) {
+        intercepted = true;
+        await updateOwnReport(ctx, member.id, r.id, { extraValue: 2 });
+      }
+      return row;
+    }) as never,
+  );
+  try {
+    await expect(reviewReport(ctx, asReviewer(m), r.id, { approve: true })).rejects.toMatchObject({
+      code: 'NOT_PENDING',
+      message: 'Lần khai vừa được sửa, hãy xem lại',
+    });
+  } finally {
+    restore();
+  }
+  expect(intercepted).toBe(true);
+  expect(await reportRow(r.id)).toMatchObject({ status: 'pending', value: 4, extraValue: 2, reviewedById: null });
+  expect(notifier.announcements).toEqual([]);
+
+  // Mod xem lại rồi duyệt: tính đúng số mới (4 + 2 × 3 = 10).
+  await reviewReport(ctx, asReviewer(m), r.id, { approve: true });
+  expect(await reportRow(r.id)).toMatchObject({ status: 'approved', extraValue: 2 });
+  expect(notifier.announcements).toEqual(['👑 An đã hoá thân Ám sát mùa 2026-10!']);
+});
+
+test('rejection DM of an extra-metric report reads "x + y"', async () => {
+  const assassin = await roleByKey(testDb, 'assassin');
+  const m = await mod();
+  const r = await submit({ roleId: assassin.id, value: 4, extraValue: 2, playedOn: '2026-10-09' });
+  await reviewReport(ctx, asReviewer(m), r.id, { approve: false, reason: 'Thiếu clip' });
+  expect(notifier.dms).toEqual([
+    {
+      discordId: member.discordId,
+      text: 'Lần khai Ám sát (4 mạng đã giết + 2 lần ám sát trong cuộc họp) ngày 09/10 bị từ chối: Thiếu clip',
+    },
+  ]);
 });
 
 test('inactive role rejected', async () => {
@@ -558,8 +753,10 @@ test('listMyReports: newest first, own reports only, limited', async () => {
     {
       id: r3.id,
       member: { id: member.id, displayName: 'An' },
-      role: { id: duck.id, nameVi: 'Vịt', icon: '🦆', metricLabel: 'Số mạng đã giết' },
+      role: roleDtoOf(duck),
       value: 1,
+      extraValue: 0,
+      points: 1,
       playedOn: '2026-10-10',
       sessionId: null,
       note: null,
@@ -571,8 +768,10 @@ test('listMyReports: newest first, own reports only, limited', async () => {
     {
       id: r2.id,
       member: { id: member.id, displayName: 'An' },
-      role: { id: swordsman.id, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém' },
+      role: roleDtoOf(swordsman),
       value: 5,
+      extraValue: 0,
+      points: 5,
       playedOn: '2026-10-10',
       sessionId: null,
       note: null,
@@ -584,8 +783,10 @@ test('listMyReports: newest first, own reports only, limited', async () => {
     {
       id: r1.id,
       member: { id: member.id, displayName: 'An' },
-      role: { id: duck.id, nameVi: 'Vịt', icon: '🦆', metricLabel: 'Số mạng đã giết' },
+      role: roleDtoOf(duck),
       value: 3,
+      extraValue: 0,
+      points: 3,
       playedOn: '2026-10-09',
       sessionId: s.id,
       note: 'Trận cuối',
@@ -596,6 +797,16 @@ test('listMyReports: newest first, own reports only, limited', async () => {
     },
   ];
   expect(list).toEqual(expected);
+  expect(expected[1]?.role).toEqual({
+    id: swordsman.id,
+    nameVi: 'Kiếm sĩ',
+    icon: '⚔️',
+    metricLabel: 'Số mạng chém',
+    maxPerGame: 15,
+    extraMetricLabel: null,
+    extraMaxPerGame: null,
+    extraPoints: null,
+  });
   expect(await listMyReports(ctx, member.id, 2)).toEqual(expected.slice(0, 2));
   expect(await listMyReports(ctx, other.id)).toHaveLength(1);
   expect(await listMyReports(ctx, 9999)).toEqual([]);
@@ -637,12 +848,15 @@ test('listPendingReports: oldest first across members, pending only', async () =
   await reviewReport(ctx, asReviewer(m), r1.id, { approve: true });
   await reviewReport(ctx, asReviewer(m), r3.id, { approve: false, reason: 'Trùng' });
   const pending = await listPendingReports(ctx);
+  const cuckoo = await roleByKey(testDb, 'cuckoo');
   expect(pending).toEqual([
     {
       id: r2.id,
       member: { id: other.id, displayName: 'Bình' },
-      role: { id: (await roleByKey(testDb, 'cuckoo')).id, nameVi: 'Cò gáy', icon: '🥚', metricLabel: 'Số trứng không bị đập' },
+      role: { ...roleDtoOf(cuckoo), nameVi: 'Cò gáy', icon: '🥚', metricLabel: 'Số trứng không bị đập', maxPerGame: 30 },
       value: 9,
+      extraValue: 0,
+      points: 9,
       playedOn: '2026-10-10',
       sessionId: null,
       note: 'Ba trứng',

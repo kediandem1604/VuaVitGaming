@@ -97,6 +97,17 @@ test('a pending report owner attaches a video and gets a Discord jump link', asy
   const r2 = await submit();
   await attach(r2.id, png());
   expect(notifier.highlights[1]).toMatchObject({ fileName: `highlight-${r2.id}.png` });
+
+  // Role có chỉ số phụ: chú thích đọc "x + y".
+  const assassin = await roleByKey(testDb, 'assassin');
+  const r3 = await submitReport(ctx, member.id, { roleId: assassin.id, value: 4, extraValue: 2, playedOn: '2026-10-09' });
+  const dto3 = await attach(r3.id, mp4());
+  expect(notifier.highlights[2]).toMatchObject({
+    roleLabel: '🗡️ Ám sát',
+    valueText: '4 mạng đã giết + 2 lần ám sát trong cuộc họp',
+    playedOnText: '09/10/2026',
+  });
+  expect(dto3).toMatchObject({ value: 4, extraValue: 2, points: 10 });
 });
 
 test("someone else's report → NOT_FOUND; approved/rejected report → NOT_PENDING", async () => {

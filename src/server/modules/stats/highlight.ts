@@ -16,7 +16,7 @@
 
 import type { ReportDto } from '../../../shared/api-types.js';
 import { highlightLimitMessage } from '../../../shared/highlight.js';
-import { formatMetricValue } from '../../../shared/metric.js';
+import { formatReportValue } from '../../../shared/metric.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dbToDateOnly } from '../../lib/time.js';
@@ -79,11 +79,12 @@ export async function attachHighlight(ctx: Ctx, memberId: number, reportId: numb
           memberId: true,
           status: true,
           value: true,
+          extraValue: true,
           playedOn: true,
           highlightChannelId: true,
           highlightMessageId: true,
           member: { select: { displayName: true } },
-          role: { select: { nameVi: true, icon: true, metricLabel: true } },
+          role: { select: { nameVi: true, icon: true, metricLabel: true, extraMetricLabel: true, extraPoints: true } },
         },
       })
     : null;
@@ -101,7 +102,8 @@ export async function attachHighlight(ctx: Ctx, memberId: number, reportId: numb
   const post: HighlightPost = {
     memberName: report.member.displayName,
     roleLabel: `${report.role.icon} ${report.role.nameVi}`,
-    valueText: formatMetricValue(report.value, report.role.metricLabel),
+    // Role có chỉ số phụ đọc "x + y" (spec chỉ số phụ §7).
+    valueText: formatReportValue(report.value, report.extraValue, report.role),
     playedOnText: toDmy(dbToDateOnly(report.playedOn)),
     fileName: `highlight-${report.id}.${kind.ext}`,
     data: upload.data,

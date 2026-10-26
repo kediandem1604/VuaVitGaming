@@ -240,8 +240,19 @@ test('submit returns the created report; mine lists newest first; own pending re
   expect(first).toEqual({
     id: first.id,
     member: { id: me.id, displayName: 'An' },
-    role: { id: swordsman.id, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém' },
+    role: {
+      id: swordsman.id,
+      nameVi: 'Kiếm sĩ',
+      icon: '⚔️',
+      metricLabel: 'Số mạng chém',
+      maxPerGame: 15,
+      extraMetricLabel: null,
+      extraMaxPerGame: null,
+      extraPoints: null,
+    },
     value: 5,
+    extraValue: 0,
+    points: 5,
     playedOn: '2026-10-22',
     sessionId: null,
     note: 'Trận cuối',
@@ -268,7 +279,7 @@ test('submit returns the created report; mine lists newest first; own pending re
   // Sửa lần khai của mình: trường vắng mặt giữ nguyên.
   const edited = await patch(`/api/reports/${first.id}`, sid, { value: 6, note: null });
   expect(edited.statusCode).toBe(200);
-  expect(edited.json<ReportDto>()).toEqual({ ...first, value: 6, note: null });
+  expect(edited.json<ReportDto>()).toEqual({ ...first, value: 6, points: 6, note: null });
   expect(await reportRow(first.id)).toMatchObject({ value: 6, note: null, status: 'pending', createdAt: new Date('2026-10-22T12:00:00Z') });
 
   // Của người khác → như không có; id hỏng → 400; body sai → 400 chung; vi phạm quy tắc → thông báo của service.
@@ -277,7 +288,7 @@ test('submit returns the created report; mine lists newest first; own pending re
   expect(foreign.json()).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
   expect((await patch('/api/reports/abc', sid, { value: 1 })).statusCode).toBe(400);
   expect((await patch('/api/reports/999', sid, { value: 1 })).statusCode).toBe(404);
-  for (const body of [undefined, { value: 'x' }, { extra: 1 }, { playedOn: '22/10/2026' }, { roleId: 0 }, { sessionId: 'x' }]) {
+  for (const body of [undefined, { value: 'x' }, { extra: 1 }, { playedOn: '22/10/2026' }, { roleId: 0 }, { sessionId: 'x' }, { extraValue: 'x' }, { extraValue: null }]) {
     const res = await patch(`/api/reports/${first.id}`, sid, body);
     expect(res.statusCode, JSON.stringify(body)).toBe(400);
     expect(res.json(), JSON.stringify(body)).toEqual(INVALID);
@@ -285,7 +296,71 @@ test('submit returns the created report; mine lists newest first; own pending re
   const over = await patch(`/api/reports/${first.id}`, sid, { value: 99 });
   expect(over.statusCode).toBe(400);
   expect(over.json()).toEqual(errorBody('VALUE_OUT_OF_RANGE', 'Giá trị phải từ 0 đến 15'));
+  // Kiếm sĩ không có chỉ số phụ: extraValue khác 0 là lỗi nghiệp vụ; 0 thì được.
+  const noExtra = await patch(`/api/reports/${first.id}`, sid, { extraValue: 1 });
+  expect(noExtra.statusCode).toBe(400);
+  expect(noExtra.json()).toEqual(errorBody('VALIDATION', 'Role này không có chỉ số phụ'));
+  expect((await patch(`/api/reports/${first.id}`, sid, { extraValue: 0 })).statusCode).toBe(200);
   expect((await reportRow(first.id)).value).toBe(6);
+});
+
+test('an extra-metric report over HTTP: extraValue in, points and role limits out; PATCH keeps the extra', async () => {
+  const { member: me, sid } = await memberWithSid({ displayName: 'An' });
+  const assassin = await roleByKey(testDb, 'assassin');
+
+  const res = await post('/api/reports', sid, { roleId: assassin.id, value: 4, extraValue: 2, playedOn: '2026-10-22' });
+  expect(res.statusCode, res.body).toBe(201);
+  const dto = res.json<ReportDto>();
+  expect(dto).toEqual({
+    id: dto.id,
+    member: { id: me.id, displayName: 'An' },
+    role: {
+      id: assassin.id,
+      nameVi: 'Ám sát',
+      icon: '🗡️',
+      metricLabel: 'Số mạng đã giết',
+      maxPerGame: 15,
+      extraMetricLabel: 'Số lần ám sát trong cuộc họp',
+      extraMaxPerGame: 2,
+      extraPoints: 3,
+    },
+    value: 4,
+    extraValue: 2,
+    points: 10,
+    playedOn: '2026-10-22',
+    sessionId: null,
+    note: null,
+    status: 'pending',
+    rejectReason: null,
+    createdAt: '2026-10-22T12:00:00.000Z',
+    highlightUrl: null,
+  });
+  expect(await reportRow(dto.id)).toMatchObject({ value: 4, extraValue: 2 });
+
+  // Không gửi extraValue → 0; vượt giới hạn → thông báo của service; sai kiểu → 400 chung.
+  const bare = await post('/api/reports', sid, { roleId: assassin.id, value: 1, playedOn: '2026-10-22' });
+  expect(bare.statusCode).toBe(201);
+  expect(bare.json<ReportDto>()).toMatchObject({ extraValue: 0, points: 1 });
+  const over = await post('/api/reports', sid, { roleId: assassin.id, value: 1, extraValue: 3, playedOn: '2026-10-22' });
+  expect(over.statusCode).toBe(400);
+  expect(over.json()).toEqual(errorBody('VALUE_OUT_OF_RANGE', 'Chỉ số phụ phải từ 0 đến 2'));
+  for (const extraValue of ['2', null, true]) {
+    const bad = await post('/api/reports', sid, { roleId: assassin.id, value: 1, extraValue, playedOn: '2026-10-22' });
+    expect(bad.statusCode, JSON.stringify(extraValue)).toBe(400);
+    expect(bad.json(), JSON.stringify(extraValue)).toEqual(INVALID);
+  }
+
+  // PATCH không gửi extraValue giữ nguyên; gửi thì đổi.
+  const edited = await patch(`/api/reports/${dto.id}`, sid, { value: 5 });
+  expect(edited.statusCode).toBe(200);
+  expect(edited.json<ReportDto>()).toEqual({ ...dto, value: 5, points: 11 });
+  const edited2 = await patch(`/api/reports/${dto.id}`, sid, { extraValue: 1 });
+  expect(edited2.json<ReportDto>()).toMatchObject({ value: 5, extraValue: 1, points: 8 });
+  expect(await reportRow(dto.id)).toMatchObject({ value: 5, extraValue: 1 });
+  expect((await get('/api/reports/mine', sid)).json<ReportDto[]>().map((r) => [r.id, r.points])).toEqual([
+    [bare.json<ReportDto>().id, 1],
+    [dto.id, 8],
+  ]);
 });
 
 test('submit validation: shape errors are generic, rule violations carry the service message', async () => {
@@ -507,7 +582,7 @@ test('faction top 3 API: three factions for the season, same season parsing as t
           memberId: me.id,
           displayName: 'An',
           avatarUrl: null,
-          role: { id: swordsman.id, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém', faction: 'duck' },
+          role: { id: swordsman.id, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém', extraMetricLabel: null, extraPoints: null, faction: 'duck' },
           value: 5,
           weight: 1,
           points: 5,
