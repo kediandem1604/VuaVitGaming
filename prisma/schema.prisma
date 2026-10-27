@@ -64,6 +64,8 @@ enum ReportStatus {
   pending
   approved
   rejected
+  /// Bị huỷ duyệt: chỉ từ `approved`, trạng thái cuối; CHECK bắt đủ `revoked_by`, `revoked_at`, `reject_reason`.
+  revoked
 }
 
 /// Nhóm hạng mục tri ân tính cho danh hiệu tháng: `mvp` (Khen → SMVP), `fun` (Vui → Vua tấu hài), `none` (không tính).
@@ -100,6 +102,7 @@ model Member {
   awards          Award[]
   statReports     StatReport[]      @relation("ReportMember")
   reviewedReports StatReport[]      @relation("ReportReviewer")
+  revokedReports  StatReport[]      @relation("ReportRevoker")
   roleTitles      RoleTitle[]
   badges          MemberBadge[]
 
@@ -317,7 +320,11 @@ model StatReport {
   status       ReportStatus @default(pending)
   reviewedById Int?         @map("reviewed_by")
   reviewedAt   DateTime?    @map("reviewed_at") @db.Timestamptz(3)
+  /// Lý do từ chối hoặc huỷ duyệt (bắt buộc ở cả hai trạng thái).
   rejectReason String?      @map("reject_reason")
+  /// Ai huỷ duyệt và lúc nào; `reviewedById`/`reviewedAt` (người duyệt ban đầu) giữ nguyên khi huỷ.
+  revokedById  Int?         @map("revoked_by")
+  revokedAt    DateTime?    @map("revoked_at") @db.Timestamptz(3)
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   /// Tin Discord chứa highlight (kênh + id tin); luôn ghi/xoá cùng nhau, cả hai null = không có highlight.
   highlightChannelId String? @map("highlight_channel_id")
@@ -327,6 +334,7 @@ model StatReport {
   role       Role         @relation(fields: [roleId], references: [id])
   session    GameSession? @relation(fields: [sessionId], references: [id])
   reviewedBy Member?      @relation("ReportReviewer", fields: [reviewedById], references: [id])
+  revokedBy  Member?      @relation("ReportRevoker", fields: [revokedById], references: [id])
 
   @@index([roleId, status, playedOn])
   @@index([memberId, createdAt])

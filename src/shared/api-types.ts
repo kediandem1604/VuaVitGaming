@@ -144,8 +144,8 @@ export interface EndOptionDto {
   preselected: boolean;
 }
 
-/** Trạng thái một lần khai điểm: chờ duyệt, đã duyệt, bị từ chối. */
-export type ReportStatus = 'pending' | 'approved' | 'rejected';
+/** Trạng thái một lần khai điểm: chờ duyệt, đã duyệt, bị từ chối, bị huỷ duyệt (từ `approved`, trạng thái cuối). */
+export type ReportStatus = 'pending' | 'approved' | 'rejected' | 'revoked';
 
 /**
  * Phần role kèm trong một lần khai: đủ để vẽ dòng, giới hạn ô nhập khi sửa (`maxPerGame`,

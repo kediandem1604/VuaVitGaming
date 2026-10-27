@@ -231,6 +231,20 @@ test('status chips are gold while pending, ok once approved and duck-soft when r
   expect(within(items[2] as HTMLElement).getByText('Bị từ chối')).toHaveClass('chip', 'bg-duck-soft');
 });
 
+test('a revoked report shows the "Bị huỷ duyệt" chip with its reason and cannot be edited', async () => {
+  stubFetch({
+    ...baseRoutes,
+    'GET /api/reports/mine': () => json(200, [report({ id: 4, status: 'revoked', value: 6, rejectReason: 'Clip không khớp' })]),
+  });
+  renderPage();
+
+  const [item] = (await screen.findAllByRole('listitem')) as [HTMLElement];
+  expect(within(item).getByText('Bị huỷ duyệt')).toHaveClass('chip', 'bg-duck-soft', 'text-night-950');
+  // Lý do hiện như lần khai bị từ chối.
+  expect(within(item).getByText('Lý do: Clip không khớp')).toBeInTheDocument();
+  expect(within(item).queryByRole('button', { name: 'Sửa' })).not.toBeInTheDocument();
+});
+
 test('the date input is bounded to the last three days and lists that day\'s sessions', async () => {
   const fetchMock = stubFetch(baseRoutes);
   renderPage();

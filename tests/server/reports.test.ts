@@ -97,6 +97,8 @@ test('submit stores a pending report with the clock time and ensures the season'
     reviewedById: null,
     reviewedAt: null,
     rejectReason: null,
+    revokedById: null,
+    revokedAt: null,
     createdAt: new Date(NOW), // từ đồng hồ của ctx, không phải giờ thật
     highlightChannelId: null,
     highlightMessageId: null,
@@ -610,6 +612,44 @@ test('concurrent reviews by two mods: exactly one wins, the other sees NOT_PENDI
     expect(row).toMatchObject({ status: 'rejected', reviewedById: m2.id, rejectReason: 'Trùng trận' });
     expect(notifier.dms).toHaveLength(1);
   }
+});
+
+test('a revoked report must carry who, when and why (CHECK)', async () => {
+  const m = await mod();
+  const a = await admin();
+  const r = await submit();
+  await reviewReport(ctx, asReviewer(m), r.id, { approve: true });
+  const revokedAt = new Date('2026-10-11T03:00:00Z');
+
+  // CHECK `stat_reports_revoked_complete`: `revoked` mà thiếu người huỷ, giờ huỷ hoặc lý do
+  // → Postgres 23514 (Prisma bọc trong P2010, mã gốc ở `meta.code`).
+  const checkViolation = { code: 'P2010', meta: { code: '23514' } };
+  await expect(
+    testDb.$executeRaw`UPDATE stat_reports SET status = 'revoked', revoked_at = ${revokedAt}, reject_reason = 'Clip không khớp' WHERE id = ${r.id}`,
+  ).rejects.toMatchObject(checkViolation);
+  await expect(
+    testDb.$executeRaw`UPDATE stat_reports SET status = 'revoked', revoked_by = ${a.id}, reject_reason = 'Clip không khớp' WHERE id = ${r.id}`,
+  ).rejects.toMatchObject(checkViolation);
+  await expect(
+    testDb.$executeRaw`UPDATE stat_reports SET status = 'revoked', revoked_by = ${a.id}, revoked_at = ${revokedAt} WHERE id = ${r.id}`,
+  ).rejects.toMatchObject(checkViolation);
+  // Ba lần hỏng ở trên không đụng tới lần khai.
+  expect(await reportRow(r.id)).toMatchObject({ status: 'approved', revokedById: null, revokedAt: null, rejectReason: null });
+
+  // Đủ cả ba → thành công; người duyệt ban đầu (`reviewed_by`/`reviewed_at`) giữ nguyên.
+  await testDb.$executeRaw`UPDATE stat_reports SET status = 'revoked', revoked_by = ${a.id}, revoked_at = ${revokedAt}, reject_reason = 'Clip không khớp' WHERE id = ${r.id}`;
+  expect(await reportRow(r.id)).toMatchObject({
+    status: 'revoked',
+    revokedById: a.id,
+    revokedAt,
+    rejectReason: 'Clip không khớp',
+    reviewedById: m.id,
+    reviewedAt: new Date(NOW),
+  });
+  // Quan hệ `revokedBy` đọc được người huỷ; lần khai bị huỷ không còn là `approved`.
+  const withRevoker = await testDb.statReport.findUniqueOrThrow({ where: { id: r.id }, include: { revokedBy: true } });
+  expect(withRevoker.revokedBy?.displayName).toBe('Admin');
+  expect(await testDb.statReport.count({ where: { status: 'approved' } })).toBe(0);
 });
 
 test('a report in a closed season can no longer be reviewed', async () => {

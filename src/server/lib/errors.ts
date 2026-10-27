@@ -23,6 +23,7 @@ export type ErrorCode =
   | 'SEASON_CLOSED'
   | 'RATE_LIMITED'
   | 'NOT_PENDING'
+  | 'NOT_APPROVED'
   | 'SELF_REVIEW'
   | 'REASON_REQUIRED'
   | 'INVALID_IMAGE'
@@ -51,6 +52,8 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   SEASON_CLOSED: { status: 409, message: 'Mùa này đã chốt' },
   RATE_LIMITED: { status: 429, message: 'Bạn đã khai quá 30 lần hôm nay' },
   NOT_PENDING: { status: 409, message: 'Lần khai này đã được xử lý' },
+  // Huỷ duyệt một lần khai không còn `approved` (đã bị huỷ, hoặc chưa từng duyệt).
+  NOT_APPROVED: { status: 409, message: 'Lần khai không còn ở trạng thái đã duyệt' },
   SELF_REVIEW: { status: 403, message: 'Mod không được tự duyệt lần khai của mình' },
   REASON_REQUIRED: { status: 400, message: 'Cần ghi lý do từ chối' },
   INVALID_IMAGE: { status: 400, message: 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB' },

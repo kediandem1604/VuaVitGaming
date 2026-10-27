@@ -61,6 +61,7 @@ const STATUS_CHIP: Record<ReportStatus, { text: string; className: string }> = {
   pending: { text: 'Chờ duyệt', className: 'bg-gold text-gold-ink' },
   approved: { text: 'Đã duyệt', className: 'bg-ok text-night-950' },
   rejected: { text: 'Bị từ chối', className: 'bg-duck-soft text-night-950' },
+  revoked: { text: 'Bị huỷ duyệt', className: 'bg-duck-soft text-night-950' },
 };
 
 /** Chip phe cạnh tên role: chữ trắng trên bản `-strong` (`goose`/`duck` gốc không đủ tương phản). */
@@ -726,7 +727,8 @@ function ReportItem({ report, highlight }: ReportItemProps) {
           <p className="font-bold break-words text-white">{formatReportValue(report.value, report.extraValue, report.role)}</p>
           {report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>}
           {report.note && <p className="text-sm text-night-200">{report.note}</p>}
-          {report.status === 'rejected' && report.rejectReason && (
+          {/* `rejectReason` là lý do của cả từ chối lẫn huỷ duyệt. */}
+          {(report.status === 'rejected' || report.status === 'revoked') && report.rejectReason && (
             <p className="text-sm text-duck-soft">Lý do: {report.rejectReason}</p>
           )}
           {report.highlightUrl && <HighlightLink href={report.highlightUrl} />}

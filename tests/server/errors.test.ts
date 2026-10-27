@@ -32,6 +32,8 @@ test('table spot checks', () => {
   expect(appError('NOT_MEMBER')).toMatchObject({ status: 403, message: 'Bạn cần vào server Discord trước' });
   expect(appError('RATE_LIMITED')).toMatchObject({ status: 429, message: 'Bạn đã khai quá 30 lần hôm nay' });
   expect(appError('SELF_REVIEW')).toMatchObject({ status: 403, message: 'Mod không được tự duyệt lần khai của mình' });
+  // Huỷ duyệt một lần khai không còn `approved` (đã bị huỷ, hoặc chưa từng duyệt).
+  expect(appError('NOT_APPROVED')).toMatchObject({ status: 409, message: 'Lần khai không còn ở trạng thái đã duyệt' });
   expect(appError('INVALID_IMAGE')).toMatchObject({
     status: 400,
     message: 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB',
