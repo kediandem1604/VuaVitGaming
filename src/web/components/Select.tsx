@@ -19,6 +19,9 @@
  *
  * `aria-activedescendant` đặt trên phần tử đang giữ focus (nút, hoặc ô tìm khi mở) để trình
  * đọc màn hình đọc dòng đang trỏ mà focus DOM không rời đi; danh sách lấy tên từ nhãn.
+ *
+ * Trong form (ô báo cáo người chơi ở trang Khai điểm) dùng `stacked`: nhãn trên, nút rộng hết ô,
+ * khung rộng bằng nút; `placeholder` là chữ mờ ở nút khi chưa chọn gì (`value` không khớp dòng nào).
  */
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
@@ -57,6 +60,13 @@ interface SelectProps<T extends string | number> {
   groups: SelectGroup<T>[];
   /** Có ô tìm trong khung. */
   search?: SelectSearch;
+  /** Chữ mờ hiện ở nút khi `value` chưa khớp dòng nào (ô chọn trong form chưa chọn gì). */
+  placeholder?: string;
+  /**
+   * Bố cục xếp dọc cho form: nhãn (kiểu nhãn form) nằm trên, nút rộng hết ô và khung rộng bằng nút
+   * ở mọi cỡ màn hình. Mặc định (hàng ngang) dành cho thanh lọc như Bảng xếp hạng.
+   */
+  stacked?: boolean;
   /** Class cho phần tử gốc (hàng nhãn + nút). */
   className?: string;
   /** Class thêm cho nút kích hoạt (vd bề rộng). */
@@ -92,7 +102,7 @@ function optionMatches<T extends string | number>(option: SelectOption<T>, query
   return [option.label, ...(option.searchText ?? [])].some((text) => normalizeText(text).includes(query));
 }
 
-export function Select<T extends string | number>({ label, value, onChange, groups, search, className, triggerClassName }: SelectProps<T>) {
+export function Select<T extends string | number>({ label, value, onChange, groups, search, placeholder, stacked = false, className, triggerClassName }: SelectProps<T>) {
   const id = useId();
   const labelId = `${id}-label`;
   const listId = `${id}-list`;
@@ -283,12 +293,12 @@ export function Select<T extends string | number>({ label, value, onChange, grou
   let flatIndex = -1;
 
   return (
-    <div ref={rootRef} className={cx('flex items-center gap-2 text-sm', className)} onBlur={onBlur}>
+    <div ref={rootRef} className={cx('flex text-sm', stacked ? 'flex-col gap-1' : 'items-center gap-2', className)} onBlur={onBlur}>
       {/* Bấm nhãn thì focus nút, như nhãn của `<select>` gốc. */}
-      <span id={labelId} className="shrink-0 font-bold text-night-300" onClick={() => triggerRef.current?.focus()}>
+      <span id={labelId} className={cx('shrink-0 font-bold', stacked ? 'text-night-200' : 'text-night-300')} onClick={() => triggerRef.current?.focus()}>
         {label}
       </span>
-      <div className="relative min-w-0 flex-1 sm:flex-none">
+      <div className={cx('relative min-w-0', !stacked && 'flex-1 sm:flex-none')}>
         <button
           ref={triggerRef}
           type="button"
@@ -298,22 +308,23 @@ export function Select<T extends string | number>({ label, value, onChange, grou
           aria-controls={open ? listId : undefined}
           aria-labelledby={labelId}
           aria-activedescendant={search ? undefined : activeId}
-          className={cx('field flex w-full items-center justify-between gap-2 py-1.5 pr-2 text-left sm:w-auto', open && 'border-gold', triggerClassName)}
+          className={cx('field flex w-full items-center justify-between gap-2 py-1.5 pr-2 text-left', !stacked && 'sm:w-auto', open && 'border-gold', triggerClassName)}
           onClick={() => (open ? close(true) : openList())}
           onKeyDown={onKeyDown}
           onKeyUp={onTriggerKeyUp}
         >
-          <span className="min-w-0 truncate">{selected?.label ?? ''}</span>
+          {selected ? <span className="min-w-0 truncate">{selected.label}</span> : <span className="min-w-0 truncate text-night-300">{placeholder ?? ''}</span>}
           <Chevron open={open} />
         </button>
 
         {open && (
           <div
             className={cx(
-              // Điện thoại: rộng bằng nút; từ `sm` rộng theo nội dung nhưng không hẹp hơn nút và không quá
-              // 20rem, bám mép trái hoặc phải của nút tuỳ nút ở nửa nào màn hình.
-              'popover absolute left-0 right-0 z-20 flex flex-col overflow-hidden sm:w-max sm:max-w-80 sm:min-w-full',
-              alignRight ? 'sm:left-auto' : 'sm:right-auto',
+              // Điện thoại (và bố cục dọc): rộng bằng nút; hàng ngang từ `sm` rộng theo nội dung nhưng
+              // không hẹp hơn nút và không quá 20rem, bám mép trái hoặc phải của nút tuỳ nút ở nửa nào màn hình.
+              'popover absolute left-0 right-0 z-20 flex flex-col overflow-hidden',
+              !stacked && 'sm:w-max sm:max-w-80 sm:min-w-full',
+              !stacked && (alignRight ? 'sm:left-auto' : 'sm:right-auto'),
               flipUp ? 'bottom-full mb-1' : 'top-full mt-1',
             )}
             // Tính lúc mở (xem `popupMaxHeight`).

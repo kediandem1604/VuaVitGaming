@@ -21,6 +21,13 @@ export const FACTION_SHORT_LABEL: Record<Faction, string> = {
   neutral: 'Phe thứ 3',
 };
 
+/** Tên phe đứng sau chữ "phe" trong một câu ("phe Ngỗng", "phe thứ 3") — khung báo cáo người chơi, khớp ghi chú/DM của server. */
+export const FACTION_NAME: Record<Faction, string> = {
+  goose: 'Ngỗng',
+  duck: 'Vịt',
+  neutral: 'thứ 3',
+};
+
 /** Chữ màu phe trên nền tối (`night-800`/`night-900`): bản `-soft` để đủ tương phản (spec §5.3). */
 export const FACTION_TEXT: Record<Faction, string> = {
   goose: 'text-goose-soft',

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
+import type { AccusationDto, ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
 import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, TITLES_QUERY_KEY } from '../../src/web/lib/queryKeys';
 import { ReviewsTab } from '../../src/web/pages/admin/ReviewsTab';
 
@@ -438,4 +438,160 @@ test('"Huỷ" after a failed rejection clears the error under the row', async ()
   fireEvent.click(within(first).getByRole('button', { name: 'Huỷ' }));
   await waitFor(() => expect(within(first).queryByRole('alert')).not.toBeInTheDocument());
   expect(within(first).getByRole('button', { name: 'Từ chối' })).toBeInTheDocument();
+});
+
+// ----- Báo cáo người chơi (spec điểm role §6) -----
+
+/** Báo cáo đang hiện ở hàng chờ: Vịt Mười chơi Dân phòng bắn Ngỗng Mười Một phe Ngỗng. */
+const accusation = (over: Partial<AccusationDto> = {}): AccusationDto => ({
+  id: 1,
+  status: 'pending',
+  accused: { id: 10, displayName: 'Vịt Mười' },
+  accusedRole: { id: 21, nameVi: 'Dân phòng', icon: '🔫', penaltyPoints: 3 },
+  victim: { id: 11, displayName: 'Ngỗng Mười Một' },
+  victimFaction: 'goose',
+  rejectReason: null,
+  ...over,
+});
+const ACCUSATION_LINE = 'Báo cáo: Vịt Mười (Dân phòng) bắn Ngỗng Mười Một — phe Ngỗng';
+const REVIEW_1 = 'POST /api/admin/reports/1/review';
+
+test('a queued report with an accusation shows the box and three buttons; "Duyệt" approves both', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: accusation() }), queue[1] as ReportDto]),
+    [REVIEW_1]: (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  renderTab();
+  const [first, second] = (await screen.findAllByRole('listitem')) as [HTMLElement, HTMLElement];
+
+  expect(first).toHaveTextContent(ACCUSATION_LINE);
+  expect(within(first).getByRole('button', { name: 'Duyệt' })).toBeInTheDocument();
+  expect(within(first).getByRole('button', { name: 'Duyệt, bỏ báo cáo' })).toBeInTheDocument();
+  expect(within(first).getByRole('button', { name: 'Từ chối' })).toBeInTheDocument();
+  // Không có báo cáo: như cũ, hai nút.
+  expect(second).not.toHaveTextContent('Báo cáo:');
+  expect(within(second).queryByRole('button', { name: 'Duyệt, bỏ báo cáo' })).not.toBeInTheDocument();
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt' }));
+  await waitFor(() => expect(posted).toEqual({ approve: true, accusation: 'approve' }));
+  await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(1));
+});
+
+test('"Duyệt, bỏ báo cáo" needs a reason, then approves the report while rejecting the accusation', async () => {
+  let posted: unknown = null;
+  const fetchMock = stubFetch({
+    [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: accusation() })]),
+    [REVIEW_1]: (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  renderTab();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt, bỏ báo cáo' }));
+  const reason = within(first).getByRole('textbox', { name: 'Lý do bỏ báo cáo' });
+  expect(reason).toHaveAttribute('maxlength', '200');
+  // Form lý do thay ba nút; chỉ còn nút xác nhận và Huỷ.
+  expect(within(first).queryByRole('button', { name: 'Từ chối' })).not.toBeInTheDocument();
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận duyệt, bỏ báo cáo' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Cần ghi lý do bỏ báo cáo');
+  expect(postCalls(fetchMock)).toHaveLength(0);
+
+  fireEvent.change(reason, { target: { value: '  Không phải Dân phòng  ' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận duyệt, bỏ báo cáo' }));
+  await waitFor(() => expect(posted).toEqual({ approve: true, accusation: 'reject', reason: 'Không phải Dân phòng' }));
+  await waitFor(() => expect(screen.queryByRole('listitem')).not.toBeInTheDocument());
+});
+
+test('"Huỷ" closes the drop-accusation form and brings the three buttons back', async () => {
+  const fetchMock = stubFetch({ [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: accusation() })]) });
+  renderTab();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt, bỏ báo cáo' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do bỏ báo cáo' }), { target: { value: 'Nhầm' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ' }));
+  expect(within(first).queryByRole('textbox')).not.toBeInTheDocument();
+  expect(within(first).getByRole('button', { name: 'Duyệt' })).toBeInTheDocument();
+  expect(within(first).getByRole('button', { name: 'Duyệt, bỏ báo cáo' })).toBeInTheDocument();
+  expect(within(first).getByRole('button', { name: 'Từ chối' })).toBeInTheDocument();
+  expect(postCalls(fetchMock)).toHaveLength(0);
+});
+
+test('"Từ chối" on a report with an accusation rejects both with the same reason', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: accusation() })]),
+    [REVIEW_1]: (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  renderTab();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Từ chối' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do từ chối' }), { target: { value: 'Khai gian' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận từ chối' }));
+  await waitFor(() => expect(posted).toEqual({ approve: false, reason: 'Khai gian', accusation: 'reject' }));
+});
+
+test('a hidden duplicate accusation shows no box, no note and only the two usual buttons, sending no accusation decision', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: null, accusationDuplicate: true })]),
+    [REVIEW_1]: (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  renderTab();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  expect(first).not.toHaveTextContent('Báo cáo');
+  expect(first).not.toHaveTextContent('trùng');
+  expect(within(first).getAllByRole('button').map((button) => button.textContent)).toEqual(['Duyệt', 'Từ chối']);
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt' }));
+  await waitFor(() => expect(posted).toEqual({ approve: true }));
+});
+
+test('recently approved: a penalty row reads "Bị báo cáo: …" with the "Bị trừ điểm" chip; a report with a settled accusation shows its outcome', async () => {
+  const penaltyRow = approvedReport({
+    id: 31,
+    member: { id: 10, displayName: 'Vịt Mười' },
+    role: reportRole(21, 'Dân phòng', '🔫', 'Số phát bắn trúng kẻ xấu', 1, { points: 5, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 1, penaltyPoints: 3 }),
+    source: 'accusation',
+    value: 0,
+    penaltyValue: 1,
+    points: -3,
+    note: 'Bị báo cáo: bắn Ngỗng Mười Một (phe Ngỗng)',
+    penaltyOf: accusation({ status: 'approved' }),
+  });
+  stubFetch({
+    [APPROVED_ROUTE]: () =>
+      json(200, [
+        penaltyRow,
+        approvedReport({ id: 32, bonusPoints: 1, points: 5, accusation: accusation({ status: 'approved' }) }),
+        approvedReport({ id: 33, accusation: accusation({ status: 'rejected', rejectReason: 'Không phải Dân phòng' }) }),
+      ]),
+  });
+  renderTab();
+
+  const [penalty, approvedAcc, rejectedAcc] = (await approvedItems()) as [HTMLElement, HTMLElement, HTMLElement];
+  expect(penalty).toHaveTextContent('Vịt Mười');
+  expect(penalty).toHaveTextContent('🔫 Dân phòng');
+  expect(within(penalty).getByText('Bị trừ điểm')).toHaveClass('chip');
+  expect(penalty).toHaveTextContent('Bị báo cáo: bắn Ngỗng Mười Một (Ngỗng) − 3 điểm');
+  expect(penalty).not.toHaveTextContent('phát bắn');
+  expect(within(penalty).getAllByText(/Bị báo cáo/)).toHaveLength(1);
+  // Mục trừ điểm vẫn huỷ duyệt riêng được.
+  expect(within(penalty).getByRole('button', { name: 'Huỷ duyệt' })).toBeInTheDocument();
+
+  expect(approvedAcc).toHaveTextContent(ACCUSATION_LINE);
+  expect(approvedAcc).toHaveTextContent('Báo cáo đúng · người báo cáo +1 điểm');
+  expect(approvedAcc).not.toHaveTextContent('bạn +1');
+  expect(rejectedAcc).toHaveTextContent('Báo cáo bị bác: Không phải Dân phòng');
+  expect(within(approvedAcc).queryByText('Bị trừ điểm')).not.toBeInTheDocument();
 });

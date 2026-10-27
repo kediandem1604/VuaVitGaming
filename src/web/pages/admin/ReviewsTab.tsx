@@ -13,21 +13,33 @@
  * Đóng form lý do (Huỷ / Thôi) cũng xoá lỗi của lần gửi hỏng. Duyệt một lần khai ở hàng chờ
  * cũng làm mới mục này.
  *
+ * Báo cáo người chơi (spec điểm role §6): lần khai trong hàng chờ kèm báo cáo đang hiện
+ * (`accusation`) có khung "Báo cáo: {người} ({role}) bắn {người bị bắn} — phe {phe}" và ba nút:
+ * "Duyệt" → `{approve: true, accusation: 'approve'}` (duyệt cả hai), "Duyệt, bỏ báo cáo" → form
+ * lý do rồi `{approve: true, accusation: 'reject', reason}`, "Từ chối" → `{approve: false, reason,
+ * accusation: 'reject'}`. Không có khung (không báo cáo, hoặc báo cáo trùng bị ẩn —
+ * `accusationDuplicate`, hàng chờ không ghi gì) thì thân gửi như cũ, không có `accusation`.
+ * "Đã duyệt gần đây" ghi khung kèm kết quả báo cáo (đúng / bị bác kèm lý do); mục trừ điểm do
+ * bị báo cáo (`source = 'accusation'`) mang chip "Bị trừ điểm" và đọc "Bị báo cáo: bắn {tên}
+ * ({phe}) − {điểm} điểm" (`lib/accusations.ts`), huỷ duyệt riêng được như mọi dòng.
+ *
  * Giao diện Sảnh đêm (spec §6 Quản trị): hai danh sách kiểu bảng (một panel, hàng kẻ
- * `night-700`, chữ 14px); Xác nhận từ chối / Xác nhận huỷ duyệt là `btn-danger`. Lần khai
- * có highlight kèm link "Xem highlight" (tin Discord, tab mới) để mod xem trước khi duyệt.
- * Dòng giá trị đọc qua `formatReportValue`: role có chỉ số phụ ra "4 mạng đã giết + 2 lần
- * ám sát trong cuộc họp" (spec chỉ số phụ §7).
+ * `night-700`, chữ 14px); Xác nhận từ chối / Xác nhận huỷ duyệt là `btn-danger` (xác nhận
+ * duyệt-bỏ-báo-cáo vẫn là duyệt nên `btn-primary`). Lần khai có highlight kèm link "Xem
+ * highlight" (tin Discord, tab mới) để mod xem trước khi duyệt. Dòng giá trị đọc qua
+ * `formatReportValue`: role có chỉ số phụ ra "4 mạng đã giết + 2 lần ám sát trong cuộc họp"
+ * (spec chỉ số phụ §7).
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type ReactNode } from 'react';
-import type { ReportDto, ReviewedReportDto } from '../../../shared/api-types';
+import type { AccusationDto, ReportDto, ReviewedReportDto } from '../../../shared/api-types';
 import { formatReportValue } from '../../../shared/metric';
 import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { HighlightLink } from '../../components/HighlightLink';
 import { QueryState } from '../../components/QueryState';
+import { PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../../lib/accusations';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatTime } from '../../lib/format';
 import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY, TITLES_QUERY_KEY } from '../../lib/queryKeys';
@@ -46,7 +58,14 @@ const LABEL_CLASS = 'text-sm font-bold text-night-200';
 const HINT_CLASS = 'text-sm text-night-300';
 const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
 
-type ReviewBody = { approve: true } | { approve: false; reason: string };
+/**
+ * Thân `POST /api/admin/reports/:id/review`: `accusation` chỉ gửi khi dòng có khung báo cáo
+ * (server bắt buộc khi có khung, từ chối `NOT_PENDING` khi gửi mà không có khung).
+ */
+type ReviewBody = { approve: true; accusation?: 'approve' } | { approve: true; accusation: 'reject'; reason: string } | { approve: false; reason: string; accusation?: 'reject' };
+
+/** Dòng hàng chờ đang hiện gì dưới ba nút: không gì / form lý do từ chối / form lý do bỏ báo cáo. */
+type PendingMode = 'idle' | 'rejecting' | 'dropping';
 
 export function ReviewsTab() {
   // Hai mục xếp dọc; khoảng cách giữa chúng do tabpanel của trang Quản trị (`gap-4`) quyết định.
@@ -133,8 +152,11 @@ function ListHeading({ id, title, query }: ListHeadingProps) {
 
 function PendingReport({ report }: { report: ReportDto }) {
   const queryClient = useQueryClient();
-  const [rejecting, setRejecting] = useState(false);
-  const reason = useReason('Cần ghi lý do từ chối');
+  const [mode, setMode] = useState<PendingMode>('idle');
+  const rejectReason = useReason('Cần ghi lý do từ chối');
+  const dropReason = useReason('Cần ghi lý do bỏ báo cáo');
+  /** Báo cáo đang hiện để mod quyết cùng lần khai; `null` = không có khung, thân gửi không có `accusation`. */
+  const accusation = report.accusation;
 
   const review = useMutation({
     mutationFn: (body: ReviewBody) => apiSend<undefined>('POST', `/api/admin/reports/${report.id}/review`, body),
@@ -149,7 +171,13 @@ function PendingReport({ report }: { report: ReportDto }) {
     },
   });
 
-  const error = reason.localError ?? (review.isError ? errorMessage(review.error) : null);
+  const error = rejectReason.localError ?? dropReason.localError ?? (review.isError ? errorMessage(review.error) : null);
+
+  // Đóng form lý do thì bỏ luôn lỗi của lần gửi hỏng, không để treo dưới dòng.
+  const closeForm = () => {
+    review.reset();
+    setMode('idle');
+  };
 
   return (
     <li className="flex flex-col gap-2 px-4 py-3 text-sm">
@@ -163,26 +191,39 @@ function PendingReport({ report }: { report: ReportDto }) {
         }
       />
 
-      {rejecting ? (
+      {mode === 'rejecting' ? (
         <ReasonForm
-          reason={reason}
+          reason={rejectReason}
           label="Lý do từ chối"
           submitLabel="Xác nhận từ chối"
           cancelLabel="Huỷ"
           pending={review.isPending}
-          onSubmit={(trimmed) => review.mutate({ approve: false, reason: trimmed })}
-          onCancel={() => {
-            // Đóng form thì bỏ luôn lỗi của lần gửi hỏng, không để treo dưới dòng.
-            review.reset();
-            setRejecting(false);
-          }}
+          // Lần khai bị từ chối thì báo cáo kèm theo cũng bị bác, cùng lý do.
+          onSubmit={(trimmed) => review.mutate({ approve: false, reason: trimmed, ...(accusation ? { accusation: 'reject' } : {}) })}
+          onCancel={closeForm}
+        />
+      ) : mode === 'dropping' ? (
+        <ReasonForm
+          reason={dropReason}
+          label="Lý do bỏ báo cáo"
+          submitLabel="Xác nhận duyệt, bỏ báo cáo"
+          submitClassName="btn-primary"
+          cancelLabel="Huỷ"
+          pending={review.isPending}
+          onSubmit={(trimmed) => review.mutate({ approve: true, accusation: 'reject', reason: trimmed })}
+          onCancel={closeForm}
         />
       ) : (
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-primary" disabled={review.isPending} onClick={() => review.mutate({ approve: true })}>
+          <button type="button" className="btn-primary" disabled={review.isPending} onClick={() => review.mutate({ approve: true, ...(accusation ? { accusation: 'approve' } : {}) })}>
             {review.isPending ? 'Đang gửi…' : 'Duyệt'}
           </button>
-          <button type="button" className="btn-secondary" disabled={review.isPending} onClick={() => setRejecting(true)}>
+          {accusation && (
+            <button type="button" className="btn-secondary" disabled={review.isPending} onClick={() => setMode('dropping')}>
+              Duyệt, bỏ báo cáo
+            </button>
+          )}
+          <button type="button" className="btn-secondary" disabled={review.isPending} onClick={() => setMode('rejecting')}>
             Từ chối
           </button>
         </div>
@@ -251,9 +292,12 @@ function ApprovedReport({ report }: { report: ReviewedReportDto }) {
 
 /**
  * Phần chung của một dòng (hàng chờ lẫn đã duyệt): tên người khai, `{icon} {role}`, ngày chơi,
- * giá trị, dòng phụ `meta` ("Khai lúc …" / "Duyệt bởi …"), ghi chú và link highlight.
+ * giá trị, dòng phụ `meta` ("Khai lúc …" / "Duyệt bởi …"), ghi chú, khung báo cáo kèm theo và
+ * link highlight. Mục trừ điểm do bị báo cáo: chip "Bị trừ điểm", dòng giá trị đọc theo báo cáo
+ * và không lặp ghi chú của server (cùng nội dung).
  */
 function ReportSummary({ report, meta }: { report: ReportDto; meta: ReactNode }) {
+  const penaltyOf = report.source === 'accusation' ? report.penaltyOf : null;
   return (
     <>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -261,16 +305,33 @@ function ReportSummary({ report, meta }: { report: ReportDto; meta: ReactNode })
         <span className="text-night-200">
           {report.role.icon} {report.role.nameVi}
         </span>
+        {report.source === 'accusation' && <span className="chip bg-duck-soft text-night-950">{PENALISED_CHIP}</span>}
         <time dateTime={report.playedOn} className="ml-auto text-night-300 tabular-nums">
           {formatDateLabel(report.playedOn)}
         </time>
       </div>
       {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
-      <p className="text-lg leading-tight font-extrabold break-words text-white">{formatReportValue(report, report.role)}</p>
+      <p className="text-lg leading-tight font-extrabold break-words text-white">{penaltyOf ? formatPenaltyLine(penaltyOf) : formatReportValue(report, report.role)}</p>
       <p className="text-night-300">{meta}</p>
-      {report.note && <p className="text-night-200">{report.note}</p>}
+      {report.note && !penaltyOf && <p className="text-night-200">{report.note}</p>}
+      {report.accusation && <AccusationBox accusation={report.accusation} />}
       {report.highlightUrl && <HighlightLink href={report.highlightUrl} />}
     </>
+  );
+}
+
+/**
+ * Khung báo cáo kèm lần khai: hàng chờ chỉ ghi dòng tóm tắt (mod quyết bằng ba nút bên dưới);
+ * "Đã duyệt gần đây" ghi thêm kết quả (đúng / bị bác kèm lý do / đã có người báo cáo trước).
+ */
+function AccusationBox({ accusation }: { accusation: AccusationDto }) {
+  return (
+    <div className="panel-inset flex flex-col gap-1">
+      <p className="font-bold break-words text-white">{formatAccusationLine(accusation)}</p>
+      {accusation.status !== 'pending' && (
+        <p className={accusation.status === 'approved' ? 'text-ok' : 'text-duck-soft'}>{accusationStatusText(accusation, 'mod')}</p>
+      )}
+    </div>
   );
 }
 
@@ -314,6 +375,8 @@ interface ReasonFormProps {
   reason: ReturnType<typeof useReason>;
   label: string;
   submitLabel: string;
+  /** Lớp nút xác nhận; mặc định `btn-danger` (từ chối, huỷ duyệt), "Duyệt, bỏ báo cáo" dùng `btn-primary`. */
+  submitClassName?: string;
   cancelLabel: string;
   pending: boolean;
   /** Nhận lý do đã cắt khoảng trắng, chỉ khi không rỗng. */
@@ -321,8 +384,8 @@ interface ReasonFormProps {
   onCancel: () => void;
 }
 
-/** Form lý do dùng chung cho Từ chối và Huỷ duyệt: nhãn, đếm ký tự /200, nút `btn-danger` xác nhận và nút đóng. */
-function ReasonForm({ reason, label, submitLabel, cancelLabel, pending, onSubmit, onCancel }: ReasonFormProps) {
+/** Form lý do dùng chung cho Từ chối, Huỷ duyệt và Duyệt-bỏ-báo-cáo: nhãn, đếm ký tự /200, nút xác nhận và nút đóng. */
+function ReasonForm({ reason, label, submitLabel, submitClassName = 'btn-danger', cancelLabel, pending, onSubmit, onCancel }: ReasonFormProps) {
   const reasonId = useId();
   return (
     <form
@@ -344,7 +407,7 @@ function ReasonForm({ reason, label, submitLabel, cancelLabel, pending, onSubmit
       </div>
       <textarea id={reasonId} className="field min-h-16" rows={2} maxLength={REASON_MAX} value={reason.value} onChange={(event) => reason.change(event.target.value)} />
       <div className="flex flex-wrap gap-2">
-        <button type="submit" className="btn-danger" disabled={pending}>
+        <button type="submit" className={submitClassName} disabled={pending}>
           {pending ? 'Đang gửi…' : submitLabel}
         </button>
         <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>

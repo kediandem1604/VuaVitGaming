@@ -9,11 +9,11 @@
  * tên role + chip phe; role đã chọn hiện thành thẻ nhỏ có nhân vật; chip trạng thái lần khai: chờ
  * duyệt `gold`, đã duyệt `ok`, bị từ chối `duck-soft`.
  *
- * Form chỉ chặn tại chỗ hai lỗi hiển nhiên (chưa chọn role, chưa nhập giá trị), chỉ số phụ
- * ngoài giới hạn và file highlight sai loại/quá cỡ; mọi quy tắc khác (giới hạn của chỉ số
- * chính, cửa sổ 3 ngày, mùa đã chốt…) do server báo và thông báo của server được hiện nguyên
- * văn. Lần khai vừa tạo/sửa được ghi thẳng vào cache danh sách (dùng DTO server trả về) thay
- * vì tải lại.
+ * Form chỉ chặn tại chỗ hai lỗi hiển nhiên (chưa chọn role, chưa nhập giá trị), chỉ số phụ và
+ * chỉ số phạt ngoài giới hạn, báo cáo người chơi thiếu trường, và file highlight sai loại/quá
+ * cỡ; mọi quy tắc khác (giới hạn của chỉ số chính, cửa sổ 3 ngày, mùa đã chốt…) do server báo
+ * và thông báo của server được hiện nguyên văn. Lần khai vừa tạo/sửa được ghi thẳng vào cache
+ * danh sách (dùng DTO server trả về) thay vì tải lại.
  *
  * Chỉ số phụ (spec chỉ số phụ §6–7): role có chỉ số phụ thì form khai và form sửa có ô thứ hai
  * (nhãn = `extraMetricLabel`, gợi ý "Tối đa N mỗi trận · +P điểm mỗi lần", mặc định 0) gửi
@@ -23,6 +23,14 @@
  * lần" khi `points ≠ 1`. Dòng của một lần khai đọc qua `formatReportValue` ("4 mạng đã giết +
  * 2 lần ám sát trong cuộc họp", "4 phát bắn trúng kẻ xấu − 1 phát bắn sai").
  *
+ * Báo cáo người chơi (spec điểm role §6): ô tick "Báo cáo người chơi" mở bốn ô chọn
+ * (`AccusationFields.tsx`); tick và đủ bốn trường thì gửi `accusation` kèm lần khai, bỏ tick thì
+ * không gửi trường này; form sửa tick sẵn theo báo cáo đã có, bỏ tick rồi Lưu gửi `accusation:
+ * null` (bỏ báo cáo). "Lần khai của tôi" ghi khung báo cáo + trạng thái của nó (chờ / đúng +1 /
+ * bị bác kèm lý do / đã có người báo cáo trước) và ghi chú khi báo cáo bị ẩn vì trùng; mục trừ
+ * điểm do bị báo cáo (`source = 'accusation'`) mang chip "Bị trừ điểm" và đọc "Bị báo cáo: bắn
+ * {tên} ({phe}) − {điểm} điểm" (`lib/accusations.ts`).
+ *
  * Highlight (spec highlight §3): ô file không bắt buộc, chỉ hiện khi tính năng dùng được;
  * gửi = tạo lần khai rồi mới tải file, lỗi tải file không huỷ lần khai. Danh sách có link
  * "Xem highlight" và nút Thêm/Đổi trên lần khai còn chờ duyệt (`ReportHighlight.tsx`).
@@ -30,14 +38,16 @@
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { Faction, HighlightConfigDto, ReportDto, ReportRoleDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
+import type { AccusationDto, AccusationInputDto, Faction, HighlightConfigDto, ReportDto, ReportRoleDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
 import { formatReportValue, hasExtraMetric, hasPenaltyMetric } from '../../shared/metric';
 import { normalizeText } from '../../shared/text';
 import { apiGet, apiSend, errorMessage } from '../api';
+import { AccusationFields, EMPTY_ACCUSATION_DRAFT, draftFromAccusation, parseAccusationDraft, type AccusationDraft } from '../components/AccusationFields';
 import { Character } from '../components/Character';
 import { EmptyState } from '../components/EmptyState';
 import { HighlightLink } from '../components/HighlightLink';
 import { QueryState } from '../components/QueryState';
+import { DUPLICATE_NOTE, PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../lib/accusations';
 import { cx } from '../lib/cx';
 import { FACTION_LABEL } from '../lib/factions';
 import { addDaysIso, formatDateLabel, formatTime, vnTodayIso } from '../lib/format';
@@ -90,6 +100,8 @@ interface ReportBody {
   playedOn: string;
   sessionId?: number;
   note?: string;
+  /** Báo cáo người chơi kèm theo; chỉ gửi khi ô tick "Báo cáo người chơi" đang bật. */
+  accusation?: AccusationInputDto;
 }
 
 interface ReportPatchBody {
@@ -100,10 +112,12 @@ interface ReportPatchBody {
   penaltyValue?: number;
   playedOn: string;
   note: string | null;
+  /** Báo cáo người chơi: object = đặt/thay, `null` = bỏ báo cáo đã có, không gửi = giữ nguyên. */
+  accusation?: AccusationInputDto | null;
 }
 
 /** Giá trị mặc định của ô chỉ số phụ và ô chỉ số phạt: 0 (hầu hết trận không có lần ám sát trong họp, không bắn sai). */
-const EXTRA_DEFAULT = '0';
+const OPTIONAL_METRIC_DEFAULT = '0';
 
 /**
  * Phần role mà form cần để vẽ ô chỉ số chính (gợi ý điểm), ô chỉ số phụ và ô chỉ số phạt:
@@ -203,7 +217,7 @@ export function ReportPage() {
             ) : (
               <ul className="flex flex-col gap-3">
                 {list.map((report) => (
-                  <ReportItem key={report.id} report={report} highlight={highlight} />
+                  <ReportItem key={report.id} report={report} roles={roles.data ?? []} highlight={highlight} />
                 ))}
               </ul>
             )
@@ -231,12 +245,15 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
 
   const [role, setRole] = useState<RoleDto | null>(null);
   const [value, setValue] = useState('');
-  const [extraValue, setExtraValue] = useState(EXTRA_DEFAULT);
-  const [penaltyValue, setPenaltyValue] = useState(EXTRA_DEFAULT);
+  const [extraValue, setExtraValue] = useState(OPTIONAL_METRIC_DEFAULT);
+  const [penaltyValue, setPenaltyValue] = useState(OPTIONAL_METRIC_DEFAULT);
   const [playedOn, setPlayedOn] = useState(today);
   const [sessionId, setSessionId] = useState('');
   const [note, setNote] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  /** Ô tick "Báo cáo người chơi" và bốn trường đang chọn (giữ cả khi bỏ tick, để tick lại không phải chọn lại). */
+  const [accusing, setAccusing] = useState(false);
+  const [accusation, setAccusation] = useState<AccusationDraft>(EMPTY_ACCUSATION_DRAFT);
   const [localError, setLocalError] = useState<string | null>(null);
   /** Đang ở bước tải file (sau khi lần khai đã tạo xong) — để nút gửi nói đúng việc đang làm. */
   const [uploading, setUploading] = useState(false);
@@ -274,9 +291,11 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
       queryClient.setQueryData<ReportDto[]>(MY_REPORTS_KEY, (current) => [report, ...(current ?? [])]);
       if (upload && highlightError === null) refreshReviewQueue(queryClient);
       setValue('');
-      setExtraValue(EXTRA_DEFAULT);
-      setPenaltyValue(EXTRA_DEFAULT);
+      setExtraValue(OPTIONAL_METRIC_DEFAULT);
+      setPenaltyValue(OPTIONAL_METRIC_DEFAULT);
       setNote('');
+      setAccusing(false);
+      setAccusation(EMPTY_ACCUSATION_DRAFT);
       clearFile();
     },
   });
@@ -307,6 +326,12 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
       setLocalError(penalty.error);
       return;
     }
+    // Bỏ tick thì không gửi báo cáo, dù các ô chọn còn giữ giá trị.
+    const accused = accusing ? parseAccusationDraft(accusation) : null;
+    if (accused?.error) {
+      setLocalError(accused.error);
+      return;
+    }
     // File sai loại/quá cỡ: không gửi gì cả; lời báo đang hiện được dựng lại để đọc lại (xem `refusals`).
     // Lối ra: nút "Bỏ file" rồi gửi không kèm highlight, hoặc chọn file khác.
     if (chosen?.problem) {
@@ -324,6 +349,7 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
         playedOn,
         ...(sessionId !== '' ? { sessionId: Number(sessionId) } : {}),
         ...(trimmedNote !== '' ? { note: trimmedNote } : {}),
+        ...(accused?.input ? { accusation: accused.input } : {}),
       },
       highlight: chosen?.upload ?? null,
     });
@@ -344,8 +370,8 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
         onSelect={(next) => {
           setRole(next);
           // Ô phụ/phạt của role trước không có nghĩa với role mới: về mặc định.
-          setExtraValue(EXTRA_DEFAULT);
-          setPenaltyValue(EXTRA_DEFAULT);
+          setExtraValue(OPTIONAL_METRIC_DEFAULT);
+          setPenaltyValue(OPTIONAL_METRIC_DEFAULT);
           touch();
         }}
       />
@@ -425,6 +451,21 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
         }}
       />
 
+      <AccusationFields
+        id={ids.accusation}
+        roles={roles}
+        checked={accusing}
+        onCheckedChange={(next) => {
+          setAccusing(next);
+          touch();
+        }}
+        draft={accusation}
+        onDraftChange={(next) => {
+          setAccusation(next);
+          touch();
+        }}
+      />
+
       {highlight && (
         <HighlightField
           id={ids.highlight}
@@ -471,6 +512,7 @@ function useFieldIds() {
     date: `${base}-date`,
     session: `${base}-session`,
     note: `${base}-note`,
+    accusation: `${base}-accusation`,
     highlight: `${base}-highlight`,
   };
 }
@@ -761,14 +803,18 @@ function NoteField({ id, value, onChange }: NoteFieldProps) {
 
 interface ReportItemProps {
   report: ReportDto;
+  /** Danh mục role của trang (cho ô "Role của họ" trong form sửa); rỗng khi chưa tải xong. */
+  roles: RoleDto[];
   /** `null` = highlight không dùng được: không có nút Thêm/Đổi (link "Xem highlight" vẫn hiện nếu đã có). */
   highlight: HighlightConfigDto | null;
 }
 
-function ReportItem({ report, highlight }: ReportItemProps) {
+function ReportItem({ report, roles, highlight }: ReportItemProps) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const chip = STATUS_CHIP[report.status];
+  /** Mục trừ điểm do bị báo cáo: dòng giá trị đọc theo báo cáo, không lặp ghi chú của server (cùng nội dung). */
+  const penaltyOf = report.source === 'accusation' ? report.penaltyOf : null;
 
   return (
     <li className="panel flex flex-col gap-2">
@@ -777,19 +823,21 @@ function ReportItem({ report, highlight }: ReportItemProps) {
           {report.role.icon} {report.role.nameVi}
         </span>
         <span className={cx('chip', chip.className)}>{chip.text}</span>
+        {report.source === 'accusation' && <span className="chip bg-duck-soft text-night-950">{PENALISED_CHIP}</span>}
         <time dateTime={report.playedOn} className="ml-auto text-sm text-night-300 tabular-nums">
           {formatDateLabel(report.playedOn)}
         </time>
       </div>
 
       {editing ? (
-        <EditForm report={report} onDone={() => setEditing(false)} />
+        <EditForm report={report} roles={roles} onDone={() => setEditing(false)} />
       ) : (
         <>
           {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
-          <p className="font-bold break-words text-white">{formatReportValue(report, report.role)}</p>
+          <p className="font-bold break-words text-white">{penaltyOf ? formatPenaltyLine(penaltyOf) : formatReportValue(report, report.role)}</p>
           {report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>}
-          {report.note && <p className="text-sm text-night-200">{report.note}</p>}
+          {report.note && !penaltyOf && <p className="text-sm text-night-200">{report.note}</p>}
+          {report.accusation && <MyAccusation accusation={report.accusation} duplicate={report.accusationDuplicate} />}
           {/* `rejectReason` là lý do của cả từ chối lẫn huỷ duyệt. */}
           {(report.status === 'rejected' || report.status === 'revoked') && report.rejectReason && (
             <p className="text-sm text-duck-soft">Lý do: {report.rejectReason}</p>
@@ -821,11 +869,29 @@ function ReportItem({ report, highlight }: ReportItemProps) {
 }
 
 /**
- * Sửa giá trị (và chỉ số phụ/phạt nếu role có) / ngày / ghi chú của lần khai còn chờ duyệt (PATCH);
- * role và buổi giữ nguyên. Ô chính giới hạn theo `role.maxPerGame`, ô phụ theo `extraMaxPerGame`,
- * ô phạt theo `penaltyMaxPerGame`.
+ * Khung báo cáo của chính mình dưới một lần khai: dòng "Báo cáo: … — phe …", trạng thái (chờ duyệt /
+ * đúng +1 / bị bác kèm lý do / đã có người báo cáo trước — `accusationStatusText`) và ghi chú khi
+ * báo cáo bị ẩn khỏi hàng chờ vì trùng vụ với báo cáo sớm hơn.
  */
-function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void }) {
+function MyAccusation({ accusation, duplicate }: { accusation: AccusationDto; duplicate: boolean }) {
+  const settled = accusation.status === 'rejected' || accusation.status === 'superseded';
+  return (
+    <div className="panel-inset flex flex-col gap-1 text-sm">
+      <p className="font-bold break-words text-white">{formatAccusationLine(accusation)}</p>
+      <p className={settled ? 'text-duck-soft' : accusation.status === 'approved' ? 'text-ok' : 'text-night-300'}>{accusationStatusText(accusation)}</p>
+      {duplicate && <p className="text-night-300">{DUPLICATE_NOTE}</p>}
+    </div>
+  );
+}
+
+/**
+ * Sửa giá trị (và chỉ số phụ/phạt nếu role có) / ngày / ghi chú / báo cáo người chơi của lần khai
+ * còn chờ duyệt (PATCH); role và buổi giữ nguyên. Ô chính giới hạn theo `role.maxPerGame`, ô phụ
+ * theo `extraMaxPerGame`, ô phạt theo `penaltyMaxPerGame`. Ô báo cáo tick sẵn khi lần khai đã có
+ * báo cáo: bỏ tick → `accusation: null` (bỏ báo cáo); tick → gửi bốn trường (server giữ báo cáo cũ
+ * nếu không đổi gì); chưa có và không tick → không gửi trường này.
+ */
+function EditForm({ report, roles, onDone }: { report: ReportDto; roles: RoleDto[]; onDone: () => void }) {
   const queryClient = useQueryClient();
   const ids = useFieldIds();
   const today = vnTodayIso();
@@ -834,6 +900,8 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
   const [penaltyValue, setPenaltyValue] = useState(String(report.penaltyValue));
   const [playedOn, setPlayedOn] = useState(report.playedOn);
   const [note, setNote] = useState(report.note ?? '');
+  const [accusing, setAccusing] = useState(report.accusation !== null);
+  const [accusation, setAccusation] = useState<AccusationDraft>(report.accusation ? draftFromAccusation(report.accusation) : EMPTY_ACCUSATION_DRAFT);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const save = useMutation({
@@ -862,6 +930,11 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
       setLocalError(penalty.error);
       return;
     }
+    const accused = accusing ? parseAccusationDraft(accusation) : null;
+    if (accused?.error) {
+      setLocalError(accused.error);
+      return;
+    }
     setLocalError(null);
     const trimmedNote = note.trim();
     save.mutate({
@@ -870,6 +943,8 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
       ...(hasPenaltyMetric(report.role) ? { penaltyValue: penalty.value } : {}),
       playedOn,
       note: trimmedNote === '' ? null : trimmedNote,
+      // Đang tick → đặt/thay; đã có mà bỏ tick → bỏ (`null`); chưa có và không tick → giữ nguyên (không gửi).
+      ...(accused?.input ? { accusation: accused.input } : report.accusation !== null ? { accusation: null } : {}),
     });
   };
 
@@ -921,6 +996,20 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
       )}
       <DateField id={ids.date} today={today} value={playedOn} onChange={setPlayedOn} />
       <NoteField id={ids.note} value={note} onChange={setNote} />
+      <AccusationFields
+        id={ids.accusation}
+        roles={roles}
+        checked={accusing}
+        onCheckedChange={(next) => {
+          setAccusing(next);
+          setLocalError(null);
+        }}
+        draft={accusation}
+        onDraftChange={(next) => {
+          setAccusation(next);
+          setLocalError(null);
+        }}
+      />
       <div className="flex flex-wrap gap-2">
         <button type="submit" className="btn-primary" disabled={save.isPending}>
           {save.isPending ? 'Đang lưu…' : 'Lưu'}

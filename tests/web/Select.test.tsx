@@ -308,3 +308,27 @@ test('the popup gets an inline max-height sized to the space available in its di
   expect(px).toBeGreaterThan(240);
   expect(px).toBeLessThan(300);
 });
+
+test('with no option matching the value, the trigger shows the placeholder in muted text (and nothing without one)', () => {
+  render(<Select label="Người bị báo cáo" value={0} onChange={vi.fn()} groups={GROUPS} placeholder="Chọn người…" />);
+  const trigger = combobox('Người bị báo cáo');
+  expect(trigger).toHaveTextContent('Chọn người…');
+  expect(within(trigger).getByText('Chọn người…').className).toContain('text-night-300');
+  cleanup();
+
+  render(<Select label="Role" value={0} onChange={vi.fn()} groups={GROUPS} />);
+  expect(combobox('Role')).toHaveTextContent('');
+});
+
+test('stacked: the label sits above a full-width trigger whose popup spans the trigger on every breakpoint', () => {
+  render(<Select label="Role của họ" value={61} onChange={vi.fn()} groups={GROUPS} stacked />);
+  const trigger = combobox('Role của họ');
+  const root = trigger.closest('div')?.parentElement as HTMLElement;
+  expect(root.className).toContain('flex-col');
+  expect(root.className).not.toContain('items-center');
+  expect(trigger.className).toContain('w-full');
+  expect(trigger.className).not.toContain('sm:w-auto');
+  fireEvent.click(trigger);
+  const popup = listbox().parentElement as HTMLElement;
+  expect(popup.className).not.toContain('sm:w-max');
+});
