@@ -8,8 +8,10 @@
  * các mùa chưa chốt, mới duyệt trước, tối đa 50 — mỗi dòng ghi "Duyệt bởi {tên} lúc {giờ}
  * {ngày}" và có nút Huỷ duyệt mở form lý do cùng khuôn với form từ chối (`ReasonForm`).
  * Huỷ xong, dòng rời danh sách ngay (sửa cache) và bảng xếp hạng, Top 3 mỗi phe, Đại sảnh,
- * trang thành viên được làm mới; `NOT_APPROVED` (người khác vừa huỷ) → hiện lời nhắn và
- * tải lại danh sách. Duyệt một lần khai ở hàng chờ cũng làm mới mục này.
+ * trang thành viên, danh hiệu ở Hồ sơ, danh sách lần khai của mình được làm mới; `NOT_APPROVED`
+ * (người khác vừa huỷ) hay `SEASON_CLOSED` (mùa vừa chốt) → hiện lời nhắn và tải lại danh sách.
+ * Đóng form lý do (Huỷ / Thôi) cũng xoá lỗi của lần gửi hỏng. Duyệt một lần khai ở hàng chờ
+ * cũng làm mới mục này.
  *
  * Giao diện Sảnh đêm (spec §6 Quản trị): hai danh sách kiểu bảng (một panel, hàng kẻ
  * `night-700`, chữ 14px); Xác nhận từ chối / Xác nhận huỷ duyệt là `btn-danger`. Lần khai
@@ -28,11 +30,18 @@ import { HighlightLink } from '../../components/HighlightLink';
 import { QueryState } from '../../components/QueryState';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatTime } from '../../lib/format';
+import { TITLES_QUERY_KEY } from '../ProfilePage';
+import { MY_REPORTS_KEY } from '../ReportPage';
 
 export const PENDING_REPORTS_KEY = ['admin', 'reports', 'pending'] as const;
 export const APPROVED_REPORTS_KEY = ['admin', 'reports', 'approved'] as const;
-/** Cache đọc điểm đã duyệt — làm mới sau khi huỷ duyệt (khớp tiền tố: mọi role, mùa, thành viên). */
-const SCORE_QUERY_KEYS = [['leaderboard'], ['leaderboard-factions'], ['hall'], ['member']] as const;
+/**
+ * Cache đọc điểm đã duyệt — làm mới sau khi huỷ duyệt (khớp tiền tố: mọi role, mùa, thành viên),
+ * kèm danh hiệu ở Hồ sơ và danh sách lần khai của chính mình (mod tự huỷ lần khai của mình).
+ */
+const SCORE_QUERY_KEYS = [['leaderboard'], ['leaderboard-factions'], ['hall'], ['member'], TITLES_QUERY_KEY, MY_REPORTS_KEY] as const;
+/** Mã 409 cho biết danh sách "Đã duyệt gần đây" đang xem đã cũ (người khác vừa huỷ, hoặc mùa vừa chốt). */
+const STALE_APPROVED_CODES = new Set(['NOT_APPROVED', 'SEASON_CLOSED']);
 const REASON_MAX = 200;
 
 const LABEL_CLASS = 'text-sm font-bold text-night-200';
@@ -164,7 +173,11 @@ function PendingReport({ report }: { report: ReportDto }) {
           cancelLabel="Huỷ"
           pending={review.isPending}
           onSubmit={(trimmed) => review.mutate({ approve: false, reason: trimmed })}
-          onCancel={() => setRejecting(false)}
+          onCancel={() => {
+            // Đóng form thì bỏ luôn lỗi của lần gửi hỏng, không để treo dưới dòng.
+            review.reset();
+            setRejecting(false);
+          }}
         />
       ) : (
         <div className="flex flex-wrap gap-2">
@@ -190,12 +203,12 @@ function ApprovedReport({ report }: { report: ReviewedReportDto }) {
     mutationFn: (trimmed: string) => apiSend<undefined>('POST', `/api/admin/reports/${report.id}/revoke`, { reason: trimmed }),
     onSuccess: () => {
       queryClient.setQueryData<ReviewedReportDto[]>(APPROVED_REPORTS_KEY, (current) => current?.filter((item) => item.id !== report.id));
-      // Điểm mùa, Top 3 mỗi phe, Đại sảnh và trang thành viên không còn tính lần khai này.
+      // Điểm mùa, Top 3 mỗi phe, Đại sảnh, trang thành viên, danh hiệu và lần khai của mình không còn tính lần khai này.
       for (const queryKey of SCORE_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey });
     },
     onError: (error) => {
-      // Người khác vừa huỷ (lần khai không còn `approved`): danh sách hiện tại đã cũ.
-      if (error instanceof ApiError && error.code === 'NOT_APPROVED') void queryClient.invalidateQueries({ queryKey: APPROVED_REPORTS_KEY });
+      // Người khác vừa huỷ (lần khai không còn `approved`) hoặc mùa vừa chốt: danh sách hiện tại đã cũ.
+      if (error instanceof ApiError && STALE_APPROVED_CODES.has(error.code)) void queryClient.invalidateQueries({ queryKey: APPROVED_REPORTS_KEY });
     },
   });
 
@@ -220,7 +233,11 @@ function ApprovedReport({ report }: { report: ReviewedReportDto }) {
           cancelLabel="Thôi"
           pending={revoke.isPending}
           onSubmit={(trimmed) => revoke.mutate(trimmed)}
-          onCancel={() => setRevoking(false)}
+          onCancel={() => {
+            // Đóng form thì bỏ luôn lỗi của lần gửi hỏng, không để treo dưới dòng.
+            revoke.reset();
+            setRevoking(false);
+          }}
         />
       ) : (
         <div className="flex flex-wrap gap-2">

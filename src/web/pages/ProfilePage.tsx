@@ -21,7 +21,8 @@ import { RoleCard } from '../components/RoleCard';
 import { ME_QUERY_KEY, useCurrentMember } from '../hooks/useMe';
 import { memberPath } from '../lib/links';
 
-const TITLES_QUERY_KEY = ['me', 'titles'] as const;
+/** Cache các role đang hoá thân mùa này — tab Duyệt điểm làm mới sau khi huỷ duyệt. */
+export const TITLES_QUERY_KEY = ['me', 'titles'] as const;
 
 interface ProfilePatch {
   email?: string | null;

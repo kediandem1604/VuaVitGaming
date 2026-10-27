@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, expect, test, vi } from 'vitest';
 import type { ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
 import { APPROVED_REPORTS_KEY, ReviewsTab } from '../../src/web/pages/admin/ReviewsTab';
+import { TITLES_QUERY_KEY } from '../../src/web/pages/ProfilePage';
+import { MY_REPORTS_KEY } from '../../src/web/pages/ReportPage';
 
 /** Phần role của một lần khai; `extra` = ba trường chỉ số phụ (mặc định không có). */
 const reportRole = (
@@ -286,6 +288,9 @@ test('revoking posts the trimmed reason, removes the row and refreshes leaderboa
   for (const key of ['leaderboard', 'leaderboard-factions', 'hall', 'member']) {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
   }
+  // Danh hiệu ở Hồ sơ và danh sách lần khai của người khai cũng không còn tính lần này.
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: TITLES_QUERY_KEY });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_REPORTS_KEY });
 });
 
 test('NOT_APPROVED shows the server message and refetches the list', async () => {
@@ -308,6 +313,28 @@ test('NOT_APPROVED shows the server message and refetches the list', async () =>
   await waitFor(() => expect(listCalls).toBe(2));
   await waitFor(() => expect(within(approvedSection()).getAllByRole('listitem')).toHaveLength(1));
   expect(within(approvedSection()).getByRole('listitem')).toHaveTextContent('Vịt Mười');
+});
+
+test('SEASON_CLOSED shows the server message and refetches the list', async () => {
+  let listCalls = 0;
+  stubFetch({
+    [APPROVED_ROUTE]: () => {
+      listCalls += 1;
+      // Mùa vừa chốt trong lúc danh sách đang mở: lần tải lại không còn dòng nào.
+      return json(200, listCalls === 1 ? approved : []);
+    },
+    'POST /api/admin/reports/21/revoke': () => json(409, { error: { code: 'SEASON_CLOSED', message: 'Mùa đã chốt, không huỷ duyệt được nữa' } }),
+  });
+  renderTab();
+  const first = (await approvedItems())[0] as HTMLElement;
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ duyệt' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do huỷ duyệt' }), { target: { value: 'Khai gian' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Mùa đã chốt, không huỷ duyệt được nữa');
+  await waitFor(() => expect(listCalls).toBe(2));
+  expect(await within(approvedSection()).findByText('Chưa có lần khai nào được duyệt trong mùa đang mở')).toBeInTheDocument();
 });
 
 test('approving from the queue refreshes the recently approved list', async () => {
@@ -342,4 +369,40 @@ test('"Thôi" closes the revoke form without sending', async () => {
   expect(within(first).queryByRole('textbox')).not.toBeInTheDocument();
   expect(within(first).getByRole('button', { name: 'Huỷ duyệt' })).toBeInTheDocument();
   expect(postCalls(fetchMock)).toHaveLength(0);
+});
+
+test('"Thôi" after a failed revoke clears the error under the row', async () => {
+  stubFetch({
+    [APPROVED_ROUTE]: () => json(200, approved),
+    'POST /api/admin/reports/21/revoke': () => json(500, { error: { code: 'INTERNAL', message: 'Lỗi máy chủ' } }),
+  });
+  renderTab();
+  const first = (await approvedItems())[0] as HTMLElement;
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ duyệt' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do huỷ duyệt' }), { target: { value: 'Khai gian' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Lỗi máy chủ');
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Thôi' }));
+  await waitFor(() => expect(within(first).queryByRole('alert')).not.toBeInTheDocument());
+  expect(within(first).getByRole('button', { name: 'Huỷ duyệt' })).toBeInTheDocument();
+});
+
+test('"Huỷ" after a failed rejection clears the error under the row', async () => {
+  stubFetch({
+    [PENDING_ROUTE]: () => json(200, queue),
+    'POST /api/admin/reports/1/review': () => json(500, { error: { code: 'INTERNAL', message: 'Lỗi máy chủ' } }),
+  });
+  renderTab();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Từ chối' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do từ chối' }), { target: { value: 'Khai gian' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận từ chối' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Lỗi máy chủ');
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ' }));
+  await waitFor(() => expect(within(first).queryByRole('alert')).not.toBeInTheDocument());
+  expect(within(first).getByRole('button', { name: 'Từ chối' })).toBeInTheDocument();
 });
