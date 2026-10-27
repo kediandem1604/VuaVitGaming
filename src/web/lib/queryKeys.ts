@@ -12,3 +12,5 @@ export const APPROVED_REPORTS_KEY = ['admin', 'reports', 'approved'] as const;
 export const MY_REPORTS_KEY = ['reports', 'mine'] as const;
 /** Cache các role đang hoá thân mùa này (trang Hồ sơ) — tab Duyệt điểm làm mới sau khi huỷ duyệt. */
 export const TITLES_QUERY_KEY = ['me', 'titles'] as const;
+/** Tiền tố khoá trang thành viên công khai (`['member', id]`) — tab Thành viên làm mới sau khi admin sửa số buổi. */
+export const MEMBER_QUERY_KEY = ['member'] as const;

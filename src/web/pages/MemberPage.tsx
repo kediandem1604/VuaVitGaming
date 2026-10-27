@@ -1,6 +1,7 @@
 /**
  * Trang thành viên công khai `/thanh-vien/:id` (spec huy hiệu §9): thẻ "hộ chiếu" như ở Hồ sơ
- * (avatar, tên, "Vào server {ngày VN}", nhãn "Đã rời server" khi đã rời) rồi danh sách danh hiệu
+ * (avatar, tên, "Trong server {n} ngày · từ {ngày VN}" — ngày vào server hiệu lực do server tính —,
+ * "{n} buổi" đã đi, nhãn "Đã rời server" khi đã rời) rồi danh sách danh hiệu
  * của người đó (`GET /api/members/:id`, mới nhất trước), không có thì "Chưa có danh hiệu nào".
  * Id không phải số nguyên thì không gọi API; id không có (404) → cùng trang "Không tìm thấy"
  * của router; lỗi khác hiện như mọi truy vấn (`QueryState`).
@@ -47,7 +48,7 @@ function MemberView({ member }: { member: PublicMemberDto }) {
   const badgesHeadingId = useId();
   return (
     <>
-      {/* Thẻ "hộ chiếu" cùng kiểu trang Hồ sơ: băng vàng trên cùng, rồi avatar, tên, ngày vào. */}
+      {/* Thẻ "hộ chiếu" cùng kiểu trang Hồ sơ: băng vàng trên cùng, rồi avatar, tên, số ngày trong server và số buổi. */}
       <section className="panel overflow-hidden p-0">
         <p className="bg-gold px-4 py-1 text-xs font-extrabold tracking-wide text-gold-ink uppercase">Thành viên</p>
         <div className="flex items-center gap-4 p-4">
@@ -55,10 +56,11 @@ function MemberView({ member }: { member: PublicMemberDto }) {
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             {/* Tên 24px ≥ 18px nên dùng được chữ nổi; tên dài xuống dòng, không tràn ở 320px. */}
             <h1 className="text-raised text-2xl leading-tight font-extrabold break-words text-white">{member.displayName}</h1>
-            <p className="flex flex-wrap items-center gap-2 text-sm text-night-300">
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-night-300">
               <span>
-                Vào server <time dateTime={member.joinedAt}>{formatDateLabel(new Date(member.joinedAt))}</time>
+                Trong server {member.daysInServer} ngày · từ <time dateTime={member.joinedAt}>{formatDateLabel(new Date(member.joinedAt))}</time>
               </span>
+              <span>{member.games} buổi</span>
               {member.left && <span className="chip">Đã rời server</span>}
             </p>
           </div>

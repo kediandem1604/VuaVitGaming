@@ -25,6 +25,8 @@ const active: PublicMemberDto = {
   displayName: 'Ngỗng Bảy',
   avatarUrl: null,
   joinedAt: '2026-10-21T17:30:00.000Z',
+  daysInServer: 5,
+  games: 51,
   left: false,
   badges: [
     badge(12, '2026-11-10T03:00:00.000Z', { badgeKey: 'games_50', kind: 'milestone', periodId: '', title: 'Lão làng', icon: '🏅', detail: 'Đã đi 50 trận' }),
@@ -37,6 +39,8 @@ const gone: PublicMemberDto = {
   displayName: 'Vịt Tám',
   avatarUrl: 'https://cdn.example/8.png',
   joinedAt: '2026-01-05T03:00:00.000Z',
+  daysInServer: 100,
+  games: 0,
   left: true,
   badges: [],
 };
@@ -80,13 +84,15 @@ test('memberPath builds the public member URL', () => {
   expect(memberPath(7)).toBe('/thanh-vien/7');
 });
 
-test('shows name, Vietnam join date and the badges newest first', async () => {
+test('shows name, days in server with the Vietnam join date, games and the badges newest first', async () => {
   const fetchMock = stubFetch({ '7': active });
   renderAt('/thanh-vien/7');
 
   expect(await screen.findByRole('heading', { level: 1, name: 'Ngỗng Bảy' })).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith('/api/members/7', expect.anything());
-  expect(screen.getByText(/Vào server/)).toHaveTextContent('Vào server 22/10/2026');
+  expect(screen.getByText(/Trong server/)).toHaveTextContent('Trong server 5 ngày · từ 22/10/2026');
+  expect(screen.getByText('51 buổi')).toBeInTheDocument();
+  expect(screen.queryByText(/Vào server/)).toBeNull();
   expect(screen.queryByText('Đã rời server')).toBeNull();
 
   const items = within(screen.getByRole('list', { name: 'Danh hiệu' })).getAllByRole('listitem');
@@ -110,7 +116,8 @@ test('a member who left is marked, and no badges shows the empty copy', async ()
 
   expect(await screen.findByRole('heading', { level: 1, name: 'Vịt Tám' })).toBeInTheDocument();
   expect(screen.getByText('Đã rời server')).toBeInTheDocument();
-  expect(screen.getByText(/Vào server/)).toHaveTextContent('Vào server 05/01/2026');
+  expect(screen.getByText(/Trong server/)).toHaveTextContent('Trong server 100 ngày · từ 05/01/2026');
+  expect(screen.getByText('0 buổi')).toBeInTheDocument();
   expect(screen.getByText('Chưa có danh hiệu nào')).toBeInTheDocument();
   expect(screen.queryByRole('list', { name: 'Danh hiệu' })).toBeNull();
 });

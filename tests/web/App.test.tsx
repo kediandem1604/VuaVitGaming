@@ -94,7 +94,7 @@ test('/thanh-vien/:id opens the public member page inside the layout', async () 
   window.history.replaceState({}, '', '/thanh-vien/7');
   const queryClient = makeClient();
   queryClient.setQueryData(['me'], me);
-  const seven: PublicMemberDto = { id: 7, displayName: 'Ngỗng Bảy', avatarUrl: null, joinedAt: '2026-10-21T17:30:00.000Z', left: false, badges: [] };
+  const seven: PublicMemberDto = { id: 7, displayName: 'Ngỗng Bảy', avatarUrl: null, joinedAt: '2026-10-21T17:30:00.000Z', daysInServer: 0, games: 0, left: false, badges: [] };
   stubRoutes({ '/api/members/7': seven });
 
   render(

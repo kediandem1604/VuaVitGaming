@@ -55,6 +55,8 @@ const publicMe = (badges: BadgeDto[]): PublicMemberDto => ({
   displayName: me.displayName,
   avatarUrl: null,
   joinedAt: '2026-01-05T03:00:00.000Z',
+  daysInServer: 290,
+  games: 12,
   left: false,
   badges,
 });
