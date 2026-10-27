@@ -1,14 +1,35 @@
 #!/usr/bin/env bash
 # Chạy (lần đầu) hoặc cập nhật GGD Hub trên máy chủ Ubuntu (README mục 6C):
 #
-#   bash deploy/server/update.sh
+#   bash deploy/server/update.sh            # tải ảnh build sẵn từ GitHub (1–3 phút)
+#   bash deploy/server/update.sh --build    # build ảnh ngay trên máy (chậm, 15–35 phút)
 #
-# Kéo code mới của nhánh đang checkout, kiểm tra .env đã đủ biến, build lại ảnh và khởi động
-# lại những gì thay đổi. Dữ liệu database và chứng chỉ HTTPS nằm trong volume, không mất.
+# Kéo code mới của nhánh đang checkout, kiểm tra .env đã đủ biến, tải ảnh ứng dụng đúng commit
+# đó (GitHub Actions build sẵn — .github/workflows/docker.yml) và khởi động lại những gì thay
+# đổi. Dữ liệu database và chứng chỉ HTTPS nằm trong volume, không mất.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="$here/.env"
+
+build=0
+for arg in "$@"; do
+  case "$arg" in
+    --build) build=1 ;;
+    *)
+      echo "Tham số không hợp lệ: $arg (chỉ có --build)" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Kéo code trước, rồi chạy lại chính script này từ bản vừa kéo về — để thay đổi của update.sh
+# (và các file nó dùng) có hiệu lực ngay trong lần cập nhật này.
+if [ -z "${GGD_UPDATE_PULLED:-}" ]; then
+  echo "==> Kéo code mới"
+  git -C "$here/../.." pull --ff-only
+  exec env GGD_UPDATE_PULLED=1 bash "$here/update.sh" "$@"
+fi
 
 if [ ! -f "$env_file" ]; then
   echo "Chưa có $env_file — chạy bash deploy/server/setup.sh trước." >&2
@@ -33,12 +54,13 @@ if [ "${#missing[@]}" -gt 0 ]; then
   exit 1
 fi
 
-echo "==> Kéo code mới"
-git -C "$here/../.." pull --ff-only
-
-echo "==> Build và khởi động (lần đầu mất vài phút)"
+# shellcheck source=deploy/server/app-image.sh
+source "$here/app-image.sh"
 cd "$here"
-sudo docker compose up -d --build --remove-orphans
+get_app_image
+
+echo "==> Khởi động"
+"${compose[@]}" up -d --remove-orphans
 sudo docker image prune -f >/dev/null
 
 site="$(grep -E '^SITE_ADDRESS=' "$env_file" | tail -n 1 | cut -d= -f2-)"

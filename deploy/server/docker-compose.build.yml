@@ -1,0 +1,8 @@
+# Build ảnh ứng dụng ngay trên máy thay vì tải từ GHCR (chậm: 15–35 phút trên e2-micro).
+# Chỉ dùng khi cần — update.sh --build và discord-setup.sh --build tự thêm file này:
+#
+#   sudo docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  app:
+    build:
+      context: ../..

@@ -2,13 +2,16 @@
 #
 #   caddy   : cổng 80/443 ra Internet, tự xin chứng chỉ HTTPS (Let's Encrypt) cho SITE_ADDRESS,
 #             chuyển mọi yêu cầu vào app:3000. Là lớp proxy duy nhất → TRUST_PROXY_HOPS=1.
-#   app     : build từ Dockerfile ở gốc repo; `npm start` = migrate → nạp dữ liệu tham chiếu → chạy.
+#   app     : ảnh build sẵn trên GitHub Actions (.github/workflows/docker.yml), tải từ GHCR;
+#             `npm start` = migrate → nạp dữ liệu tham chiếu → chạy.
+#             update.sh đặt APP_TAG = mã commit đang checkout; build tại máy: update.sh --build
+#             (dùng thêm docker-compose.build.yml).
 #             Không mở cổng ra ngoài — chỉ caddy gọi tới qua mạng nội bộ của compose.
 #   db      : PostgreSQL 16, dữ liệu trong volume `pgdata`; không mở cổng ra ngoài.
 #   backup  : mỗi ngày pg_dump → ./backups/ggd-YYYY-MM-DD.sql.gz, giữ 14 bản gần nhất.
 #
 # Mọi giá trị lấy từ ./.env (tạo bởi setup.sh từ .env.example; không bao giờ commit).
-# Chạy trong thư mục này: `docker compose up -d --build` (update.sh làm hộ).
+# Chạy trong thư mục này: `docker compose pull app && docker compose up -d` (update.sh làm hộ).
 
 name: ggd-hub-prod
 
@@ -36,8 +39,9 @@ services:
     logging: *logging
 
   app:
-    build:
-      context: ../..
+    # APP_IMAGE / APP_TAG đặt trong .env nếu muốn ghim ảnh khác (vd repo fork, hoặc quay về
+    # một commit cũ). Mặc định: bản mới nhất của nhánh feat/ggd-hub-v1.
+    image: ${APP_IMAGE:-ghcr.io/kediandem1604/vuavitgaming}:${APP_TAG:-feat-ggd-hub-v1}
     restart: unless-stopped
     env_file: .env
     environment:
