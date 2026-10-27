@@ -88,7 +88,7 @@ test('revoking an approved report stores who, when and why, keeps the approver, 
   });
 
   // DM dùng nhãn thật của role trong seed qua `formatReportValue`.
-  const text = `Lần khai ${duck.nameVi} (${formatReportValue(3, 0, duck)}) ngày 10/10 đã bị huỷ duyệt: Clip không khớp`;
+  const text = `Lần khai ${duck.nameVi} (${formatReportValue({ value: 3, extraValue: 0, penaltyValue: 0 }, duck)}) ngày 10/10 đã bị huỷ duyệt: Clip không khớp`;
   expect(text).toBe('Lần khai Vịt (3 mạng đã giết) ngày 10/10 đã bị huỷ duyệt: Clip không khớp');
   expect(notifier.dms).toEqual([{ discordId: member.discordId, text }]);
 
@@ -355,12 +355,19 @@ test('listRecentlyApproved: approved reports of open seasons, newest review firs
       icon: '🦆',
       metricLabel: 'Số mạng đã giết',
       maxPerGame: 15,
+      points: 1,
       extraMetricLabel: null,
       extraMaxPerGame: null,
       extraPoints: null,
+      penaltyMetricLabel: null,
+      penaltyMaxPerGame: null,
+      penaltyPoints: null,
     },
     value: 3,
     extraValue: 0,
+    penaltyValue: 0,
+    bonusPoints: 0,
+    source: 'self',
     points: 3,
     playedOn: '2026-10-09',
     sessionId: null,

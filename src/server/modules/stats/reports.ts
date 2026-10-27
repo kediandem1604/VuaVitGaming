@@ -297,8 +297,17 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
 // Duyệt
 // ---------------------------------------------------------------------------
 
-/** Phần role mà DM từ chối/huỷ duyệt cần: tên và cách đọc "x + y" (`MetricRole`). */
-const REVIEW_ROLE_SELECT = { nameVi: true, metricLabel: true, extraMetricLabel: true, extraPoints: true } satisfies Prisma.RoleSelect;
+/** Phần role mà DM từ chối/huỷ duyệt cần: tên và cách đọc "x + y − z" (`MetricRole`). */
+const REVIEW_ROLE_SELECT = {
+  nameVi: true,
+  metricLabel: true,
+  points: true,
+  extraMetricLabel: true,
+  extraPoints: true,
+  penaltyMetricLabel: true,
+  penaltyMaxPerGame: true,
+  penaltyPoints: true,
+} satisfies Prisma.RoleSelect;
 
 /** Những gì DM từ chối/huỷ duyệt cần kèm lần khai: người khai (discordId), role (tên, chỉ số). */
 const REVIEWABLE_INCLUDE = {
@@ -465,7 +474,7 @@ async function notifyRevoked(ctx: Ctx, report: ReviewableReport, reason: string)
 /** "Lần khai {role} ({giá trị}) ngày {dd/mm}" — phần đầu chung của DM từ chối và huỷ duyệt. */
 function describeReport(report: ReviewableReport): string {
   return (
-    `Lần khai ${report.role.nameVi} (${formatReportValue(report.value, report.extraValue, report.role)}) ` +
+    `Lần khai ${report.role.nameVi} (${formatReportValue(report, report.role)}) ` +
     `ngày ${formatVnDay(dbToDateOnly(report.playedOn))}`
   );
 }
@@ -487,6 +496,9 @@ const REPORT_SELECT = {
   id: true,
   value: true,
   extraValue: true,
+  penaltyValue: true,
+  bonusPoints: true,
+  source: true,
   playedOn: true,
   sessionId: true,
   note: true,
@@ -497,7 +509,20 @@ const REPORT_SELECT = {
   highlightMessageId: true,
   member: { select: { id: true, displayName: true } },
   role: {
-    select: { id: true, nameVi: true, icon: true, metricLabel: true, maxPerGame: true, extraMetricLabel: true, extraMaxPerGame: true, extraPoints: true },
+    select: {
+      id: true,
+      nameVi: true,
+      icon: true,
+      metricLabel: true,
+      maxPerGame: true,
+      points: true,
+      extraMetricLabel: true,
+      extraMaxPerGame: true,
+      extraPoints: true,
+      penaltyMetricLabel: true,
+      penaltyMaxPerGame: true,
+      penaltyPoints: true,
+    },
   },
 } satisfies Prisma.StatReportSelect;
 
@@ -505,7 +530,7 @@ type ReportRow = Prisma.StatReportGetPayload<{ select: typeof REPORT_SELECT }>;
 
 /**
  * DTO của một dòng; `guildId` để dựng link tới tin Discord chứa highlight (hai cột phải cùng
- * có). `points` tính lúc đọc theo `extraPoints` hiện tại của role.
+ * có). `points` tính lúc đọc theo điểm hiện tại của role (`reportPoints`, spec điểm role §3).
  */
 function toReportDto(r: ReportRow, guildId: string): ReportDto {
   return {
@@ -517,13 +542,20 @@ function toReportDto(r: ReportRow, guildId: string): ReportDto {
       icon: r.role.icon,
       metricLabel: r.role.metricLabel,
       maxPerGame: r.role.maxPerGame,
+      points: r.role.points,
       extraMetricLabel: r.role.extraMetricLabel,
       extraMaxPerGame: r.role.extraMaxPerGame,
       extraPoints: r.role.extraPoints,
+      penaltyMetricLabel: r.role.penaltyMetricLabel,
+      penaltyMaxPerGame: r.role.penaltyMaxPerGame,
+      penaltyPoints: r.role.penaltyPoints,
     },
     value: r.value,
     extraValue: r.extraValue,
-    points: reportPoints(r.value, r.extraValue, r.role),
+    penaltyValue: r.penaltyValue,
+    bonusPoints: r.bonusPoints,
+    source: r.source,
+    points: reportPoints(r, r.role),
     playedOn: dbToDateOnly(r.playedOn),
     sessionId: r.sessionId,
     note: r.note,

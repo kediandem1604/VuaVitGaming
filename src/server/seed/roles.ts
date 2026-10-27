@@ -8,10 +8,16 @@ export type RoleSeed = {
   description: string;
   metricLabel: string;
   maxPerGame: number;
+  /** Điểm mỗi đơn vị chỉ số chính (spec điểm role §4: role tối đa 1 mỗi trận 5, role bắn 3 hoặc 5, còn lại 1). */
+  points: number;
   /** Chỉ số phụ: cả ba cùng có hoặc cùng null (spec chỉ số phụ §3). */
   extraMetricLabel: string | null;
   extraMaxPerGame: number | null;
   extraPoints: number | null;
+  /** Chỉ số phạt (bị trừ): cả ba cùng có hoặc cùng null (spec điểm role §3). */
+  penaltyMetricLabel: string | null;
+  penaltyMaxPerGame: number | null;
+  penaltyPoints: number | null;
   mapNote: string | null;
   modeKey: string | null;
   icon: string;
@@ -34,6 +40,36 @@ type MainRow = [
 
 type ExtraMetric = readonly [label: string, maxPerGame: number, points: number];
 
+/** Nhãn chỉ số phạt của các role bắn phe Ngỗng (spec điểm role §4). */
+const WRONG_SHOT_LABEL = 'Số phát bắn sai';
+
+/**
+ * Điểm khởi đầu riêng theo `key` (spec điểm role §4) — cùng giá trị với migration
+ * `20261028120000_role_points_accusations`: Dân phòng 5 điểm mỗi phát trúng, bắn sai tối đa 1 lần
+ * −3; Người vận động hành lang, Binh lính, Cảnh sát trưởng, Người báo thù 3 điểm mỗi phát trúng,
+ * bắn sai tối đa = `maxPerGame` của role, −1. Role không có trong bảng: tối đa 1 mỗi trận → 5 điểm
+ * (thay luật ×5 cũ), còn lại 1; không có chỉ số phạt.
+ */
+const STARTING_POINTS: Readonly<Record<string, { points: number; penaltyMaxPerGame: number | 'maxPerGame'; penaltyPoints: number }>> = {
+  vigilante: { points: 5, penaltyMaxPerGame: 1, penaltyPoints: 3 },
+  lobbyist: { points: 3, penaltyMaxPerGame: 'maxPerGame', penaltyPoints: 1 },
+  soldier: { points: 3, penaltyMaxPerGame: 'maxPerGame', penaltyPoints: 1 },
+  sheriff: { points: 3, penaltyMaxPerGame: 'maxPerGame', penaltyPoints: 1 },
+  avenger: { points: 3, penaltyMaxPerGame: 'maxPerGame', penaltyPoints: 1 },
+};
+
+/** Điểm mỗi lần và chỉ số phạt khởi đầu của một role chính theo `key` và `maxPerGame`. */
+function startingPoints(key: string, maxPerGame: number): Pick<RoleSeed, 'points' | 'penaltyMetricLabel' | 'penaltyMaxPerGame' | 'penaltyPoints'> {
+  const special = STARTING_POINTS[key];
+  if (!special) return { points: maxPerGame === 1 ? 5 : 1, penaltyMetricLabel: null, penaltyMaxPerGame: null, penaltyPoints: null };
+  return {
+    points: special.points,
+    penaltyMetricLabel: WRONG_SHOT_LABEL,
+    penaltyMaxPerGame: special.penaltyMaxPerGame === 'maxPerGame' ? maxPerGame : special.penaltyMaxPerGame,
+    penaltyPoints: special.penaltyPoints,
+  };
+}
+
 function mainRoles(faction: Faction, rows: readonly MainRow[]): RoleSeed[] {
   return rows.map(([key, nameVi, nameEn, description, metricLabel, maxPerGame, mapNote, icon, extra], i) => ({
     key,
@@ -46,6 +82,7 @@ function mainRoles(faction: Faction, rows: readonly MainRow[]): RoleSeed[] {
     extraMetricLabel: extra?.[0] ?? null,
     extraMaxPerGame: extra?.[1] ?? null,
     extraPoints: extra?.[2] ?? null,
+    ...startingPoints(key, maxPerGame),
     mapNote,
     modeKey: null,
     icon,
@@ -174,9 +211,13 @@ const SPECIAL_ROLES: RoleSeed[] = SPECIAL_ROWS.map(([key, nameVi, nameEn, factio
   description: 'Role riêng của chế độ đặc biệt; admin xác nhận phe và chỉ số rồi mới bật.',
   metricLabel: 'Chưa đặt chỉ số',
   maxPerGame: 15,
+  points: 1,
   extraMetricLabel: null,
   extraMaxPerGame: null,
   extraPoints: null,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
   mapNote: null,
   modeKey,
   icon: FACTION_ICON[faction],

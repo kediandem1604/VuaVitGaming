@@ -9,9 +9,13 @@ const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'icon' |
   nameEn: over.key,
   description: '',
   maxPerGame: 10,
+  points: 1,
   extraMetricLabel: null,
   extraMaxPerGame: null,
   extraPoints: null,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
   mapNote: null,
   modeKey: null,
   hasImage: false,
@@ -71,52 +75,59 @@ const boards: Record<string, LeaderboardRowDto[]> = {
   '70@2026-10': [row(1, 7, 'Ngỗng Bảy', 9, 3), row(2, 8, 'Vịt Tám', 6, 2), row(3, 9, 'Ngỗng Chín', 2, 1), row(4, 10, 'Vịt Mười', 1, 1)],
 };
 
-/** Phần role của một dòng "Top 3 mỗi phe"; `extra` = nhãn phụ và điểm mỗi lần (mặc định không có). */
+/** Phần role của một dòng "Top 3 mỗi phe"; `over` ghi đè điểm mỗi lần, chỉ số phụ, chỉ số phạt (mặc định ×1, không có). */
 const topRole = (
   id: number,
   nameVi: string,
   icon: string,
   metricLabel: string,
   faction: FactionTopRowDto['role']['faction'],
-  extra: Pick<FactionTopRowDto['role'], 'extraMetricLabel' | 'extraPoints'> = { extraMetricLabel: null, extraPoints: null },
+  over: Partial<FactionTopRowDto['role']> = {},
 ): FactionTopRowDto['role'] => ({
   id,
   nameVi,
   icon,
   metricLabel,
   faction,
-  ...extra,
+  points: 1,
+  extraMetricLabel: null,
+  extraPoints: null,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
+  ...over,
 });
-const VIGILANTE = topRole(4, 'Dân phòng', '🔫', 'Số phát bắn trúng kẻ xấu', 'goose');
+/** Dân phòng theo điểm khởi đầu: +5 mỗi phát trúng, −3 mỗi phát bắn sai. */
+const VIGILANTE = topRole(4, 'Dân phòng', '🔫', 'Số phát bắn trúng kẻ xấu', 'goose', { points: 5, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 1, penaltyPoints: 3 });
 const GOOSE = topRole(1, 'Ngỗng', '🪿', 'Số lần vote trúng Vịt', 'goose');
 const SWORDSMAN = topRole(61, 'Kiếm sĩ', '⚔️', 'Số mạng chém', 'duck');
 const ASSASSIN = topRole(50, 'Ám sát', '🗡️', 'Số mạng đã giết', 'duck', { extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraPoints: 3 });
 
-const topRow = (rank: number, memberId: number, displayName: string, role: FactionTopRowDto['role'], value: number, weight: number, games: number): FactionTopRowDto => ({
+/** Một dòng top phe: `value` và `points` đều là điểm mùa của cặp (người, role) — không còn hệ số ×5. */
+const topRow = (rank: number, memberId: number, displayName: string, role: FactionTopRowDto['role'], value: number, games: number): FactionTopRowDto => ({
   rank,
   memberId,
   displayName,
   avatarUrl: null,
   role,
   value,
-  weight,
-  points: value * weight,
+  points: value,
   games,
 });
 
 const emptyTop = (seasonId: string): FactionTopDto => ({ seasonId, factions: { goose: [], duck: [], neutral: [] } });
 
-/** Top 3 mỗi phe có dữ liệu: cùng một người giữ hai dòng Phe Ngỗng (Dân phòng ×5 trên Ngỗng ×1), Phe thứ 3 trống. */
+/** Top 3 mỗi phe có dữ liệu: cùng một người giữ hai dòng Phe Ngỗng (Dân phòng 2 phát × 5 điểm = 10 trên Ngỗng 9), Phe thứ 3 trống. */
 const factionTops: Record<string, FactionTopDto> = {
   '2026-10': {
     seasonId: '2026-10',
     factions: {
-      goose: [topRow(1, 1, 'Ngỗng Một', VIGILANTE, 2, 5, 2), topRow(2, 1, 'Ngỗng Một', GOOSE, 9, 1, 3), topRow(3, 3, 'Ngỗng Ba', GOOSE, 4, 1, 1)],
-      duck: [topRow(1, 2, 'Vịt Hai', SWORDSMAN, 11, 1, 5)],
+      goose: [topRow(1, 1, 'Ngỗng Một', VIGILANTE, 10, 2), topRow(2, 1, 'Ngỗng Một', GOOSE, 9, 3), topRow(3, 3, 'Ngỗng Ba', GOOSE, 4, 1)],
+      duck: [topRow(1, 2, 'Vịt Hai', SWORDSMAN, 11, 5)],
       neutral: [],
     },
   },
-  '2026-09': { seasonId: '2026-09', factions: { goose: [], duck: [topRow(1, 2, 'Vịt Hai', SWORDSMAN, 12, 1, 5)], neutral: [] } },
+  '2026-09': { seasonId: '2026-09', factions: { goose: [], duck: [topRow(1, 2, 'Vịt Hai', SWORDSMAN, 12, 5)], neutral: [] } },
 };
 
 // --- Tổng điểm theo phe ---
@@ -407,7 +418,7 @@ test('changing the selects updates the URL and loads the new board', async () =>
   expect(screen.getByTestId('location')).toHaveTextContent('/bang-xep-hang?role=61&mua=2026-09');
 });
 
-test('Top 3 mỗi phe: three faction blocks, rows in rank order with medal, role, raw value and weighted points', async () => {
+test('Top 3 mỗi phe: three faction blocks, rows in rank order with medal, role and season points — no ×5 line', async () => {
   const fetchMock = stubFetch(factionTops);
   renderAt('/bang-xep-hang');
   await findBoard();
@@ -419,14 +430,16 @@ test('Top 3 mỗi phe: three faction blocks, rows in rank order with medal, role
   const goose = within(factionList('Phe Ngỗng')).getAllByRole('listitem');
   expect(goose).toHaveLength(3);
   const [first, second, third] = goose as [HTMLElement, HTMLElement, HTMLElement];
-  // Hạng 1: Dân phòng 2 phát × 5 = 10 điểm, xếp trên Ngỗng 9 vote của chính người đó.
+  // Hạng 1: Dân phòng 2 phát × 5 điểm = 10 điểm mùa, xếp trên Ngỗng 9 vote của chính người đó. Role có
+  // points ≠ 1 đọc điểm mùa là "10 điểm" (không còn đơn vị), và không còn dòng hệ số "2 × 5".
   expect(within(first).getByTitle('Hạng 1')).toHaveTextContent('🥇');
   expect(first).toHaveTextContent('Ngỗng Một');
-  expect(first).toHaveTextContent('Dân phòng · 2 phát bắn trúng kẻ xấu');
+  expect(first).toHaveTextContent('Dân phòng · 10 điểm');
   expect(first).toHaveTextContent('10 điểm');
-  expect(first).toHaveTextContent('2 × 5');
+  expect(first).not.toHaveTextContent('×');
+  expect(first).not.toHaveTextContent('phát bắn trúng kẻ xấu');
   expect(within(first).getByRole('link', { name: /Dân phòng/ })).toHaveAttribute('href', '/bang-xep-hang?role=4&mua=2026-10');
-  // Cùng một người ở hạng 2 với role khác; hệ số 1 thì không ghi phép nhân.
+  // Cùng một người ở hạng 2 với role khác, ×1: điểm mùa đọc theo nhãn chỉ số.
   expect(within(second).getByTitle('Hạng 2')).toHaveTextContent('🥈');
   expect(second).toHaveTextContent('Ngỗng Một');
   expect(second).toHaveTextContent('Ngỗng · 9 lần vote trúng Vịt');

@@ -9,9 +9,13 @@ import { ReportPage } from '../../src/web/pages/ReportPage';
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn' | 'icon' | 'metricLabel' | 'maxPerGame'> & Partial<RoleDto>): RoleDto => ({
   description: '',
+  points: 1,
   extraMetricLabel: null,
   extraMaxPerGame: null,
   extraPoints: null,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
   mapNote: null,
   modeKey: null,
   hasImage: false,
@@ -51,9 +55,13 @@ const ASSASSIN_REPORT_ROLE: ReportDto['role'] = {
   icon: '🗡️',
   metricLabel: 'Số mạng đã giết',
   maxPerGame: 15,
+  points: 1,
   extraMetricLabel: EXTRA_LABEL,
   extraMaxPerGame: 2,
   extraPoints: 3,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
 };
 
 const today = vnTodayIso();
@@ -72,9 +80,25 @@ const session: SessionDto = {
 
 const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id' | 'status'>): ReportDto => ({
   member: { id: 9, displayName: 'Tôi' },
-  role: { id: 61, nameVi: 'Kiếm sĩ', icon: '⚔️', metricLabel: 'Số mạng chém', maxPerGame: 15, extraMetricLabel: null, extraMaxPerGame: null, extraPoints: null },
+  role: {
+    id: 61,
+    nameVi: 'Kiếm sĩ',
+    icon: '⚔️',
+    metricLabel: 'Số mạng chém',
+    maxPerGame: 15,
+    points: 1,
+    extraMetricLabel: null,
+    extraMaxPerGame: null,
+    extraPoints: null,
+    penaltyMetricLabel: null,
+    penaltyMaxPerGame: null,
+    penaltyPoints: null,
+  },
   value: 4,
   extraValue: 0,
+  penaltyValue: 0,
+  bonusPoints: 0,
+  source: 'self',
   points: over.value ?? 4,
   playedOn: today,
   sessionId: null,

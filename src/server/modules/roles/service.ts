@@ -3,7 +3,9 @@
  * riêng của chế độ đặc biệt nạp sẵn nhưng tắt, admin xác nhận rồi bật. Admin sửa
  * tên, mô tả, chỉ số, giới hạn, biểu tượng, thứ tự, bật/tắt và thêm role mới khi
  * game cập nhật; `key` đặt một lần khi tạo. Ảnh tuỳ chỉnh ở `image.ts`. Role có thể
- * có chỉ số phụ được nhân điểm (ba trường `extra*`, spec chỉ số phụ §3–5).
+ * có chỉ số phụ được nhân điểm (ba trường `extra*`, spec chỉ số phụ §3–5). Điểm mỗi lần
+ * (`points`) và chỉ số phạt (ba trường `penalty*`, spec điểm role §3) có trong DTO; admin
+ * sửa chúng qua đây ở task sau — hiện tạo role lấy mặc định DB (points 1, không có phạt).
  *
  * Thứ tự hiển thị mọi nơi: phe Ngỗng → Vịt → Phe thứ 3, rồi `sortOrder`, rồi `id`.
  * DTO không bao giờ chứa ảnh (không kéo 91 blob khi liệt kê).
@@ -31,9 +33,13 @@ const ROLE_SELECT = {
   description: true,
   metricLabel: true,
   maxPerGame: true,
+  points: true,
   extraMetricLabel: true,
   extraMaxPerGame: true,
   extraPoints: true,
+  penaltyMetricLabel: true,
+  penaltyMaxPerGame: true,
+  penaltyPoints: true,
   mapNote: true,
   icon: true,
   active: true,
@@ -58,9 +64,13 @@ function toRoleDto(r: RoleRow): RoleDto {
     description: r.description,
     metricLabel: r.metricLabel,
     maxPerGame: r.maxPerGame,
+    points: r.points,
     extraMetricLabel: r.extraMetricLabel,
     extraMaxPerGame: r.extraMaxPerGame,
     extraPoints: r.extraPoints,
+    penaltyMetricLabel: r.penaltyMetricLabel,
+    penaltyMaxPerGame: r.penaltyMaxPerGame,
+    penaltyPoints: r.penaltyPoints,
     mapNote: r.mapNote,
     modeKey: r.mode?.key ?? null,
     icon: r.icon,

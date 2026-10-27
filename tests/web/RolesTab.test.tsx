@@ -7,9 +7,13 @@ import { RolesTab } from '../../src/web/pages/admin/RolesTab';
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn' | 'icon' | 'metricLabel'> & Partial<RoleDto>): RoleDto => ({
   description: '',
   maxPerGame: 10,
+  points: 1,
   extraMetricLabel: null,
   extraMaxPerGame: null,
   extraPoints: null,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
   mapNote: null,
   modeKey: null,
   hasImage: false,

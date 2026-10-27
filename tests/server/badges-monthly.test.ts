@@ -195,10 +195,10 @@ test('month follows the VN date of the session', async () => {
 // ---------------------------------------------------------------------------
 
 test('faction tops match getFactionTop rank 1', async () => {
-  const goose = await roleByKey(testDb, 'goose'); // tối đa 10 → hệ số 1
-  const vigilante = await roleByKey(testDb, 'vigilante'); // tối đa 1 → hệ số 5
+  const goose = await roleByKey(testDb, 'goose'); // ×1
+  const vigilante = await roleByKey(testDb, 'vigilante'); // points 5 (điểm khởi đầu)
   const duck = await roleByKey(testDb, 'duck');
-  // An: Ngỗng 9 (×1 = 9) và Dân phòng 2 (×5 = 10) → hạng 1 phe Ngỗng là dòng Dân phòng của An.
+  // An: Ngỗng 9 (×1 = 9) và Dân phòng 2 phát (×5 điểm = 10) → hạng 1 phe Ngỗng là dòng Dân phòng của An.
   await report(a.id, goose.id, '2026-10-10', 9);
   await report(a.id, vigilante.id, '2026-10-11', 1);
   await report(a.id, vigilante.id, '2026-10-12', 1);

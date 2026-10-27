@@ -1,9 +1,10 @@
 import type { Member, Prisma, Role } from '@prisma/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../src/server/ctx.js';
+import { dateOnlyToDb } from '../../src/server/lib/time.js';
 import { listRoles, updateRole } from '../../src/server/modules/roles/service.js';
 import { closeSeason, ensureSeason } from '../../src/server/modules/seasons/service.js';
-import { getFactionTop, getFactionTotals, getHall, getHeldRoles, getRoleLeaderboard, getSeasonLeaders, rolePointWeight } from '../../src/server/modules/stats/leaderboard.js';
+import { getFactionTop, getFactionTotals, getHall, getHeldRoles, getRoleLeaderboard, getSeasonLeaders } from '../../src/server/modules/stats/leaderboard.js';
 import { reviewReport, submitReport, updateOwnReport } from '../../src/server/modules/stats/reports.js';
 import type { FactionTopRowDto, HallDto } from '../../src/shared/api-types.js';
 import { makeTestCtx } from '../helpers/ctx.js';
@@ -336,46 +337,161 @@ test('a stored extraValue on a role whose extra metric is gone scores 0 points',
 });
 
 // ---------------------------------------------------------------------------
+// Điểm theo role: points, phạt, bonus, source (spec điểm role §3)
+// ---------------------------------------------------------------------------
+
+/** Ghi thẳng một lần khai đã duyệt với đủ trường mới (service chưa nhận penaltyValue/bonusPoints ở task này). */
+async function approvedRaw(
+  memberId: number,
+  o: { roleId: number; value: number; extraValue?: number; penaltyValue?: number; bonusPoints?: number; source?: 'self' | 'accusation'; at: string },
+): Promise<number> {
+  const row = await testDb.statReport.create({
+    data: {
+      memberId,
+      roleId: o.roleId,
+      playedOn: dateOnlyToDb('2026-10-10'),
+      value: o.value,
+      extraValue: o.extraValue ?? 0,
+      penaltyValue: o.penaltyValue ?? 0,
+      bonusPoints: o.bonusPoints ?? 0,
+      source: o.source ?? 'self',
+      status: 'approved',
+      reviewedById: mod.id,
+      reviewedAt: new Date(o.at),
+    },
+  });
+  return row.id;
+}
+
+test('a role scores value × points: Dân phòng gives 5 per hit, Cảnh sát trưởng 3, and admin changing points re-scores the open season', async () => {
+  const vigilante = await roleByKey(testDb, 'vigilante');
+  const sheriff = await roleByKey(testDb, 'sheriff');
+  expect(vigilante).toMatchObject({ points: 5, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 1, penaltyPoints: 3 });
+  expect(sheriff).toMatchObject({ points: 3, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 10, penaltyPoints: 1 });
+
+  await approved(a.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T02:00:00Z' });
+  await approved(a.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T03:00:00Z' });
+  await approved(b.id, { roleId: sheriff.id, value: 4, at: '2026-10-10T03:00:00Z' });
+  expect((await getRoleLeaderboard(ctx, vigilante.id, '2026-10')).map((r) => [r.memberId, r.score, r.games])).toEqual([[a.id, 10, 2]]);
+  expect((await getRoleLeaderboard(ctx, sheriff.id, '2026-10')).map((r) => [r.memberId, r.score, r.games])).toEqual([[b.id, 12, 1]]);
+
+  // Đổi điểm mỗi lần → bảng mùa đang mở đổi theo (đọc điểm HIỆN TẠI của role).
+  await testDb.role.update({ where: { id: sheriff.id }, data: { points: 2 } });
+  expect((await getRoleLeaderboard(ctx, sheriff.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([[b.id, 8]]);
+});
+
+test('penalty values subtract penaltyPoints, bonus points add, a cell at or below 0 leaves the board', async () => {
+  const vigilante = await roleByKey(testDb, 'vigilante');
+  // An: 1 trúng (+5) − 1 sai (−3) = 2, cộng 1 bonus → 3.
+  await approvedRaw(a.id, { roleId: vigilante.id, value: 1, penaltyValue: 1, bonusPoints: 1, at: '2026-10-10T02:00:00Z' });
+  // Bình: 1 trúng (+5), rồi 0 trúng 1 sai (−3) → 2.
+  await approvedRaw(b.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T03:00:00Z' });
+  await approvedRaw(b.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, at: '2026-10-10T04:00:00Z' });
+  // Cường: 1 trúng (+5) − 2 lần bị trừ (−6) = −1 → không lên bảng; Dũng: đúng 0 → không lên bảng.
+  const c = await createMember(testDb, { displayName: 'Cường' });
+  const d = await createMember(testDb, { displayName: 'Dũng' });
+  await approvedRaw(c.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T05:00:00Z' });
+  await approvedRaw(c.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, source: 'accusation', at: '2026-10-10T06:00:00Z' });
+  await approvedRaw(c.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, source: 'accusation', at: '2026-10-10T07:00:00Z' });
+  await approvedRaw(d.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T05:00:00Z' });
+  await approvedRaw(d.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, at: '2026-10-10T05:30:00Z' });
+  await approvedRaw(d.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, at: '2026-10-10T05:40:00Z' });
+  await testDb.role.update({ where: { id: vigilante.id }, data: { penaltyPoints: 2 } }); // Dũng: 5 − 2 − 2 = 1 → vẫn lên; đổi lại dưới.
+  expect((await getRoleLeaderboard(ctx, vigilante.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([
+    [a.id, 4], // 5 − 2 + 1
+    [b.id, 3], // 5 − 2
+    [d.id, 1], // 5 − 2 − 2
+    // Cường: 5 − 2 − 2 = 1 → cũng lên; hoà 1 điểm với Dũng, Dũng đạt trước (05:40 < 07:00).
+    [c.id, 1],
+  ]);
+  await testDb.role.update({ where: { id: vigilante.id }, data: { penaltyPoints: 3 } });
+  expect((await getRoleLeaderboard(ctx, vigilante.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([
+    [a.id, 3],
+    [b.id, 2],
+  ]);
+  // Người điểm âm/0 không lên Top phe, Tổng phe, Đại sảnh.
+  const top = await getFactionTop(ctx, '2026-10');
+  expect(top.factions.goose.map((r) => [r.memberId, r.points])).toEqual([
+    [a.id, 3],
+    [b.id, 2],
+  ]);
+  const totals = await getFactionTotals(ctx, '2026-10', c.id);
+  expect(totals.boards.goose.top.map((r) => [r.memberId, r.points])).toEqual([
+    [a.id, 3],
+    [b.id, 2],
+  ]);
+  expect(totals.boards.goose.me).toBeNull();
+  expect(hallRole(await getHall(ctx, '2026-10'), 'vigilante').holder).toMatchObject({ memberId: a.id, score: 3 });
+
+  // Role đã tắt chỉ số phạt trong DB mà lần khai còn penaltyValue: phần phạt tính 0.
+  await testDb.role.update({ where: { id: vigilante.id }, data: { penaltyMetricLabel: null, penaltyMaxPerGame: null, penaltyPoints: null } });
+  // Cường và Dũng hoà 5: Dũng đạt trước (lần duyệt gần nhất 05:40 < 07:00 của Cường, kể cả mục trừ).
+  expect((await getRoleLeaderboard(ctx, vigilante.id, '2026-10')).map((r) => [r.memberId, r.score])).toEqual([
+    [a.id, 6],
+    [b.id, 5],
+    [d.id, 5],
+    [c.id, 5],
+  ]);
+});
+
+test('`games` counts only the reports the player filed themselves (source = self), not penalty entries from accusations', async () => {
+  const vigilante = await roleByKey(testDb, 'vigilante');
+  await approvedRaw(a.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T02:00:00Z' });
+  await approvedRaw(a.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T03:00:00Z' });
+  await approvedRaw(a.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, source: 'accusation', at: '2026-10-10T04:00:00Z' });
+  // Bình chỉ có mục trừ do báo cáo: điểm âm, không lên bảng.
+  await approvedRaw(b.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, source: 'accusation', at: '2026-10-10T04:00:00Z' });
+
+  const rows = await getRoleLeaderboard(ctx, vigilante.id, '2026-10');
+  expect(rows).toEqual([
+    // 5 + 5 − 3 = 7; games 2 (không đếm mục trừ); mốc phân hoà vẫn là lần duyệt gần nhất (kể cả mục trừ).
+    { rank: 1, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, score: 7, games: 2, lastApprovedAt: new Date('2026-10-10T04:00:00Z') },
+  ]);
+  expect((await getFactionTop(ctx, '2026-10')).factions.goose.map((r) => [r.memberId, r.points, r.games])).toEqual([[a.id, 7, 2]]);
+});
+
+// ---------------------------------------------------------------------------
 // Top 3 mỗi phe
 // ---------------------------------------------------------------------------
 
-test('rolePointWeight is 5 for a role capped at 1 per game and 1 otherwise', () => {
-  expect(rolePointWeight({ maxPerGame: 1 })).toBe(5);
-  expect(rolePointWeight({ maxPerGame: 2 })).toBe(1);
-  expect(rolePointWeight({ maxPerGame: 10 })).toBe(1);
-  expect(rolePointWeight({ maxPerGame: 100 })).toBe(1);
-});
-
-/** Phần role trong một dòng top phe, lấy từ dữ liệu mẫu. */
+/** Phần role trong một dòng top phe, lấy từ dữ liệu mẫu (đủ `MetricRole` để web đọc điểm). */
 const roleOf = (role: Role): FactionTopRowDto['role'] => ({
   id: role.id,
   nameVi: role.nameVi,
   icon: role.icon,
   metricLabel: role.metricLabel,
+  points: role.points,
   extraMetricLabel: role.extraMetricLabel,
   extraPoints: role.extraPoints,
+  penaltyMetricLabel: role.penaltyMetricLabel,
+  penaltyMaxPerGame: role.penaltyMaxPerGame,
+  penaltyPoints: role.penaltyPoints,
   faction: role.faction,
 });
 
 test('faction top ranks an extra-metric role by its season points (Ám sát 4 + 2 → 10)', async () => {
   const assassin = await roleByKey(testDb, 'assassin');
   expect(assassin.faction).toBe('duck');
-  expect(assassin.maxPerGame).toBe(15); // hệ số 1
+  expect(assassin.points).toBe(1);
   await approved(a.id, { roleId: assassin.id, value: 4, extraValue: 2, at: '2026-10-10T02:00:00Z' });
   await approved(b.id, { value: 9, at: '2026-10-10T03:00:00Z' }); // Vịt 9 < 10
 
   const top = await getFactionTop(ctx, '2026-10');
   expect(top.factions.duck).toEqual([
-    { rank: 1, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(assassin), value: 10, weight: 1, points: 10, games: 1 },
-    { rank: 2, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(duck), value: 9, weight: 1, points: 9, games: 1 },
+    { rank: 1, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(assassin), value: 10, points: 10, games: 1 },
+    { rank: 2, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(duck), value: 9, points: 9, games: 1 },
   ]);
   expect(roleOf(assassin)).toEqual({
     id: assassin.id,
     nameVi: 'Ám sát',
     icon: '🗡️',
     metricLabel: 'Số mạng đã giết',
+    points: 1,
     extraMetricLabel: 'Số lần ám sát trong cuộc họp',
     extraPoints: 3,
+    penaltyMetricLabel: null,
+    penaltyMaxPerGame: null,
+    penaltyPoints: null,
     faction: 'duck',
   });
 
@@ -387,11 +503,11 @@ test('faction top ranks an extra-metric role by its season points (Ám sát 4 + 
   ]);
 });
 
-test('faction top: a max-1 role weighs x5, one member may hold several rows, factions are separate', async () => {
-  const goose = await roleByKey(testDb, 'goose'); // tối đa 10 → hệ số 1
-  const vigilante = await roleByKey(testDb, 'vigilante'); // tối đa 1 → hệ số 5
-  expect(vigilante.maxPerGame).toBe(1);
-  // An: Ngỗng 9 vote (×1 = 9); Dân phòng 2 phát (×5 = 10) → dòng Dân phòng xếp trên dù giá trị thô nhỏ hơn.
+test('faction top uses season points straight (no ×5): Dân phòng is worth its `points` per shot, one member may hold several rows, factions are separate', async () => {
+  const goose = await roleByKey(testDb, 'goose'); // ×1
+  const vigilante = await roleByKey(testDb, 'vigilante'); // points = 5 (điểm khởi đầu), không còn hệ số riêng
+  expect(vigilante.points).toBe(5);
+  // An: Ngỗng 9 vote (×1 = 9); Dân phòng 2 phát (×5 = 10) → dòng Dân phòng xếp trên; `value` = `points` = điểm mùa.
   await approved(a.id, { roleId: goose.id, value: 9, at: '2026-10-10T02:00:00Z' });
   await approved(a.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T03:00:00Z' });
   await approved(a.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T04:00:00Z' });
@@ -402,15 +518,36 @@ test('faction top: a max-1 role weighs x5, one member may hold several rows, fac
   const top = await getFactionTop(ctx, '2026-10');
   expect(top.seasonId).toBe('2026-10');
   expect(top.factions.goose).toEqual([
-    { rank: 1, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(vigilante), value: 2, weight: 5, points: 10, games: 2 },
-    { rank: 2, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(goose), value: 9, weight: 1, points: 9, games: 1 },
-    { rank: 3, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(goose), value: 3, weight: 1, points: 3, games: 1 },
+    { rank: 1, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(vigilante), value: 10, points: 10, games: 2 },
+    { rank: 2, memberId: a.id, displayName: 'An', avatarUrl: AN_AVATAR, role: roleOf(goose), value: 9, points: 9, games: 1 },
+    { rank: 3, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(goose), value: 3, points: 3, games: 1 },
   ]);
   expect(top.factions.duck).toEqual([
-    { rank: 1, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(duck), value: 7, weight: 1, points: 7, games: 1 },
+    { rank: 1, memberId: b.id, displayName: 'Bình', avatarUrl: null, role: roleOf(duck), value: 7, points: 7, games: 1 },
   ]);
   expect(top.factions.neutral).toEqual([]);
-  expect(roleOf(duck)).toEqual({ id: duck.id, nameVi: 'Vịt', icon: '🦆', metricLabel: 'Số mạng đã giết', extraMetricLabel: null, extraPoints: null, faction: 'duck' });
+  expect(roleOf(duck)).toEqual({
+    id: duck.id,
+    nameVi: 'Vịt',
+    icon: '🦆',
+    metricLabel: 'Số mạng đã giết',
+    points: 1,
+    extraMetricLabel: null,
+    extraPoints: null,
+    penaltyMetricLabel: null,
+    penaltyMaxPerGame: null,
+    penaltyPoints: null,
+    faction: 'duck',
+  });
+  expect(roleOf(vigilante)).toMatchObject({ points: 5, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 1, penaltyPoints: 3 });
+
+  // Admin hạ `points` của Dân phòng về 1 → không còn hệ số nào bù: dòng Dân phòng 2 điểm xuống cuối.
+  await testDb.role.update({ where: { id: vigilante.id }, data: { points: 1 } });
+  expect((await getFactionTop(ctx, '2026-10')).factions.goose.map((r) => [r.memberId, r.role.id, r.value, r.points])).toEqual([
+    [a.id, goose.id, 9, 9],
+    [b.id, goose.id, 3, 3],
+    [a.id, vigilante.id, 2, 2],
+  ]);
 });
 
 test('faction top ties: earlier approval first, then member id, then role id', async () => {
@@ -468,7 +605,7 @@ test('faction top takes `limit` rows per faction (default 3) with ranks 1..n, an
   const members = [a, b, await createMember(testDb, { displayName: 'Cường' }), await createMember(testDb, { displayName: 'Dũng' })];
   for (const [i, m] of members.entries()) await approved(m.id, { roleId: goose.id, value: i + 1 }); // Ngỗng 1..4
   // Role tắt sau khi đã có điểm vẫn tính (lịch sử), như bảng xếp hạng theo role.
-  await approved(a.id, { roleId: vigilante.id, value: 1 }); // ×5 = 5
+  await approved(a.id, { roleId: vigilante.id, value: 1 }); // points 5 → 5 điểm
   await testDb.role.update({ where: { id: vigilante.id }, data: { active: false } });
 
   const top = await getFactionTop(ctx, '2026-10');
@@ -526,10 +663,11 @@ const totalRow = (rank: number, m: Member, points: number) => ({
   points,
 });
 
-test('faction totals sum every (member, role) pair of the faction with role weights and extra metrics; "all" sums the three', async () => {
-  const vigilante = await roleByKey(testDb, 'vigilante'); // Ngỗng, ×5
+test('faction totals sum the season points of every (member, role) pair of the faction (no ×5); "all" sums the three', async () => {
+  const vigilante = await roleByKey(testDb, 'vigilante'); // Ngỗng, points 5
   const assassin = await roleByKey(testDb, 'assassin'); // Vịt, chỉ số phụ ×3
-  const dodo = await roleByKey(testDb, 'dodo'); // Phe thứ 3, ×5
+  const dodo = await roleByKey(testDb, 'dodo'); // Phe thứ 3, points 5 (role tối đa 1 mỗi trận)
+  expect(dodo.points).toBe(5);
   // An: Vịt 4 + Kiếm sĩ 3 + Ám sát (2 + 1×3 = 5) = 12 Vịt; Dân phòng 1×5 = 5 Ngỗng → cả 3 phe 17.
   await approved(a.id, { value: 4 });
   await approved(a.id, { roleId: swordsman.id, value: 3 });

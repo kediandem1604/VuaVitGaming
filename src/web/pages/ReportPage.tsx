@@ -723,7 +723,7 @@ function ReportItem({ report, highlight }: ReportItemProps) {
       ) : (
         <>
           {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
-          <p className="font-bold break-words text-white">{formatReportValue(report.value, report.extraValue, report.role)}</p>
+          <p className="font-bold break-words text-white">{formatReportValue(report, report.role)}</p>
           {report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>}
           {report.note && <p className="text-sm text-night-200">{report.note}</p>}
           {/* `rejectReason` là lý do của cả từ chối lẫn huỷ duyệt. */}

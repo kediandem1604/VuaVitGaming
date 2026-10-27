@@ -202,7 +202,19 @@ async function loadTitles(ctx: Ctx, seasonId: string): Promise<SeasonTitle[]> {
     where: { seasonId },
     select: {
       score: true,
-      role: { select: { faction: true, nameVi: true, metricLabel: true, extraMetricLabel: true, extraPoints: true } },
+      role: {
+        select: {
+          faction: true,
+          nameVi: true,
+          metricLabel: true,
+          points: true,
+          extraMetricLabel: true,
+          extraPoints: true,
+          penaltyMetricLabel: true,
+          penaltyMaxPerGame: true,
+          penaltyPoints: true,
+        },
+      },
       member: { select: { displayName: true } },
     },
     orderBy: [{ role: { sortOrder: 'asc' } }, { roleId: 'asc' }],
@@ -213,8 +225,12 @@ async function loadTitles(ctx: Ctx, seasonId: string): Promise<SeasonTitle[]> {
     displayName: r.member.displayName,
     score: r.score,
     metricLabel: r.role.metricLabel,
+    points: r.role.points,
     extraMetricLabel: r.role.extraMetricLabel,
     extraPoints: r.role.extraPoints,
+    penaltyMetricLabel: r.role.penaltyMetricLabel,
+    penaltyMaxPerGame: r.role.penaltyMaxPerGame,
+    penaltyPoints: r.role.penaltyPoints,
   }));
 }
 

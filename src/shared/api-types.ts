@@ -120,6 +120,8 @@ export interface RoleDto {
   metricLabel: string;
   /** Giới hạn giá trị một lần khai (1–100). */
   maxPerGame: number;
+  /** Điểm mỗi đơn vị chỉ số chính (1–100, mặc định 1) — spec điểm role §3. */
+  points: number;
   /**
    * Chỉ số phụ (tuỳ chọn): tên, giới hạn một lần khai (1–100) và điểm mỗi đơn vị (1–100).
    * Cả ba cùng có hoặc cùng null (role không có chỉ số phụ).
@@ -127,6 +129,13 @@ export interface RoleDto {
   extraMetricLabel: string | null;
   extraMaxPerGame: number | null;
   extraPoints: number | null;
+  /**
+   * Chỉ số phạt (tuỳ chọn, spec điểm role §3): tên, giới hạn một lần khai (1–100) và điểm bị TRỪ
+   * mỗi đơn vị (1–100, số dương). Cả ba cùng có hoặc cùng null (role không có chỉ số phạt).
+   */
+  penaltyMetricLabel: string | null;
+  penaltyMaxPerGame: number | null;
+  penaltyPoints: number | null;
   mapNote: string | null;
   modeKey: string | null;
   /** Biểu tượng emoji của role. */
@@ -147,10 +156,14 @@ export interface EndOptionDto {
 /** Trạng thái một lần khai điểm: chờ duyệt, đã duyệt, bị từ chối, bị huỷ duyệt (từ `approved`, trạng thái cuối). */
 export type ReportStatus = 'pending' | 'approved' | 'rejected' | 'revoked';
 
+/** Nguồn một lần khai: `self` do chính người chơi khai; `accusation` là mục trừ điểm tạo khi duyệt báo cáo người chơi (spec điểm role §6). */
+export type ReportSource = 'self' | 'accusation';
+
 /**
  * Phần role kèm trong một lần khai: đủ để vẽ dòng, giới hạn ô nhập khi sửa (`maxPerGame`,
- * `extraMaxPerGame`) và đọc "x + y" / điểm (`metricLabel`, `extraMetricLabel`, `extraPoints`).
- * Ba trường chỉ số phụ cùng có hoặc cùng null (role không có chỉ số phụ).
+ * `extraMaxPerGame`, `penaltyMaxPerGame`) và đọc "x + y − z" / điểm (`metricLabel`, `points`,
+ * `extraMetricLabel`, `extraPoints`, `penaltyMetricLabel`, `penaltyPoints`). Mỗi bộ ba trường
+ * phụ/phạt cùng có hoặc cùng null (role không có chỉ số đó).
  */
 export interface ReportRoleDto {
   id: number;
@@ -158,9 +171,13 @@ export interface ReportRoleDto {
   icon: string;
   metricLabel: string;
   maxPerGame: number;
+  points: number;
   extraMetricLabel: string | null;
   extraMaxPerGame: number | null;
   extraPoints: number | null;
+  penaltyMetricLabel: string | null;
+  penaltyMaxPerGame: number | null;
+  penaltyPoints: number | null;
 }
 
 /**
@@ -168,8 +185,10 @@ export interface ReportRoleDto {
  * (ngày VN), `createdAt` ISO 8601 (UTC). `rejectReason` là lý do từ chối (`status = 'rejected'`)
  * hoặc lý do huỷ duyệt (`status = 'revoked'`); `null` ở các trạng thái khác.
  * `highlightUrl` là link tới tin Discord chứa highlight (mở tab mới), `null` khi chưa kèm.
- * `extraValue` là chỉ số phụ (0 với role không có); `points = value + extraValue × extraPoints`
- * theo điểm mỗi lần hiện tại của role (spec chỉ số phụ §3).
+ * `extraValue` là chỉ số phụ, `penaltyValue` chỉ số phạt (0 với role không có); `bonusPoints` là
+ * +1 khi báo cáo kèm theo được duyệt đúng; `source` cho biết lần khai do người chơi khai hay là mục
+ * trừ điểm do báo cáo. `points = value × points + extraValue × extraPoints − penaltyValue ×
+ * penaltyPoints + bonusPoints` theo điểm hiện tại của role (spec điểm role §3), có thể âm.
  */
 export interface ReportDto {
   id: number;
@@ -177,6 +196,9 @@ export interface ReportDto {
   role: ReportRoleDto;
   value: number;
   extraValue: number;
+  penaltyValue: number;
+  bonusPoints: number;
+  source: ReportSource;
   points: number;
   playedOn: string;
   sessionId: number | null;
@@ -209,7 +231,8 @@ export interface HighlightConfigDto {
 
 /**
  * Một dòng bảng xếp hạng của một role trong một mùa. Hạng 1..n liên tiếp (không đồng
- * hạng); `lastApprovedAt` ISO 8601 (UTC) là lần duyệt gần nhất của người đó ở role này
+ * hạng); `games` chỉ đếm lần khai do chính người chơi khai (không đếm mục trừ điểm do báo
+ * cáo); `lastApprovedAt` ISO 8601 (UTC) là lần duyệt gần nhất của người đó ở role này
  * trong mùa — mốc dùng để phân hoà điểm (ai đạt mức điểm đó trước xếp trên).
  */
 export interface LeaderboardRowDto {
@@ -224,21 +247,32 @@ export interface LeaderboardRowDto {
 
 /**
  * Một dòng "Top 3 mỗi phe" (`GET /api/leaderboard/factions`): một cặp (người, role) trong
- * một mùa. `value` là điểm mùa của cặp đó (tổng điểm các lần khai đã duyệt — với role có
- * chỉ số phụ đã gồm `extraValue × extraPoints`); `weight` là hệ số của role (5 khi role tối
- * đa 1 mỗi trận, còn lại 1); `points = value × weight` là điểm dùng để xếp hạng trong phe.
- * Một người có thể có nhiều dòng (mỗi role một dòng). Hạng 1..n liên tiếp, không đồng hạng.
- * `role` chỉ gồm những gì cần để vẽ dòng (kể cả đọc `value` là "N điểm" hay "N {nhãn}") và
- * dẫn tới bảng của role đó.
+ * một mùa. `value` là điểm mùa của cặp đó (tổng điểm các lần khai đã duyệt theo luật spec điểm
+ * role §3: chính × `points`, cộng chỉ số phụ, trừ chỉ số phạt, cộng bonus); `points` là điểm
+ * dùng để xếp hạng trong phe — bằng đúng `value` (luật ×5 cũ đã bỏ). Một người có thể có
+ * nhiều dòng (mỗi role một dòng). Hạng 1..n liên tiếp, không đồng hạng. `role` chỉ gồm những
+ * gì cần để vẽ dòng (kể cả đọc `value` là "N điểm" hay "N {nhãn}" — khớp `MetricRole`) và dẫn
+ * tới bảng của role đó. `games` chỉ đếm lần khai do chính người chơi khai.
  */
 export interface FactionTopRowDto {
   rank: number;
   memberId: number;
   displayName: string;
   avatarUrl: string | null;
-  role: { id: number; nameVi: string; icon: string; metricLabel: string; extraMetricLabel: string | null; extraPoints: number | null; faction: Faction };
+  role: {
+    id: number;
+    nameVi: string;
+    icon: string;
+    metricLabel: string;
+    points: number;
+    extraMetricLabel: string | null;
+    extraPoints: number | null;
+    penaltyMetricLabel: string | null;
+    penaltyMaxPerGame: number | null;
+    penaltyPoints: number | null;
+    faction: Faction;
+  };
   value: number;
-  weight: number;
   points: number;
   games: number;
 }
@@ -254,8 +288,8 @@ export interface FactionTopDto {
 
 /**
  * Một dòng "Tổng điểm theo phe" (`GET /api/leaderboard/totals`): một NGƯỜI trong một bảng.
- * `points` = tổng điểm có hệ số của mọi cặp (người, role) thuộc phe đó trong mùa (cùng luật
- * với `FactionTopRowDto.points`); bảng "Cả 3 phe" cộng ba phe. Hạng 1..n liên tiếp.
+ * `points` = tổng điểm mùa của mọi cặp (người, role) điểm > 0 thuộc phe đó trong mùa (cùng
+ * luật với `FactionTopRowDto.points`); bảng "Cả 3 phe" cộng ba phe. Hạng 1..n liên tiếp.
  */
 export interface FactionTotalRowDto {
   rank: number;

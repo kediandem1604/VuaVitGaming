@@ -80,11 +80,24 @@ export async function attachHighlight(ctx: Ctx, memberId: number, reportId: numb
           status: true,
           value: true,
           extraValue: true,
+          penaltyValue: true,
           playedOn: true,
           highlightChannelId: true,
           highlightMessageId: true,
           member: { select: { displayName: true } },
-          role: { select: { nameVi: true, icon: true, metricLabel: true, extraMetricLabel: true, extraPoints: true } },
+          role: {
+            select: {
+              nameVi: true,
+              icon: true,
+              metricLabel: true,
+              points: true,
+              extraMetricLabel: true,
+              extraPoints: true,
+              penaltyMetricLabel: true,
+              penaltyMaxPerGame: true,
+              penaltyPoints: true,
+            },
+          },
         },
       })
     : null;
@@ -102,8 +115,8 @@ export async function attachHighlight(ctx: Ctx, memberId: number, reportId: numb
   const post: HighlightPost = {
     memberName: report.member.displayName,
     roleLabel: `${report.role.icon} ${report.role.nameVi}`,
-    // Role có chỉ số phụ đọc "x + y" (spec chỉ số phụ §7).
-    valueText: formatReportValue(report.value, report.extraValue, report.role),
+    // Role có chỉ số phụ/phạt đọc "x + y − z" (spec điểm role §5).
+    valueText: formatReportValue(report, report.role),
     playedOnText: toDmy(dbToDateOnly(report.playedOn)),
     fileName: `highlight-${report.id}.${kind.ext}`,
     data: upload.data,

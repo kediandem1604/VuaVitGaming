@@ -19,7 +19,7 @@
  * `game_sessions.starts_at` (như Sảnh tri ân); nhóm hạng mục đọc giá trị HIỆN TẠI của
  * `award_categories.badge_group`. Một trận đã đi = điểm danh `going` ở buổi `ended`. Đa
  * diện đếm role khác nhau có lần khai đã duyệt với ngày chơi trong tháng. Top phe = hạng
- * 1 của `getFactionTop(ctx, M, 1)` (đã ×5 role tối đa 1/trận và phân hoà).
+ * 1 của `getFactionTop(ctx, M, 1)` (điểm mùa theo `points` của role, đã phân hoà).
  */
 
 import { Prisma } from '@prisma/client';

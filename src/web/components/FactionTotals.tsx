@@ -1,6 +1,6 @@
 /**
  * Mục "Tổng điểm theo phe" cuối trang Bảng xếp hạng: bốn tab "Cả 3 phe" / "Ngỗng" / "Vịt" /
- * "Phe thứ 3" cho mùa đang chọn, mỗi tab một bảng top 20 người theo tổng điểm có hệ số của mọi
+ * "Phe thứ 3" cho mùa đang chọn, mỗi tab một bảng top 20 người theo tổng điểm mùa của mọi
  * cặp (người, role) thuộc phe đó (server tính, `FactionTotalsDto`). Dòng của người đang xem
  * tô sáng (nền vàng nhạt, viền trái vàng) kèm chữ ẩn "(bạn)"; người xem ngoài top 20 nhưng có
  * điểm thấy thêm dòng "Hạng của bạn: #N · M điểm" cuối bảng; không có điểm ở tab đó thì không

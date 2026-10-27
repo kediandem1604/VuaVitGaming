@@ -68,6 +68,22 @@ enum ReportStatus {
   revoked
 }
 
+/// Nguồn một lần khai: `self` do chính người chơi khai; `accusation` là mục trừ điểm tạo khi một
+/// báo cáo người chơi được duyệt đúng (spec điểm role §6). `games` trên bảng role chỉ đếm `self`.
+enum ReportSource {
+  self
+  accusation
+}
+
+/// Trạng thái một báo cáo người chơi (spec điểm role §6): `superseded` khi báo cáo trùng khác của
+/// cùng vụ đã được duyệt trước.
+enum AccusationStatus {
+  pending
+  approved
+  rejected
+  superseded
+}
+
 /// Nhóm hạng mục tri ân tính cho danh hiệu tháng: `mvp` (Khen → SMVP), `fun` (Vui → Vua tấu hài), `none` (không tính).
 enum BadgeGroup {
   mvp
@@ -109,6 +125,10 @@ model Member {
   revokedReports  StatReport[]      @relation("ReportRevoker")
   roleTitles      RoleTitle[]
   badges          MemberBadge[]
+  accusationsMade     PlayerAccusation[] @relation("AccusationReporter")
+  accusationsReceived PlayerAccusation[] @relation("AccusationAccused")
+  accusationsAsVictim PlayerAccusation[] @relation("AccusationVictim")
+  accusationsReviewed PlayerAccusation[] @relation("AccusationReviewer")
 
   @@map("members")
 }
@@ -291,11 +311,19 @@ model Role {
   description      String
   metricLabel      String  @map("metric_label")
   maxPerGame       Int     @map("max_per_game")
+  /// Điểm mỗi đơn vị chỉ số chính (spec điểm role §3), 1–100 (CHECK roles_points_range); thay luật ×5 cũ.
+  points           Int     @default(1)
   /// Chỉ số phụ tuỳ chọn (spec chỉ số phụ §3–4): mỗi đơn vị `extraValue` của lần khai
   /// được `extraPoints` điểm. Ba cột cùng null hoặc cùng có (CHECK roles_extra_metric_all_or_none).
   extraMetricLabel String? @map("extra_metric_label")
   extraMaxPerGame  Int?    @map("extra_max_per_game")
   extraPoints      Int?    @map("extra_points")
+  /// Chỉ số phạt tuỳ chọn (spec điểm role §3–4): mỗi đơn vị `penaltyValue` của lần khai bị TRỪ
+  /// `penaltyPoints` điểm (1–100, CHECK roles_penalty_points_range). Ba cột cùng null hoặc cùng có
+  /// (CHECK roles_penalty_metric_all_or_none).
+  penaltyMetricLabel String? @map("penalty_metric_label")
+  penaltyMaxPerGame  Int?    @map("penalty_max_per_game")
+  penaltyPoints      Int?    @map("penalty_points")
   mapNote          String? @map("map_note")
   modeId           Int?    @map("mode_id")
   icon             String
@@ -307,6 +335,7 @@ model Role {
   mode        GameMode?    @relation(fields: [modeId], references: [id])
   statReports StatReport[]
   roleTitles  RoleTitle[]
+  accusations PlayerAccusation[]
 
   @@map("roles")
 }
@@ -320,6 +349,12 @@ model StatReport {
   value        Int
   /// Giá trị chỉ số phụ của role (0 khi role không có chỉ số phụ); CHECK extra_value >= 0.
   extraValue   Int          @default(0) @map("extra_value")
+  /// Giá trị chỉ số phạt của role (0 khi role không có); CHECK penalty_value >= 0. Bị TRỪ `penaltyPoints` mỗi đơn vị.
+  penaltyValue Int          @default(0) @map("penalty_value")
+  /// +1 khi báo cáo kèm lần khai này được duyệt đúng (spec điểm role §6); CHECK 0..1.
+  bonusPoints  Int          @default(0) @map("bonus_points")
+  /// `self` do người chơi khai; `accusation` là mục trừ điểm tạo khi duyệt báo cáo (không đếm vào `games`).
+  source       ReportSource @default(self)
   note         String?
   status       ReportStatus @default(pending)
   reviewedById Int?         @map("reviewed_by")
@@ -339,10 +374,47 @@ model StatReport {
   session    GameSession? @relation(fields: [sessionId], references: [id])
   reviewedBy Member?      @relation("ReportReviewer", fields: [reviewedById], references: [id])
   revokedBy  Member?      @relation("ReportRevoker", fields: [revokedById], references: [id])
+  /// Báo cáo người chơi kèm lần khai này (của chính người khai), nếu có.
+  accusation PlayerAccusation? @relation("AccusationReport")
+  /// Báo cáo mà lần khai này là mục trừ điểm của nó (`source = accusation`).
+  penaltyFor PlayerAccusation? @relation("AccusationPenaltyReport")
 
   @@index([roleId, status, playedOn])
   @@index([memberId, createdAt])
   @@map("stat_reports")
+}
+
+/// Báo cáo người chơi (spec điểm role §4, §6): người khai `reporter` báo `accused` (đang chơi
+/// `accusedRole`) đã bắn `victim` thuộc `victimFaction` trong ngày `playedOn` (= ngày chơi của lần khai
+/// `report`). Duyệt đúng → `report.bonusPoints = 1`, tạo lần khai trừ điểm `penaltyReport`
+/// (`source = accusation`); báo cáo trùng cùng vụ (accused, role, victim, playedOn) còn `pending` →
+/// `superseded`. CHECK: `accused_id <> reporter_id`, `victim_id <> accused_id`. Task này chỉ tạo bảng.
+model PlayerAccusation {
+  id              Int              @id @default(autoincrement())
+  reportId        Int              @unique @map("report_id")
+  reporterId      Int              @map("reporter_id")
+  accusedId       Int              @map("accused_id")
+  accusedRoleId   Int              @map("accused_role_id")
+  victimId        Int              @map("victim_id")
+  victimFaction   Faction          @map("victim_faction")
+  playedOn        DateTime         @map("played_on") @db.Date
+  status          AccusationStatus @default(pending)
+  rejectReason    String?          @map("reject_reason")
+  penaltyReportId Int?             @unique @map("penalty_report_id")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  reviewedById    Int?             @map("reviewed_by")
+  reviewedAt      DateTime?        @map("reviewed_at") @db.Timestamptz(3)
+
+  report        StatReport  @relation("AccusationReport", fields: [reportId], references: [id])
+  reporter      Member      @relation("AccusationReporter", fields: [reporterId], references: [id])
+  accused       Member      @relation("AccusationAccused", fields: [accusedId], references: [id])
+  accusedRole   Role        @relation(fields: [accusedRoleId], references: [id])
+  victim        Member      @relation("AccusationVictim", fields: [victimId], references: [id])
+  penaltyReport StatReport? @relation("AccusationPenaltyReport", fields: [penaltyReportId], references: [id])
+  reviewedBy    Member?     @relation("AccusationReviewer", fields: [reviewedById], references: [id])
+
+  @@index([accusedId, accusedRoleId, victimId, playedOn, status])
+  @@map("player_accusations")
 }
 
 model Season {

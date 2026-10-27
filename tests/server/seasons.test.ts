@@ -361,8 +361,12 @@ test('a summary that fails midway is reposted whole on the next run', async () =
       displayName: long.displayName,
       score: i + 1,
       metricLabel: r.metricLabel,
+      points: r.points,
       extraMetricLabel: r.extraMetricLabel,
       extraPoints: r.extraPoints,
+      penaltyMetricLabel: r.penaltyMetricLabel,
+      penaltyMaxPerGame: r.penaltyMaxPerGame,
+      penaltyPoints: r.penaltyPoints,
     })),
   );
   expect(expected.length).toBeGreaterThanOrEqual(2);
@@ -544,13 +548,25 @@ function manyTitles(n: number): SeasonTitle[] {
     displayName: `Người chơi có tên khá dài số ${i + 1}`,
     score: i + 1,
     metricLabel: 'Số mạng đã giết',
+    points: 1,
     extraMetricLabel: null,
     extraPoints: null,
+    penaltyMetricLabel: null,
+    penaltyMaxPerGame: null,
+    penaltyPoints: null,
   }));
 }
 
-/** Role thường trong `SeasonTitle`: không có chỉ số phụ. */
-const plain = (metricLabel: string) => ({ metricLabel, extraMetricLabel: null, extraPoints: null });
+/** Role thường trong `SeasonTitle`: ×1, không có chỉ số phụ hay phạt. */
+const plain = (metricLabel: string) => ({
+  metricLabel,
+  points: 1,
+  extraMetricLabel: null,
+  extraPoints: null,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
+});
 
 test('summary split under Discord limit', () => {
   const titles = manyTitles(120);
@@ -592,7 +608,7 @@ test('summary groups by faction in order, omits empty factions, and has a one-li
 });
 
 test('summary writes "N điểm" for a role with an extra metric', () => {
-  const assassin = { metricLabel: 'Số mạng đã giết', extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraPoints: 3 };
+  const assassin = { ...plain('Số mạng đã giết'), extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraPoints: 3 };
   expect(
     buildSeasonSummary('2026-10', [
       { faction: 'duck', roleName: 'Ám sát', displayName: 'An', score: 10, ...assassin },

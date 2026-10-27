@@ -5,15 +5,22 @@ import type { ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
 import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, TITLES_QUERY_KEY } from '../../src/web/lib/queryKeys';
 import { ReviewsTab } from '../../src/web/pages/admin/ReviewsTab';
 
-/** Phần role của một lần khai; `extra` = ba trường chỉ số phụ (mặc định không có). */
-const reportRole = (
-  id: number,
-  nameVi: string,
-  icon: string,
-  metricLabel: string,
-  maxPerGame = 15,
-  extra: Pick<ReportDto['role'], 'extraMetricLabel' | 'extraMaxPerGame' | 'extraPoints'> = { extraMetricLabel: null, extraMaxPerGame: null, extraPoints: null },
-): ReportDto['role'] => ({ id, nameVi, icon, metricLabel, maxPerGame, ...extra });
+/** Phần role của một lần khai; `over` ghi đè điểm mỗi lần, chỉ số phụ, chỉ số phạt (mặc định ×1, không có). */
+const reportRole = (id: number, nameVi: string, icon: string, metricLabel: string, maxPerGame = 15, over: Partial<ReportDto['role']> = {}): ReportDto['role'] => ({
+  id,
+  nameVi,
+  icon,
+  metricLabel,
+  maxPerGame,
+  points: 1,
+  extraMetricLabel: null,
+  extraMaxPerGame: null,
+  extraPoints: null,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
+  ...over,
+});
 
 const ASSASSIN = reportRole(50, 'Ám sát', '🗡️', 'Số mạng đã giết', 15, { extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraMaxPerGame: 2, extraPoints: 3 });
 
@@ -22,6 +29,9 @@ const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id'>): ReportDto => 
   role: reportRole(61, 'Kiếm sĩ', '⚔️', 'Số mạng chém'),
   value: 4,
   extraValue: 0,
+  penaltyValue: 0,
+  bonusPoints: 0,
+  source: 'self',
   points: over.value ?? 4,
   playedOn: '2026-10-22',
   sessionId: 7,

@@ -247,7 +247,7 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
     const extraValue = interaction.options.getInteger(OPTION.extraValue) ?? 0;
     const report = await submitReport(ctx, member.id, { roleId: role.id, value, extraValue, playedOn, note: interaction.options.getString(OPTION.note) });
     await interaction.editReply(
-      `Đã gửi: ${role.icon} ${role.nameVi} — ${formatReportValue(report.value, report.extraValue, role)} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
+      `Đã gửi: ${role.icon} ${role.nameVi} — ${formatReportValue(report, role)} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
     );
   } catch (err) {
     await answerError(interaction, `/${interaction.commandName}`, err);

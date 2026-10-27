@@ -266,7 +266,7 @@ function ReportSummary({ report, meta }: { report: ReportDto; meta: ReactNode })
         </time>
       </div>
       {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
-      <p className="text-lg leading-tight font-extrabold break-words text-white">{formatReportValue(report.value, report.extraValue, report.role)}</p>
+      <p className="text-lg leading-tight font-extrabold break-words text-white">{formatReportValue(report, report.role)}</p>
       <p className="text-night-300">{meta}</p>
       {report.note && <p className="text-night-200">{report.note}</p>}
       {report.highlightUrl && <HighlightLink href={report.highlightUrl} />}

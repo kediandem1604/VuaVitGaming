@@ -2,8 +2,9 @@
  * Bảng xếp hạng (spec §8, §6): chọn mùa ở đầu trang, rồi ba phần cho mùa đó.
  *
  * "Top 3 mỗi phe": ba khối Phe Ngỗng / Phe Vịt / Phe thứ 3 (cạnh nhau từ `md`, xếp dọc ở
- * điện thoại), mỗi dòng là một cặp (người, role) với điểm = giá trị thô × hệ số của role
- * (server tính, `FactionTopDto`); cùng một người có thể có nhiều dòng. Phe trống → "Chưa có ai".
+ * điện thoại), mỗi dòng là một cặp (người, role) với điểm = điểm mùa của cặp đó (server tính,
+ * `FactionTopDto`; luật ×5 cũ đã bỏ, điểm theo `points` của role); cùng một người có thể có
+ * nhiều dòng. Phe trống → "Chưa có ai".
  *
  * Bên dưới: chọn role (ô chọn tự làm `Select` có ô tìm, nhóm theo phe, role chế độ đặc biệt
  * thành nhóm riêng) rồi top 50 của role đó trong mùa đó: bục vinh danh 1-2-3 (`Podium`) và
@@ -11,10 +12,11 @@
  * phe, bục, bảng) là link tới trang thành viên công khai (spec huy hiệu §9).
  *
  * Role có chỉ số phụ (spec chỉ số phụ §7): dòng "Chỉ số:" ghi cả hai chỉ số kèm điểm mỗi đơn
- * vị; điểm mùa trên bục, trong bảng và ở "Top 3 mỗi phe" đọc "N điểm" thay cho `{N} {nhãn}`.
+ * vị; điểm mùa trên bục, trong bảng và ở "Top 3 mỗi phe" đọc "N điểm" thay cho `{N} {nhãn}`
+ * (cũng vậy với role có points ≠ 1 hay có chỉ số phạt — spec điểm role §5).
  *
  * Cuối trang: "Tổng điểm theo phe" (`FactionTotals`) — bốn tab, mỗi tab top 20 người theo tổng
- * điểm có hệ số của phe đó (hoặc cả ba phe), kèm dòng của chính người xem.
+ * điểm mùa của phe đó (hoặc cả ba phe), kèm dòng của chính người xem.
  *
  * Role trong `?role={id}`, mùa trong `?mua=YYYY-MM` (Đại sảnh và dòng "Top 3 mỗi phe" dẫn
  * tới đây với cả hai); giá trị lạ về mặc định (role đầu danh mục, mùa mới nhất), không gửi lên API.
@@ -130,11 +132,11 @@ export function LeaderboardPage() {
 
 /**
  * Phần sau "Chỉ số:" — role thường chỉ có nhãn; role có chỉ số phụ ghi cả hai kèm điểm mỗi đơn vị
- * (chỉ số chính luôn +1): "Số mạng đã giết (+1 điểm) · Số lần ám sát trong cuộc họp (+3 điểm)".
+ * (chỉ số chính theo `points` của role): "Số mạng đã giết (+1 điểm) · Số lần ám sát trong cuộc họp (+3 điểm)".
  */
 function metricsLine(role: RoleDto): string {
   if (!hasExtraMetric(role)) return role.metricLabel;
-  return `${role.metricLabel} (+1 điểm) · ${role.extraMetricLabel} (+${role.extraPoints} điểm)`;
+  return `${role.metricLabel} (+${role.points} điểm) · ${role.extraMetricLabel} (+${role.extraPoints} điểm)`;
 }
 
 /** `?role=` phải là số nguyên và là một role đang bật; không thì role đầu danh mục. */
@@ -202,8 +204,8 @@ function FactionBlock({ faction, rows, seasonId }: FactionBlockProps) {
 
 /**
  * Một dòng: huy chương, avatar, rồi hai dòng chữ — tên người (link tới trang thành viên) với
- * `{điểm} điểm` bên phải (role có hệ số ghi thêm `{giá trị} × {hệ số}` nhỏ bên dưới), và
- * `{icon} {role} · {điểm mùa} {chỉ số}` (role có chỉ số phụ: `{điểm mùa} điểm`) với tên role là
+ * `{điểm} điểm` bên phải (điểm mùa của cặp, không còn hệ số ×5), và
+ * `{icon} {role} · {điểm mùa} {chỉ số}` (role có points ≠ 1, chỉ số phụ hoặc phạt: `{điểm mùa} điểm`) với tên role là
  * link tới bảng của role đó trong mùa đang xem. Hai link tách dòng, không lồng nhau. Hai dòng
  * để nhãn chỉ số dài (tới 40 ký tự) xuống dòng thay vì tràn ngang ở 320px.
  */
@@ -219,14 +221,7 @@ function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string
           <Link to={memberPath(row.memberId)} className="min-w-0 truncate font-bold text-white hover:underline">
             {row.displayName}
           </Link>
-          <span className="shrink-0 text-right">
-            <span className="font-bold text-gold tabular-nums">{row.points} điểm</span>
-            {row.weight !== 1 && (
-              <span className="block text-xs text-night-300 tabular-nums" title="Role tối đa 1 mỗi trận: nhân hệ số">
-                {row.value} × {row.weight}
-              </span>
-            )}
-          </span>
+          <span className="shrink-0 font-bold text-gold tabular-nums">{row.points} điểm</span>
         </div>
         <p className="text-sm break-words text-night-300">
           <Link to={`/bang-xep-hang?${ROLE_PARAM}=${row.role.id}&${SEASON_PARAM}=${seasonId}`} className="font-bold text-night-200 hover:underline">
