@@ -378,6 +378,7 @@ test('listRecentlyApproved: approved reports of open seasons, newest review firs
     highlightUrl: null,
     accusation: null,
     accusationDuplicate: false,
+    accusationWaitingFor: null,
     penaltyOf: null,
     reviewedBy: { id: mod.id, displayName: 'Mod' },
     reviewedAt: '2026-10-10T05:00:00.000Z',

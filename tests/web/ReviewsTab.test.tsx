@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { AccusationDto, ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
-import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, TITLES_QUERY_KEY } from '../../src/web/lib/queryKeys';
+import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY, TITLES_QUERY_KEY } from '../../src/web/lib/queryKeys';
 import { ReviewsTab } from '../../src/web/pages/admin/ReviewsTab';
 
 /** Phần role của một lần khai; `over` ghi đè điểm mỗi lần, chỉ số phụ, chỉ số phạt (mặc định ×1, không có). */
@@ -43,6 +43,7 @@ const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id'>): ReportDto => 
   highlightUrl: null,
   accusation: null,
   accusationDuplicate: false,
+  accusationWaitingFor: null,
   penaltyOf: null,
   ...over,
 });
@@ -297,7 +298,7 @@ test('revoking requires a non-blank reason before anything is sent', async () =>
 test('revoking posts the trimmed reason, removes the row and refreshes leaderboards', async () => {
   let posted: unknown = null;
   stubFetch({
-    [APPROVED_ROUTE]: () => json(200, approved),
+    [APPROVED_ROUTE]: () => json(200, posted === null ? approved : approved.filter((r) => r.id !== 21)),
     'POST /api/admin/reports/21/revoke': (init) => {
       posted = JSON.parse(String(init?.body));
       return noContent();
@@ -324,6 +325,8 @@ test('revoking posts the trimmed reason, removes the row and refreshes leaderboa
   expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_REPORTS_KEY });
   // Bảng "Tổng điểm theo phe" cũng tính lần khai này.
   expect(invalidate).toHaveBeenCalledWith({ queryKey: LEADERBOARD_TOTALS_KEY });
+  // Mục trừ điểm do báo cáo kèm lần khai này cũng vừa bị huỷ dây chuyền → tải lại danh sách đã duyệt.
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: APPROVED_REPORTS_KEY });
 });
 
 test('NOT_APPROVED shows the server message and refetches the list', async () => {
@@ -459,7 +462,8 @@ const REVIEW_1 = 'POST /api/admin/reports/1/review';
 test('a queued report with an accusation shows the box and three buttons; "Duyệt" approves both', async () => {
   let posted: unknown = null;
   stubFetch({
-    [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: accusation() }), queue[1] as ReportDto]),
+    // Sau khi duyệt, hàng chờ tải lại (báo cáo vừa được quyết) không còn lần khai 1.
+    [PENDING_ROUTE]: () => json(200, posted === null ? [report({ id: 1, accusation: accusation() }), queue[1] as ReportDto] : [queue[1] as ReportDto]),
     [REVIEW_1]: (init) => {
       posted = JSON.parse(String(init?.body));
       return noContent();
@@ -484,7 +488,7 @@ test('a queued report with an accusation shows the box and three buttons; "Duy�
 test('"Duyệt, bỏ báo cáo" needs a reason, then approves the report while rejecting the accusation', async () => {
   let posted: unknown = null;
   const fetchMock = stubFetch({
-    [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: accusation() })]),
+    [PENDING_ROUTE]: () => json(200, posted === null ? [report({ id: 1, accusation: accusation() })] : []),
     [REVIEW_1]: (init) => {
       posted = JSON.parse(String(init?.body));
       return noContent();
@@ -594,4 +598,96 @@ test('recently approved: a penalty row reads "Bị báo cáo: …" with the "B�
   expect(approvedAcc).not.toHaveTextContent('bạn +1');
   expect(rejectedAcc).toHaveTextContent('Báo cáo bị bác: Không phải Dân phòng');
   expect(within(approvedAcc).queryByText('Bị trừ điểm')).not.toBeInTheDocument();
+});
+
+test('a duplicate waiting for an earlier accusation: note with the earlier reporter, "Duyệt" disabled, "Từ chối" still works', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: null, accusationDuplicate: true, accusationWaitingFor: { reporterName: 'Ngỗng Ba' } })]),
+    [REVIEW_1]: (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  renderTab();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  expect(first).toHaveTextContent('Báo cáo trùng — chờ quyết báo cáo sớm hơn của Ngỗng Ba');
+  const approve = within(first).getByRole('button', { name: 'Duyệt' });
+  expect(approve).toBeDisabled();
+  expect(approve).toHaveAccessibleDescription('Báo cáo trùng — chờ quyết báo cáo sớm hơn của Ngỗng Ba');
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Từ chối' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do từ chối' }), { target: { value: 'Khai gian' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận từ chối' }));
+  await waitFor(() => expect(posted).toEqual({ approve: false, reason: 'Khai gian' }));
+});
+
+test('a review that decided an accusation refreshes the queue (the next duplicate may surface)', async () => {
+  let listCalls = 0;
+  stubFetch({
+    [PENDING_ROUTE]: () => {
+      listCalls += 1;
+      return json(200, listCalls === 1 ? [report({ id: 1, accusation: accusation() })] : []);
+    },
+    [REVIEW_1]: () => noContent(),
+  });
+  const queryClient = renderTab();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt' }));
+  await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: PENDING_REPORTS_KEY }));
+  await waitFor(() => expect(listCalls).toBe(2));
+});
+
+test('a review without an accusation decision does not refetch the queue', async () => {
+  stubFetch({ [PENDING_ROUTE]: () => json(200, queue), 'POST /api/admin/reports/2/review': () => noContent() });
+  const queryClient = renderTab();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const second = (await screen.findAllByRole('listitem'))[1] as HTMLElement;
+  fireEvent.click(within(second).getByRole('button', { name: 'Duyệt' }));
+  await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(1));
+  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: PENDING_REPORTS_KEY });
+});
+
+test('VALIDATION on review shows the message and refetches the queue', async () => {
+  let listCalls = 0;
+  stubFetch({
+    [PENDING_ROUTE]: () => {
+      listCalls += 1;
+      return json(200, listCalls === 1 ? queue : [report({ id: 1, accusation: accusation() })]);
+    },
+    [REVIEW_1]: () => json(400, { error: { code: 'VALIDATION', message: 'Cần chọn duyệt hay bỏ báo cáo kèm lần khai' } }),
+  });
+  renderTab();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Cần chọn duyệt hay bỏ báo cáo kèm lần khai');
+  await waitFor(() => expect(listCalls).toBe(2));
+  expect(await screen.findByText(ACCUSATION_LINE)).toBeInTheDocument();
+});
+
+test('a reason error of one form does not show under the other form', async () => {
+  const fetchMock = stubFetch({ [PENDING_ROUTE]: () => json(200, [report({ id: 1, accusation: accusation() })]) });
+  renderTab();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+
+  // Lỗi lý do của "Duyệt, bỏ báo cáo" không sang form Từ chối.
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt, bỏ báo cáo' }));
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận duyệt, bỏ báo cáo' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Cần ghi lý do bỏ báo cáo');
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ' }));
+  expect(within(first).queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.click(within(first).getByRole('button', { name: 'Từ chối' }));
+  expect(within(first).queryByRole('alert')).not.toBeInTheDocument();
+
+  // Ngược lại: lỗi lý do từ chối không sang form bỏ báo cáo, kể cả khi mở lại.
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận từ chối' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Cần ghi lý do từ chối');
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ' }));
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt, bỏ báo cáo' }));
+  expect(within(first).queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ' }));
+  fireEvent.click(within(first).getByRole('button', { name: 'Từ chối' }));
+  expect(within(first).queryByRole('alert')).not.toBeInTheDocument();
+  expect(postCalls(fetchMock)).toHaveLength(0);
 });

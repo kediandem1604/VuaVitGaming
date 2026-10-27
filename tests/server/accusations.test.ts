@@ -296,11 +296,60 @@ test('two duplicates reviewed at the same moment: the accused is penalised once'
   const dup = await submitWith(accusation(), { memberId: dung.id });
   const mod2 = await createMember(testDb, { accessLevel: 'mod', displayName: 'Mod 2' });
 
-  // Hai lượt xếp hàng trên dòng mùa; thứ tự nào cũng xong cả hai.
-  await Promise.all([approveBoth(first), review(mod2, dup, { approve: true })]);
+  // Hai lượt xếp hàng trên dòng mùa. Lượt duyệt lần khai trùng đọc trước khi báo cáo sớm hơn được
+  // quyết thì bị chặn (409, chờ báo cáo sớm hơn); đọc sau thì báo cáo trùng đã `superseded`.
+  const [a, b] = await Promise.allSettled([approveBoth(first), review(mod2, dup, { approve: true })]);
+  expect(a.status).toBe('fulfilled');
+  if (b.status === 'rejected') {
+    expect(b.reason).toMatchObject({ code: 'NOT_PENDING' });
+    expect((await reportRow(dup)).status).toBe('pending');
+  } else {
+    expect((await reportRow(dup)).status).toBe('approved');
+  }
   expect(await penaltyRows()).toHaveLength(1);
   expect(await accusationOf(dup)).toMatchObject({ status: 'superseded', rejectReason: 'Đã có người báo cáo trước' });
-  expect((await reportRow(dup)).status).toBe('approved');
+});
+
+test('approving the report of a duplicate that waits for an earlier pending accusation → 409, nothing changes; rejecting is allowed', async () => {
+  const first = await submitWith();
+  setNow('2026-10-10T05:01:00Z');
+  const dup = await submitWith(accusation(), { memberId: dung.id });
+
+  // Hàng chờ cho mod biết dòng trùng đang chờ báo cáo của ai.
+  const queue = await listPendingReports(ctx);
+  expect(queue.find((r) => r.id === first)).toMatchObject({ accusationWaitingFor: null });
+  expect(queue.find((r) => r.id === dup)).toMatchObject({ accusation: null, accusationDuplicate: true, accusationWaitingFor: { reporterName: 'An' } });
+  // Người khai trùng không thấy tên người báo cáo kia.
+  expect((await listMyReports(ctx, dung.id))[0]).toMatchObject({ accusationDuplicate: true, accusationWaitingFor: null });
+
+  await expect(review(mod, dup, { approve: true })).rejects.toMatchObject({
+    code: 'NOT_PENDING',
+    message: 'Báo cáo kèm lần khai này trùng với báo cáo của An đang chờ — duyệt lần khai đó trước',
+  });
+  expect((await reportRow(dup)).status).toBe('pending');
+  expect(await accusationOf(dup)).toMatchObject({ status: 'pending', reviewedById: null });
+
+  // Từ chối lần khai trùng vẫn được: báo cáo trùng bị bác cùng lý do; báo cáo sớm hơn vẫn hiện.
+  await review(mod, dup, { approve: false, reason: 'Khai sai' });
+  expect(await accusationOf(dup)).toMatchObject({ status: 'rejected', rejectReason: 'Khai sai' });
+  expect((await listPendingReports(ctx)).find((r) => r.id === first)).toMatchObject({ accusationDuplicate: false, accusation: { status: 'pending' } });
+});
+
+test('rejecting the earliest accusation lets the waiting duplicate be approved', async () => {
+  const first = await submitWith();
+  setNow('2026-10-10T05:01:00Z');
+  const dup = await submitWith(accusation(), { memberId: dung.id });
+  await expect(review(mod, dup, { approve: true })).rejects.toMatchObject({ code: 'NOT_PENDING' });
+
+  await review(mod, first, { approve: false, reason: 'Khai sai', accusation: 'reject' });
+  expect((await listPendingReports(ctx)).find((r) => r.id === dup)).toMatchObject({
+    accusation: { id: (await accusationOf(dup)).id },
+    accusationDuplicate: false,
+    accusationWaitingFor: null,
+  });
+  await approveBoth(dup);
+  expect(await accusationOf(dup)).toMatchObject({ status: 'approved' });
+  expect(await penaltyRows()).toHaveLength(1);
 });
 
 test('a decision sent for an accusation that is hidden or gone → NOT_PENDING "xem lại"; no extra penalty', async () => {

@@ -18,7 +18,11 @@
  * "Duyệt" → `{approve: true, accusation: 'approve'}` (duyệt cả hai), "Duyệt, bỏ báo cáo" → form
  * lý do rồi `{approve: true, accusation: 'reject', reason}`, "Từ chối" → `{approve: false, reason,
  * accusation: 'reject'}`. Không có khung (không báo cáo, hoặc báo cáo trùng bị ẩn —
- * `accusationDuplicate`, hàng chờ không ghi gì) thì thân gửi như cũ, không có `accusation`.
+ * `accusationDuplicate`, hàng chờ không ghi gì) thì thân gửi như cũ, không có `accusation`. Báo cáo
+ * trùng còn chờ báo cáo sớm hơn của vụ (`accusationWaitingFor`): ghi chú "Báo cáo trùng — chờ quyết
+ * báo cáo sớm hơn của {tên}" và nút Duyệt bị khoá (server cũng chặn 409) — Từ chối vẫn được. Duyệt
+ * xong một lần khai có quyết định về báo cáo (hoặc nhận `VALIDATION`) thì tải lại hàng chờ: báo cáo
+ * trùng kế tiếp có thể vừa hiện lên.
  * "Đã duyệt gần đây" ghi khung kèm kết quả báo cáo (đúng / bị bác kèm lý do); mục trừ điểm do
  * bị báo cáo (`source = 'accusation'`) mang chip "Bị trừ điểm" và đọc "Bị báo cáo: bắn {tên}
  * ({phe}) − {điểm} điểm" (`lib/accusations.ts`), huỷ duyệt riêng được như mọi dòng.
@@ -52,6 +56,8 @@ import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, PENDING_R
 const SCORE_QUERY_KEYS = [['leaderboard'], ['leaderboard-factions'], LEADERBOARD_TOTALS_KEY, ['hall'], ['member'], TITLES_QUERY_KEY, MY_REPORTS_KEY] as const;
 /** Mã 409 cho biết danh sách "Đã duyệt gần đây" đang xem đã cũ (người khác vừa huỷ, hoặc mùa vừa chốt). */
 const STALE_APPROVED_CODES = new Set(['NOT_APPROVED', 'SEASON_CLOSED']);
+/** Mã lỗi cho biết hàng chờ đang xem đã cũ (người khác vừa duyệt / người khai vừa sửa / khung báo cáo đã đổi). */
+const STALE_PENDING_CODES = new Set(['NOT_PENDING', 'VALIDATION']);
 const REASON_MAX = 200;
 
 const LABEL_CLASS = 'text-sm font-bold text-night-200';
@@ -164,18 +170,27 @@ function PendingReport({ report }: { report: ReportDto }) {
       queryClient.setQueryData<ReportDto[]>(PENDING_REPORTS_KEY, (current) => current?.filter((item) => item.id !== report.id));
       // Vừa duyệt → lần khai này sang mục "Đã duyệt gần đây".
       if (body.approve) void queryClient.invalidateQueries({ queryKey: APPROVED_REPORTS_KEY });
+      // Báo cáo vừa được quyết: báo cáo trùng của vụ có thể vừa hiện lên (bị bác) hoặc bị thay thế (đúng).
+      if (body.accusation !== undefined) void queryClient.invalidateQueries({ queryKey: PENDING_REPORTS_KEY });
     },
     onError: (error) => {
-      // Đã có người xử lý, hoặc người khai vừa sửa: hàng chờ hiện tại đã cũ.
-      if (error instanceof ApiError && error.code === 'NOT_PENDING') void queryClient.invalidateQueries({ queryKey: PENDING_REPORTS_KEY });
+      // Đã có người xử lý, người khai vừa sửa, hoặc khung báo cáo đã đổi (`VALIDATION`): hàng chờ hiện tại đã cũ.
+      if (error instanceof ApiError && STALE_PENDING_CODES.has(error.code)) void queryClient.invalidateQueries({ queryKey: PENDING_REPORTS_KEY });
     },
   });
 
-  const error = rejectReason.localError ?? dropReason.localError ?? (review.isError ? errorMessage(review.error) : null);
+  // Lỗi tại chỗ chỉ của form đang mở.
+  const localError = mode === 'rejecting' ? rejectReason.localError : mode === 'dropping' ? dropReason.localError : null;
+  const error = localError ?? (review.isError ? errorMessage(review.error) : null);
+  /** Báo cáo trùng còn chờ báo cáo sớm hơn của vụ: chưa duyệt được lần khai này. */
+  const waitingNote = report.accusationWaitingFor ? `Báo cáo trùng — chờ quyết báo cáo sớm hơn của ${report.accusationWaitingFor.reporterName}` : null;
+  const waitingNoteId = useId();
 
-  // Đóng form lý do thì bỏ luôn lỗi của lần gửi hỏng, không để treo dưới dòng.
+  // Đóng form lý do thì bỏ luôn lỗi của lần gửi hỏng và lỗi tại chỗ, không để treo dưới dòng.
   const closeForm = () => {
     review.reset();
+    rejectReason.clearError();
+    dropReason.clearError();
     setMode('idle');
   };
 
@@ -190,6 +205,11 @@ function PendingReport({ report }: { report: ReportDto }) {
           </>
         }
       />
+      {waitingNote && (
+        <p id={waitingNoteId} className={HINT_CLASS}>
+          {waitingNote}
+        </p>
+      )}
 
       {mode === 'rejecting' ? (
         <ReasonForm
@@ -215,7 +235,13 @@ function PendingReport({ report }: { report: ReportDto }) {
         />
       ) : (
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-primary" disabled={review.isPending} onClick={() => review.mutate({ approve: true, ...(accusation ? { accusation: 'approve' } : {}) })}>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={review.isPending || waitingNote !== null}
+            aria-describedby={waitingNote ? waitingNoteId : undefined}
+            onClick={() => review.mutate({ approve: true, ...(accusation ? { accusation: 'approve' } : {}) })}
+          >
             {review.isPending ? 'Đang gửi…' : 'Duyệt'}
           </button>
           {accusation && (
@@ -242,6 +268,8 @@ function ApprovedReport({ report }: { report: ReviewedReportDto }) {
     mutationFn: (trimmed: string) => apiSend<undefined>('POST', `/api/admin/reports/${report.id}/revoke`, { reason: trimmed }),
     onSuccess: () => {
       queryClient.setQueryData<ReviewedReportDto[]>(APPROVED_REPORTS_KEY, (current) => current?.filter((item) => item.id !== report.id));
+      // Mục trừ điểm do báo cáo kèm lần khai này có thể vừa bị huỷ dây chuyền → tải lại danh sách.
+      void queryClient.invalidateQueries({ queryKey: APPROVED_REPORTS_KEY });
       // Điểm mùa, Top 3 mỗi phe, Tổng điểm theo phe, Đại sảnh, trang thành viên, danh hiệu và lần khai của mình không còn tính lần khai này.
       for (const queryKey of SCORE_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey });
     },
@@ -356,6 +384,10 @@ function useReason(requiredMessage: string) {
     localError,
     change(next: string) {
       setValue(next);
+      setLocalError(null);
+    },
+    /** Bỏ lỗi tại chỗ (khi đóng form). */
+    clearError() {
       setLocalError(null);
     },
     /** Lý do đã cắt khoảng trắng; rỗng → báo lỗi tại chỗ và trả `null` (không gửi gì). */

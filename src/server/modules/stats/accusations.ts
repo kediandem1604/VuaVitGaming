@@ -13,8 +13,10 @@
  * Duyệt (trong giao dịch khoá dòng mùa của `reviewReport`, nên hai lần duyệt cùng mùa xếp hàng):
  * báo cáo hiện + "đúng" → báo cáo `approved`, tạo mục trừ điểm (`source = 'accusation'`, đã duyệt,
  * `penaltyValue = 1`) cho người bị báo cáo, mọi báo cáo `pending` khác của vụ → `superseded`; bác →
- * `rejected` kèm lý do. Báo cáo trùng bị ẩn: lần khai được duyệt → `superseded`, bị từ chối →
- * `rejected` cùng lý do. Huỷ duyệt lần khai người báo cáo kéo theo huỷ mục trừ điểm (nếu nó còn
+ * `rejected` kèm lý do. Báo cáo trùng bị ẩn vì vụ đã bị trừ điểm: lần khai được duyệt → `superseded`,
+ * bị từ chối → `rejected` cùng lý do. Báo cáo trùng bị ẩn vì còn báo cáo `pending` sớm hơn (đang chờ
+ * quyết): KHÔNG duyệt được lần khai của nó (`reviewReport` chặn 409 — báo cáo sớm nhất phải được quyết
+ * trước, bị bác thì báo cáo này hiện lên); từ chối thì báo cáo → `rejected` cùng lý do. Huỷ duyệt lần khai người báo cáo kéo theo huỷ mục trừ điểm (nếu nó còn
  * `approved` — đã huỷ riêng trước thì thôi, không lỗi).
  */
 
@@ -146,12 +148,20 @@ function caseKey(a: Omit<CaseFields, 'id' | 'status'>): string {
 }
 
 /**
- * Id những báo cáo `pending` trong `accs` đang bị ẩn vì trùng: vụ đã có báo cáo `approved` với mục
- * trừ điểm còn `approved`, hoặc có báo cáo `pending` sớm hơn (`createdAt`, rồi `id`). Một truy vấn.
+ * Vì sao một báo cáo `pending` bị ẩn: `waitingFor` = người gửi báo cáo `pending` sớm hơn đang được
+ * hiện của vụ (báo cáo này chờ báo cáo đó được quyết); `null` = vụ đã bị trừ điểm.
  */
-export async function hiddenAccusationIds(db: Db, accs: CaseFields[]): Promise<Set<number>> {
+export interface HiddenAccusation {
+  waitingFor: { reporterName: string } | null;
+}
+
+/**
+ * Những báo cáo `pending` trong `accs` đang bị ẩn vì trùng (id → lý do): vụ đã có báo cáo `approved`
+ * với mục trừ điểm còn `approved`, hoặc có báo cáo `pending` sớm hơn (`createdAt`, rồi `id`). Một truy vấn.
+ */
+export async function hiddenAccusations(db: Db, accs: CaseFields[]): Promise<Map<number, HiddenAccusation>> {
   const pending = accs.filter((a) => a.status === 'pending');
-  if (pending.length === 0) return new Set();
+  if (pending.length === 0) return new Map();
 
   const cases = new Map(pending.map((a) => [caseKey(a), a]));
   const rows = await db.playerAccusation.findMany({
@@ -172,21 +182,29 @@ export async function hiddenAccusationIds(db: Db, accs: CaseFields[]): Promise<S
       victimId: true,
       playedOn: true,
       penaltyReport: { select: { status: true } },
+      reporter: { select: { displayName: true } },
     },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
 
-  // Mỗi vụ: báo cáo được hiện (pending sớm nhất), hoặc không ai nếu vụ đã bị trừ điểm.
-  const shown = new Map<string, number | null>();
+  // Mỗi vụ: báo cáo được hiện (pending sớm nhất, kèm tên người gửi), hoặc không ai nếu vụ đã bị trừ điểm.
+  const shown = new Map<string, { id: number; reporterName: string } | null>();
   for (const r of rows) {
     const key = caseKey(r);
     if (r.status === 'approved') {
       if (r.penaltyReport?.status === 'approved') shown.set(key, null);
     } else if (!shown.has(key)) {
-      shown.set(key, r.id);
+      shown.set(key, { id: r.id, reporterName: r.reporter.displayName });
     }
   }
-  return new Set(pending.filter((a) => shown.get(caseKey(a)) !== a.id).map((a) => a.id));
+  const hidden = new Map<number, HiddenAccusation>();
+  for (const a of pending) {
+    const top = shown.get(caseKey(a));
+    // Vụ đã bị trừ điểm (hoặc báo cáo vừa đổi trạng thái giữa hai lần đọc) → ẩn, không chờ ai.
+    if (top == null) hidden.set(a.id, { waitingFor: null });
+    else if (top.id !== a.id) hidden.set(a.id, { waitingFor: { reporterName: top.reporterName } });
+  }
+  return hidden;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,17 +247,27 @@ export function toAccusationDto(a: AccusationRow): AccusationDto {
 /** Quyết định của mod về báo cáo kèm lần khai (body review `accusation`). */
 export type AccusationDecision = 'approve' | 'reject';
 
-/** Báo cáo kèm một lần khai và nó có đang được hiện không; không có báo cáo `pending` → null. */
+/**
+ * Báo cáo kèm một lần khai, nó có đang được hiện không, và (khi ẩn) có đang chờ báo cáo sớm hơn của
+ * ai không (`waitingFor`; null = đang hiện, hoặc ẩn vì vụ đã bị trừ điểm). Không có báo cáo `pending` → null.
+ */
 export interface PendingAccusation {
   row: AccusationRow;
   shown: boolean;
+  waitingFor: { reporterName: string } | null;
 }
 
 /** Báo cáo `pending` kèm lần khai `reportId` (và có được hiện không), hoặc null. */
 export async function pendingAccusationOf(db: Db, reportId: number): Promise<PendingAccusation | null> {
   const row = await db.playerAccusation.findFirst({ where: { reportId, status: 'pending' }, select: ACCUSATION_SELECT });
   if (!row) return null;
-  return { row, shown: !(await hiddenAccusationIds(db, [row])).has(row.id) };
+  const hidden = (await hiddenAccusations(db, [row])).get(row.id);
+  return { row, shown: hidden === undefined, waitingFor: hidden?.waitingFor ?? null };
+}
+
+/** Lỗi khi duyệt lần khai mà báo cáo kèm theo còn chờ báo cáo sớm hơn của `reporterName` được quyết. */
+export function waitingForEarlierError(reporterName: string): Error {
+  return appError('NOT_PENDING', `Báo cáo kèm lần khai này trùng với báo cáo của ${reporterName} đang chờ — duyệt lần khai đó trước`);
 }
 
 /** Thông tin mục trừ điểm vừa tạo/gỡ — để DM người bị báo cáo và kiểm tra người hoá thân sau khi lưu. */
@@ -258,6 +286,7 @@ export interface PenaltyNotice {
  * nên mọi lần duyệt/huỷ cùng mùa xếp hàng; lần khai đã đổi trạng thái). `seen` là báo cáo `pending`
  * mod đã thấy (đọc trước giao dịch, null = không có). Đọc lại trong giao dịch:
  * - báo cáo trùng bị ẩn mà nay không còn `pending` (bị thay thế bởi lượt duyệt vừa xong) → không làm gì;
+ * - báo cáo trùng nay còn chờ báo cáo sớm hơn mà lần khai được duyệt → 409 (`waitingForEarlierError`);
  * - còn lại phải vẫn đúng báo cáo đó và vẫn hiện/ẩn như lúc đọc — khác (người khai vừa thêm/bỏ/đổi báo
  *   cáo, hoặc báo cáo ẩn vừa được hiện) → `NOT_PENDING` "Lần khai vừa được sửa, hãy xem lại".
  * Trả về mục trừ điểm vừa tạo (báo cáo được duyệt đúng), hoặc null.
@@ -277,7 +306,9 @@ export async function applyAccusationReview(
   const reviewed = { reviewedById: o.reviewerId, reviewedAt: o.now };
 
   if (!fresh.shown) {
-    // Báo cáo trùng bị ẩn: đi theo lần khai.
+    // Báo cáo sớm hơn của vụ còn chờ quyết: chưa duyệt được lần khai này (kiểm lại trong giao dịch).
+    if (o.reportApproved && fresh.waitingFor) throw waitingForEarlierError(fresh.waitingFor.reporterName);
+    // Báo cáo trùng bị ẩn vì vụ đã bị trừ điểm (duyệt → `superseded`), hoặc lần khai bị từ chối.
     await tx.playerAccusation.update({
       where: { id: a.id },
       data: o.reportApproved

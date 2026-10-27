@@ -888,9 +888,20 @@ function MyAccusation({ accusation, duplicate }: { accusation: AccusationDto; du
  * Sửa giá trị (và chỉ số phụ/phạt nếu role có) / ngày / ghi chú / báo cáo người chơi của lần khai
  * còn chờ duyệt (PATCH); role và buổi giữ nguyên. Ô chính giới hạn theo `role.maxPerGame`, ô phụ
  * theo `extraMaxPerGame`, ô phạt theo `penaltyMaxPerGame`. Ô báo cáo tick sẵn khi lần khai đã có
- * báo cáo: bỏ tick → `accusation: null` (bỏ báo cáo); tick → gửi bốn trường (server giữ báo cáo cũ
- * nếu không đổi gì); chưa có và không tick → không gửi trường này.
+ * báo cáo: bỏ tick → `accusation: null` (bỏ báo cáo); tick và khác báo cáo đã có → gửi bốn trường;
+ * không đổi gì (hoặc chưa có và không tick) → không gửi trường này — báo cáo giữ chỗ sớm nhất trong vụ.
  */
+/** Bản nháp báo cáo `d` có y hệt báo cáo đã có (`original`, null = chưa có) không. */
+function sameAccusationDraft(d: AccusationDraft, original: AccusationDraft | null): boolean {
+  return (
+    original !== null &&
+    d.accusedId === original.accusedId &&
+    d.accusedRoleId === original.accusedRoleId &&
+    d.victimId === original.victimId &&
+    d.victimFaction === original.victimFaction
+  );
+}
+
 function EditForm({ report, roles, onDone }: { report: ReportDto; roles: RoleDto[]; onDone: () => void }) {
   const queryClient = useQueryClient();
   const ids = useFieldIds();
@@ -901,7 +912,9 @@ function EditForm({ report, roles, onDone }: { report: ReportDto; roles: RoleDto
   const [playedOn, setPlayedOn] = useState(report.playedOn);
   const [note, setNote] = useState(report.note ?? '');
   const [accusing, setAccusing] = useState(report.accusation !== null);
-  const [accusation, setAccusation] = useState<AccusationDraft>(report.accusation ? draftFromAccusation(report.accusation) : EMPTY_ACCUSATION_DRAFT);
+  /** Bản nháp ban đầu (báo cáo đã có) — so để biết người khai có đổi báo cáo không. */
+  const originalDraft = report.accusation ? draftFromAccusation(report.accusation) : null;
+  const [accusation, setAccusation] = useState<AccusationDraft>(originalDraft ?? EMPTY_ACCUSATION_DRAFT);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const save = useMutation({
@@ -943,8 +956,14 @@ function EditForm({ report, roles, onDone }: { report: ReportDto; roles: RoleDto
       ...(hasPenaltyMetric(report.role) ? { penaltyValue: penalty.value } : {}),
       playedOn,
       note: trimmedNote === '' ? null : trimmedNote,
-      // Đang tick → đặt/thay; đã có mà bỏ tick → bỏ (`null`); chưa có và không tick → giữ nguyên (không gửi).
-      ...(accused?.input ? { accusation: accused.input } : report.accusation !== null ? { accusation: null } : {}),
+      // Tick và khác báo cáo đã có → đặt/thay; đã có mà bỏ tick → bỏ (`null`); còn lại → giữ nguyên (không gửi).
+      ...(accused?.input
+        ? sameAccusationDraft(accusation, originalDraft)
+          ? {}
+          : { accusation: accused.input }
+        : originalDraft !== null
+          ? { accusation: null }
+          : {}),
     });
   };
 

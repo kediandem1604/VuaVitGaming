@@ -234,6 +234,7 @@ test('an extra-metric report stores extraValue and the DTO carries points and th
     highlightUrl: null,
     accusation: null,
     accusationDuplicate: false,
+    accusationWaitingFor: null,
     penaltyOf: null,
   });
 
@@ -974,6 +975,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       highlightUrl: null,
       accusation: null,
       accusationDuplicate: false,
+      accusationWaitingFor: null,
       penaltyOf: null,
     },
     {
@@ -995,6 +997,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       highlightUrl: null,
       accusation: null,
       accusationDuplicate: false,
+      accusationWaitingFor: null,
       penaltyOf: null,
     },
     {
@@ -1016,6 +1019,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       highlightUrl: null,
       accusation: null,
       accusationDuplicate: false,
+      accusationWaitingFor: null,
       penaltyOf: null,
     },
   ];
@@ -1096,6 +1100,7 @@ test('listPendingReports: oldest first across members, pending only', async () =
       highlightUrl: null,
       accusation: null,
       accusationDuplicate: false,
+      accusationWaitingFor: null,
       penaltyOf: null,
     },
   ]);

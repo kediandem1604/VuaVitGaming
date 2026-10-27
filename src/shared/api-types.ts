@@ -218,10 +218,20 @@ export interface ReportDto {
   /**
    * `true` khi lần khai có báo cáo `pending` nhưng nó trùng vụ với một báo cáo khác đang được hiện
    * (sớm hơn) hoặc vụ đã bị trừ điểm rồi — hàng chờ không kèm khung báo cáo, chỉ ghi chú nhỏ "Báo
-   * cáo của bạn trùng với một báo cáo khác đang chờ". Mod duyệt lần khai này thì báo cáo trùng thành
-   * `superseded`, từ chối thì `rejected`. Mọi trường hợp khác `false`.
+   * cáo của bạn trùng với một báo cáo khác đang chờ". Vụ đã bị trừ điểm: mod duyệt lần khai này thì
+   * báo cáo trùng thành `superseded`, từ chối thì `rejected`. Còn báo cáo sớm hơn đang chờ
+   * (`accusationWaitingFor`): chưa duyệt được lần khai (409 `NOT_PENDING`), từ chối thì được.
+   * Mọi trường hợp khác `false`.
    */
   accusationDuplicate: boolean;
+  /**
+   * Chỉ ở hàng chờ duyệt: báo cáo kèm lần khai bị ẩn vì trùng với báo cáo `pending` SỚM HƠN của cùng
+   * vụ (đang được hiện ở lần khai khác) → tên người gửi báo cáo đó. Báo cáo sớm nhất phải được quyết
+   * trước: duyệt lần khai này bị chặn (409 `NOT_PENDING` "Báo cáo kèm lần khai này trùng với báo cáo
+   * của {tên} đang chờ — duyệt lần khai đó trước"); từ chối thì được. Báo cáo sớm hơn bị bác → báo
+   * cáo này hiện lên (trường thành `null`). Ngoài hàng chờ, hoặc ẩn vì vụ đã bị trừ điểm → `null`.
+   */
+  accusationWaitingFor: { reporterName: string } | null;
   /**
    * Chỉ với mục trừ điểm (`source = 'accusation'`): báo cáo đã tạo ra mục này (để hiện "Bị báo cáo:
    * bắn {victim.displayName} ({phe}) − {penaltyPoints} điểm"); `null` với lần khai thường.

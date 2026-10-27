@@ -1169,3 +1169,32 @@ test('editing a pending report with an accusation prefills the box; unticking pa
   expect(bodies[1]).toEqual({ value: 6, playedOn: today, note: null, accusation: { accusedId: 10, accusedRoleId: 20, victimId: 9, victimFaction: 'duck' } });
   expect(await within(second).findByText('Báo cáo: Vịt Mười (Cảnh sát trưởng) bắn Tôi — phe Vịt')).toBeInTheDocument();
 });
+
+test('editing a report whose accusation is unchanged omits accusation (keeps its place in the case); a changed field sends it', async () => {
+  const bodies: unknown[] = [];
+  const withAccusation = report({ id: 3, status: 'pending', accusation: accusation() });
+  stubFetch({
+    ...baseRoutes,
+    'GET /api/reports/mine': () => json(200, [withAccusation]),
+    'PATCH /api/reports/3': (init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return json(200, withAccusation);
+    },
+  });
+  renderPage();
+  const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+
+  // Chỉ sửa giá trị: báo cáo vẫn tick, không đổi → không gửi `accusation`.
+  fireEvent.click(within(first).getByRole('button', { name: 'Sửa' }));
+  expect(await within(first).findByRole('combobox', { name: 'Người bị báo cáo' })).toHaveTextContent('Vịt Mười');
+  fireEvent.change(within(first).getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '5' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Lưu' }));
+  await waitFor(() => expect(bodies).toEqual([{ value: 5, playedOn: today, note: null }]));
+
+  // Đổi phe người bị bắn → gửi báo cáo mới.
+  fireEvent.click(await within(first).findByRole('button', { name: 'Sửa' }));
+  await pickOption(within(first), 'Phe của người bị bắn', 'Vịt');
+  fireEvent.click(within(first).getByRole('button', { name: 'Lưu' }));
+  await waitFor(() => expect(bodies).toHaveLength(2));
+  expect(bodies[1]).toEqual({ value: 4, playedOn: today, note: null, accusation: { accusedId: 10, accusedRoleId: 20, victimId: 11, victimFaction: 'duck' } });
+});

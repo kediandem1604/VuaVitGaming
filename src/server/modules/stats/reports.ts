@@ -69,7 +69,7 @@ import {
   ACCUSATION_SELECT,
   applyAccusationReview,
   createAccusation,
-  hiddenAccusationIds,
+  hiddenAccusations,
   livePenaltyOfReport,
   pendingAccusationOf,
   penaltyDmText,
@@ -79,8 +79,9 @@ import {
   syncAccusationOnEdit,
   toAccusationDto,
   validateAccusation,
+  waitingForEarlierError,
 } from './accusations.js';
-import type { AccusationDecision, PenaltyNotice, PendingAccusation } from './accusations.js';
+import type { AccusationDecision, HiddenAccusation, PenaltyNotice, PendingAccusation } from './accusations.js';
 import { announceHolderChange, getRoleLeader } from './leaderboard.js';
 import type { LeaderboardRow } from './leaderboard.js';
 
@@ -498,7 +499,8 @@ export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
  * hiện: phải có quyết định (`VALIDATION`); từ chối lần khai không đi với "báo cáo đúng"
  * (`VALIDATION`); mod không quyết báo cáo về chính mình (`SELF_REVIEW`; admin thì được); duyệt mà bác
  * báo cáo phải có lý do (`REASON_REQUIRED`/`VALIDATION`). Không có báo cáo hiện mà vẫn gửi quyết
- * định → mod đang xem bản cũ (`NOT_PENDING` "xem lại"). Trả về lý do ghi vào báo cáo (null nếu không).
+ * định → mod đang xem bản cũ (`NOT_PENDING` "xem lại"); báo cáo ẩn vì chờ báo cáo `pending` sớm hơn
+ * của vụ → không duyệt được lần khai (`NOT_PENDING` nêu tên người báo cáo sớm hơn). Trả về lý do ghi vào báo cáo (null nếu không).
  */
 function checkAccusationDecision(
   seen: PendingAccusation | null,
@@ -508,6 +510,9 @@ function checkAccusationDecision(
 ): string | null {
   if (!seen?.shown) {
     if (d.accusation !== undefined) throw appError('NOT_PENDING', 'Lần khai vừa được sửa, hãy xem lại');
+    // Báo cáo trùng chờ báo cáo sớm hơn của vụ: báo cáo sớm nhất phải được quyết trước (bị bác thì
+    // báo cáo này hiện lên) — chưa duyệt được lần khai, từ chối thì được.
+    if (d.approve && seen?.waitingFor) throw waitingForEarlierError(seen.waitingFor.reporterName);
     return reportReason;
   }
   if (d.accusation === undefined) throw appError('VALIDATION', 'Cần chọn duyệt hay bỏ báo cáo kèm lần khai');
@@ -694,12 +699,13 @@ type ReportRow = Prisma.StatReportGetPayload<{ select: typeof REPORT_SELECT }>;
  * xác định báo cáo trùng.
  */
 async function toReportDtos<R extends ReportRow>(ctx: Ctx, rows: R[], o: { queue: boolean } = { queue: false }): Promise<{ row: R; dto: ReportDto }[]> {
-  const hidden = await hiddenAccusationIds(ctx.db, rows.flatMap((r) => (r.accusation ? [r.accusation] : [])));
+  const hidden = await hiddenAccusations(ctx.db, rows.flatMap((r) => (r.accusation ? [r.accusation] : [])));
   return rows.map((row) => ({ row, dto: toReportDto(row, ctx.config.discord.guildId, hidden, o.queue) }));
 }
 
-function toReportDto(r: ReportRow, guildId: string, hidden: Set<number>, queue: boolean): ReportDto {
-  const duplicate = r.accusation !== null && hidden.has(r.accusation.id);
+function toReportDto(r: ReportRow, guildId: string, hidden: Map<number, HiddenAccusation>, queue: boolean): ReportDto {
+  const hiddenAs = r.accusation ? hidden.get(r.accusation.id) : undefined;
+  const duplicate = hiddenAs !== undefined;
   return {
     id: r.id,
     member: { id: r.member.id, displayName: r.member.displayName },
@@ -736,6 +742,8 @@ function toReportDto(r: ReportRow, guildId: string, hidden: Set<number>, queue: 
     // Hàng chờ chỉ kèm báo cáo mod còn phải quyết: `pending` và không bị ẩn vì trùng.
     accusation: r.accusation && !(queue && (duplicate || r.accusation.status !== 'pending')) ? toAccusationDto(r.accusation) : null,
     accusationDuplicate: duplicate,
+    // Chỉ hàng chờ (mod) mới thấy tên người báo cáo sớm hơn; người khai trùng thì không.
+    accusationWaitingFor: queue ? (hiddenAs?.waitingFor ?? null) : null,
     penaltyOf: r.penaltyFor ? toAccusationDto(r.penaltyFor) : null,
   };
 }

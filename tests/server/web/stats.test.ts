@@ -271,6 +271,7 @@ test('submit returns the created report; mine lists newest first; own pending re
     highlightUrl: null,
     accusation: null,
     accusationDuplicate: false,
+    accusationWaitingFor: null,
     penaltyOf: null,
   });
 
@@ -399,6 +400,7 @@ test('an extra-metric report over HTTP: extraValue in, points and role limits ou
     highlightUrl: null,
     accusation: null,
     accusationDuplicate: false,
+    accusationWaitingFor: null,
     penaltyOf: null,
   });
   expect(await reportRow(dto.id)).toMatchObject({ value: 4, extraValue: 2 });
