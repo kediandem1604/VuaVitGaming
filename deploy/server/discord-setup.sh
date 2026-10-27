@@ -5,7 +5,8 @@
 # dùng lại (máy đã có ba kênh đầu chỉ được thêm #highlight). Cuối cùng in danh sách role của
 # server kèm ID để điền role admin/mod.
 #
-#   bash deploy/server/discord-setup.sh
+#   bash deploy/server/discord-setup.sh            # tải ảnh build sẵn từ GitHub
+#   bash deploy/server/discord-setup.sh --build    # build ảnh ngay trên máy (chậm)
 #
 # Cần trước: DISCORD_TOKEN và DISCORD_GUILD_ID trong .env; bot đã được mời vào server với
 # quyền Manage Channels và Attach Files (README mục 2.2).
@@ -13,6 +14,17 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="$here/.env"
+
+build=0
+for arg in "$@"; do
+  case "$arg" in
+    --build) build=1 ;;
+    *)
+      echo "Tham số không hợp lệ: $arg (chỉ có --build)" >&2
+      exit 1
+      ;;
+  esac
+done
 
 if [ ! -f "$env_file" ]; then
   echo "Chưa có $env_file — chạy bash deploy/server/setup.sh trước." >&2
@@ -26,12 +38,13 @@ for key in DISCORD_TOKEN DISCORD_GUILD_ID; do
   fi
 done
 
+# shellcheck source=deploy/server/app-image.sh
+source "$here/app-image.sh"
 cd "$here"
-echo "==> Build ảnh ứng dụng (lần đầu lâu: 5–30 phút tuỳ máy; update.sh dùng lại kết quả này)"
-sudo docker compose build app
+get_app_image
 
 echo "==> Bot tạo kênh"
-out="$(sudo docker compose run --rm --no-deps -T app node dist/server/tools/setup-discord.js)"
+out="$("${compose[@]}" run --rm --no-deps -T app node dist/server/tools/setup-discord.js)"
 
 # .env sửa tay có thể thiếu xuống dòng cuối: thêm trước khi nối dòng mới, kẻo dính vào dòng cuối.
 [ -n "$(tail -c1 "$env_file")" ] && echo >>"$env_file"

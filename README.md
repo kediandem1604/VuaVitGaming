@@ -302,7 +302,7 @@ Mỗi lần đẩy commit lên nhánh đã chọn, Render tự build và deploy 
 Một máy chủ ảo Linux (Debian 13 hoặc Ubuntu 24.04) chạy mọi thứ bằng Docker Compose (thư mục `deploy/server/`):
 
 - **Caddy** — nhận HTTPS ở cổng 443, tự xin và gia hạn chứng chỉ miễn phí. Địa chỉ web mặc định dạng `https://34-82-10-20.sslip.io` (IP tĩnh của máy, không cần mua tên miền).
-- **Ứng dụng** — build từ `Dockerfile`, mỗi lần khởi động tự migrate và nạp dữ liệu tham chiếu.
+- **Ứng dụng** — ảnh Docker được **GitHub build sẵn** (GitHub Actions, workflow `Docker image`) mỗi lần đẩy code lên nhánh, lưu trên GitHub Container Registry (`ghcr.io`); máy chủ chỉ tải về nên mỗi lần cập nhật mất **1–3 phút**. Mỗi lần khởi động tự migrate và nạp dữ liệu tham chiếu.
 - **PostgreSQL 16** — chỉ chạy trong máy, không mở ra Internet.
 - **Sao lưu** — mỗi ngày một bản `pg_dump` vào `deploy/server/backups/`, giữ 14 ngày.
 
@@ -315,7 +315,7 @@ Khác Railway/Render, máy chủ này **bạn tự quản**: cập nhật code b
 | Chi phí hằng tháng | Máy **miễn phí** (Free Tier); địa chỉ IPv4 công khai **~3,6 USD**; vượt 1 GB dữ liệu gửi đi thì ~0,12 USD/GB | **7 USD** (đã gồm IPv4 và 2 TB dữ liệu) |
 | Lúc mới tạo tài khoản | 300 USD tín dụng, dùng trong 90 ngày | 100–200 USD tín dụng, dùng trong 6 tháng |
 | Vị trí | Chỉ ở Mỹ — chọn Oregon (`us-west1`), gần Việt Nam nhất; mỗi lần bấm chậm thêm khoảng 0,2 giây | Singapore |
-| Sức máy | 1 GB RAM, CPU yếu (khoảng 1/4 nhân chạy liên tục) — build lần đầu **15–30 phút** | 1 GB RAM, 2 vCPU — build **5–10 phút** |
+| Sức máy | 1 GB RAM, CPU yếu (khoảng 1/4 nhân chạy liên tục) — đủ chạy; chỉ chậm khi tự build ảnh tại máy (`--build`, 15–35 phút) | 1 GB RAM, 2 vCPU — tự build tại máy 5–10 phút |
 
 ### 6C.1 Tạo máy trên Google Cloud (e2-micro miễn phí)
 
@@ -351,6 +351,8 @@ Tiếp theo: mục 6C.3.
 
 ### 6C.3 Cài đặt và chạy (giống nhau cho cả hai)
 
+0. **Ảnh ứng dụng trên GitHub** (một lần cho cả repo): làm theo mục 6C.4, ý **Ảnh ứng dụng trên GitHub**, để máy chủ tải được ảnh mà không cần đăng nhập.
+
 1. **Tải code và chuẩn bị máy** — dán từng dòng vào terminal:
 
    ```
@@ -376,7 +378,7 @@ Tiếp theo: mục 6C.3.
    bash deploy/server/discord-setup.sh
    ```
 
-   Script build ảnh ứng dụng (lần đầu lâu, `update.sh` dùng lại), rồi bot tạo nhóm kênh **GGD Hub** gồm `#lịch-chơi`, `#vote-mvp`, `#thông-báo`, `#highlight` — thành viên xem được nhưng không nhắn, chỉ bot đăng tin (nút Tham gia và menu vote vẫn bấm được; `#highlight` nhận video/ảnh thành viên kèm khi khai điểm) — và **tự ghi bốn ID kênh vào `.env`**. Chạy lại không tạo trùng: kênh đã có ID trong `.env` được giữ nguyên, kênh cùng tên được dùng lại; đổi tên kênh hay nhóm trong Discord sau đó không ảnh hưởng gì. Cuối cùng script in danh sách role của server kèm ID: chép ID role admin/mod vào `DISCORD_ADMIN_ROLE_IDS` và `DISCORD_MOD_ROLE_IDS` (`nano deploy/server/.env`).
+   Script tải ảnh ứng dụng do GitHub build sẵn (`update.sh` dùng lại), rồi bot tạo nhóm kênh **GGD Hub** gồm `#lịch-chơi`, `#vote-mvp`, `#thông-báo`, `#highlight` — thành viên xem được nhưng không nhắn, chỉ bot đăng tin (nút Tham gia và menu vote vẫn bấm được; `#highlight` nhận video/ảnh thành viên kèm khi khai điểm) — và **tự ghi bốn ID kênh vào `.env`**. Chạy lại không tạo trùng: kênh đã có ID trong `.env` được giữ nguyên, kênh cùng tên được dùng lại; đổi tên kênh hay nhóm trong Discord sau đó không ảnh hưởng gì. Cuối cùng script in danh sách role của server kèm ID: chép ID role admin/mod vào `DISCORD_ADMIN_ROLE_IDS` và `DISCORD_MOD_ROLE_IDS` (`nano deploy/server/.env`).
 
 4. **Chạy:**
 
@@ -384,7 +386,7 @@ Tiếp theo: mục 6C.3.
    bash deploy/server/update.sh
    ```
 
-   Script kiểm tra `.env` đã đủ biến (thiếu thì báo tên biến và dừng), rồi build và khởi động. Lần đầu mất 5–10 phút trên Lightsail, 15–30 phút trên e2-micro của Google Cloud. Cửa sổ SSH bị ngắt giữa chừng thì mở lại và chạy lại lệnh này.
+   Script kéo code mới, kiểm tra `.env` đã đủ biến (thiếu thì báo tên biến và dừng), tải ảnh ứng dụng **đúng commit vừa kéo về** rồi khởi động — khoảng 1–3 phút. Cửa sổ SSH bị ngắt giữa chừng thì mở lại và chạy lại lệnh này.
 
 5. **Kiểm tra:** mở `https://….sslip.io/healthz` → `{"ok":true,"discord":"ready"}` (lần đầu Caddy cần khoảng 1 phút để lấy chứng chỉ). Vào Discord Developer Portal → OAuth2 → **Redirects** → thêm `https://….sslip.io/auth/callback`. Rồi chạy `docs/manual-test-checklist.md` như mục 6.5.
 
@@ -392,7 +394,16 @@ Tiếp theo: mục 6C.3.
 
 Mọi lệnh chạy trong terminal SSH của máy, từ thư mục `~/ggd-hub`.
 
-- **Cập nhật lên code mới nhất** của nhánh: `bash deploy/server/update.sh` (dữ liệu và chứng chỉ không mất).
+- **Cập nhật lên code mới nhất** của nhánh (dữ liệu và chứng chỉ không mất):
+  1. Đẩy code lên nhánh (hoặc merge PR) → trên GitHub, tab **Actions** → workflow **Docker image** chạy khoảng 5–10 phút. Chờ có dấu ✓ xanh.
+  2. Trên máy: `bash deploy/server/update.sh` — mất 1–3 phút.
+
+  Nếu script báo *Không tải được ảnh ứng dụng*: thường là GitHub chưa build xong commit mới nhất (chờ ✓ xanh rồi chạy lại), hoặc package còn riêng tư (ý ngay dưới). Cần gấp hoặc GitHub Actions hỏng thì build ngay trên máy như cách cũ (chậm, 15–35 phút trên e2-micro): `bash deploy/server/update.sh --build`.
+- **Ảnh ứng dụng trên GitHub** (làm một lần, sau khi workflow **Docker image** chạy xong lần đầu): GitHub tạo package `vuavitgaming` ở chế độ **riêng tư**. Repo đã công khai nên cứ để package công khai — máy chủ tải về không cần đăng nhập, và trong ảnh không có bí mật nào (`.env` chỉ nằm trên máy):
+  trang GitHub của chủ repo → tab **Packages** → `vuavitgaming` → **Package settings** (cột bên phải, dưới cùng) → **Danger Zone** → **Change visibility** → **Public** → gõ tên package để xác nhận.
+
+  Muốn giữ package riêng tư thì máy chủ phải đăng nhập một lần: GitHub → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)** → **Generate new token (classic)** → chỉ tick **`read:packages`** → **Generate** → copy token. Rồi trên máy chạy `sudo docker login ghcr.io -u <tên GitHub của bạn>` và dán token khi được hỏi *Password*. Token chỉ dán vào terminal của máy — không gửi qua chat, không ghi vào repo hay `.env`.
+- **Quay về một bản cũ:** ghi `APP_TAG=<mã commit đầy đủ 40 ký tự>` vào `deploy/server/.env` rồi chạy `update.sh` (mã commit lấy ở trang commit trên GitHub). Xoá dòng đó để quay lại theo code mới nhất. Lưu ý: migration database đã chạy không tự lùi lại.
 - **Thêm kênh `#highlight` cho máy đã chạy bản cũ** (chỉ có ba kênh): trước khi chạy lại script, Server Settings → Roles → role của bot → bật **Manage Channels** (nếu đã tắt sau lần tạo kênh đầu — chạy xong lại tắt được) và **Attach Files** (hoặc mời lại bot bằng link thứ hai ở mục 2.2). Rồi chạy lần lượt `git pull`, `bash deploy/server/discord-setup.sh`, `bash deploy/server/update.sh`. Script giữ nguyên ID ba kênh đang có trong `.env` (kể cả khi đã đổi tên kênh hay nhóm, hoặc ID tự điền tay), chỉ tạo thêm `#highlight` và ghi ID của nó vào `.env`. Không muốn dùng highlight thì chỉ cần `update.sh` như thường — biến `DISCORD_HIGHLIGHT_CHANNEL_ID` không bắt buộc.
 - **Xem log ứng dụng:** `cd deploy/server && sudo docker compose logs -f app` (`Ctrl+C` để thoát).
 - **Trạng thái:** `cd deploy/server && sudo docker compose ps`.
