@@ -17,10 +17,8 @@ import type {
 } from '../../../shared/api-types.js';
 import { appError } from '../../lib/errors.js';
 import { maskEmails } from '../../lib/mask.js';
+import { GAMES_INVALID_MESSAGE, GAMES_MAX, GAMES_MIN } from '../../../shared/games.js';
 import {
-  GAMES_INVALID_MESSAGE,
-  GAMES_MAX,
-  GAMES_MIN,
   attendedGamesCounts,
   daysInServer,
   gamesTotal,

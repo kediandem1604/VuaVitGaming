@@ -5,12 +5,14 @@
  * (từ ngày vào server hiệu lực) và số buổi đã đi — kèm ghi chú `(đã chỉnh ±n)` khi admin đã
  * sửa. Email chỉ có khi server trả về — tức người xem là admin (spec §9). Chỉ admin thấy nút
  * **Sửa số buổi**: form tại chỗ đặt tổng số buổi (`PUT /api/admin/members/:id/games`), lưu
- * xong sửa dòng trong cache danh sách và làm mới trang thành viên công khai của người đó.
+ * xong sửa dòng đó trong MỌI danh sách đã cache (mọi bộ lọc) và làm mới trang thành viên công
+ * khai của người đó.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
 import type { AccessLevel, AdminMemberDto, MemberStatus } from '../../../shared/api-types';
+import { GAMES_INVALID_MESSAGE, GAMES_MAX, GAMES_MIN, isValidGamesTotal } from '../../../shared/games';
 import { apiGet, apiSend, errorMessage } from '../../api';
 import { QueryState } from '../../components/QueryState';
 import { useCurrentMember } from '../../hooks/useMe';
@@ -27,10 +29,8 @@ const STATUS_LABEL: Record<MemberStatus, string> = { active: 'Đang hoạt độ
 const LABEL_CLASS = 'text-sm font-bold text-night-200';
 const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
 
-/** Khoảng tổng số buổi admin đặt được — cùng với server; lời nhắn giống hệt câu server trả. */
-const GAMES_MIN = 0;
-const GAMES_MAX = 10000;
-const GAMES_INVALID_MESSAGE = 'Số buổi phải là số nguyên từ 0 đến 10000';
+/** Tiền tố khoá mọi danh sách thành viên quản trị (`['admin', 'members', q, status]`). */
+const ADMIN_MEMBERS_KEY = ['admin', 'members'] as const;
 
 /** Dấu trừ thật (U+2212) cho ghi chú chỉnh âm, không phải gạch nối. */
 const MINUS = '−';
@@ -56,7 +56,7 @@ export function MembersTab() {
   }, [q]);
 
   const url = membersUrl(debouncedQ, status);
-  const queryKey = ['admin', 'members', debouncedQ, status];
+  const queryKey = [...ADMIN_MEMBERS_KEY, debouncedQ, status];
   const members = useQuery({ queryKey, queryFn: () => apiGet<AdminMemberDto[]>(url) });
 
   return (
@@ -95,7 +95,7 @@ export function MembersTab() {
             {list.length > 0 && (
               <ul className="panel flex flex-col divide-y divide-night-700 p-0">
                 {list.map((member) => (
-                  <MemberRow key={member.id} member={member} canEdit={isAdmin} listKey={queryKey} />
+                  <MemberRow key={member.id} member={member} canEdit={isAdmin} />
                 ))}
               </ul>
             )}
@@ -110,11 +110,9 @@ interface MemberRowProps {
   member: AdminMemberDto;
   /** Người xem là admin: hiện nút Sửa số buổi. */
   canEdit: boolean;
-  /** Khoá cache của danh sách đang hiện — để sửa dòng tại chỗ sau khi lưu. */
-  listKey: unknown[];
 }
 
-function MemberRow({ member, canEdit, listKey }: MemberRowProps) {
+function MemberRow({ member, canEdit }: MemberRowProps) {
   const [editing, setEditing] = useState(false);
   return (
     <li className="flex flex-col gap-1 px-4 py-3 text-sm">
@@ -138,7 +136,7 @@ function MemberRow({ member, canEdit, listKey }: MemberRowProps) {
       </p>
       {canEdit &&
         (editing ? (
-          <GamesForm member={member} listKey={listKey} onClose={() => setEditing(false)} />
+          <GamesForm member={member} onClose={() => setEditing(false)} />
         ) : (
           <div>
             <button type="button" className="btn-secondary" onClick={() => setEditing(true)}>
@@ -160,21 +158,21 @@ function parseGames(raw: string): number | null {
   const trimmed = raw.trim();
   if (trimmed === '' || !/^\d+$/.test(trimmed)) return null;
   const n = Number(trimmed);
-  return Number.isInteger(n) && n >= GAMES_MIN && n <= GAMES_MAX ? n : null;
+  return isValidGamesTotal(n) ? n : null;
 }
 
 interface GamesFormProps {
   member: AdminMemberDto;
-  listKey: unknown[];
   onClose: () => void;
 }
 
 /**
  * Form tại chỗ đặt tổng số buổi: kiểm tra trước khi gửi (rỗng/không nguyên/ngoài khoảng → cùng câu
- * với server), lưu xong thay dòng trong cache danh sách (không tải lại) và làm mới `['member']`
- * (trang thành viên công khai). Lỗi server hiện dưới ô, form vẫn mở.
+ * với server), lưu xong thay dòng đó trong mọi danh sách thành viên đã cache (không tải lại; bộ lọc
+ * khác mở lại cũng không còn thấy tổng cũ) và làm mới `['member']` (trang thành viên công khai).
+ * Lỗi server hiện dưới ô, form vẫn mở; gõ tiếp thì lời nhắn cũ biến mất.
  */
-function GamesForm({ member, listKey, onClose }: GamesFormProps) {
+function GamesForm({ member, onClose }: GamesFormProps) {
   const inputId = useId();
   const queryClient = useQueryClient();
   const [value, setValue] = useState(String(member.games));
@@ -183,7 +181,9 @@ function GamesForm({ member, listKey, onClose }: GamesFormProps) {
   const save = useMutation({
     mutationFn: (games: number) => apiSend<AdminMemberDto>('PUT', `/api/admin/members/${member.id}/games`, { games }),
     onSuccess: (updated) => {
-      queryClient.setQueryData<AdminMemberDto[]>(listKey, (current) => current?.map((item) => (item.id === updated.id ? updated : item)));
+      queryClient.setQueriesData<AdminMemberDto[]>({ queryKey: ADMIN_MEMBERS_KEY }, (current) =>
+        current?.map((item) => (item.id === updated.id ? updated : item)),
+      );
       void queryClient.invalidateQueries({ queryKey: MEMBER_QUERY_KEY });
       onClose();
     },
@@ -222,6 +222,8 @@ function GamesForm({ member, listKey, onClose }: GamesFormProps) {
           onChange={(event) => {
             setValue(event.target.value);
             setLocalError(null);
+            // Lỗi server của lần lưu trước không còn đúng với giá trị đang gõ.
+            save.reset();
           }}
         />
       </div>

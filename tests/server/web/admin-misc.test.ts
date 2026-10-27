@@ -81,7 +81,8 @@ const INVALID = errorBody('VALIDATION', 'Dữ liệu không hợp lệ');
 
 test('member search', async () => {
   const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod Một' });
-  const ke = await createMember(testDb, { displayName: 'Kẹ', email: 'ke@example.com' });
+  // now = 2026-10-22T12:00Z (19:00 VN ngày 22/10); vào 10:00 VN ngày 15/10 → 7 ngày lịch VN.
+  const ke = await createMember(testDb, { displayName: 'Kẹ', email: 'ke@example.com', joinedAt: new Date('2026-10-15T03:00:00Z') });
   await createMember(testDb, { displayName: 'Ngỗng Ba' });
   const gone = await createMember(testDb, { displayName: 'Kẹ Rời', status: 'left', leftAt: new Date() });
 
@@ -97,9 +98,9 @@ test('member search', async () => {
     accessLevel: 'member',
     status: 'active',
     email: null, // mod không thấy email
-    joinedAt: ke.joinedAt.toISOString(),
-    serverJoinedAt: ke.joinedAt.toISOString(),
-    daysInServer: 0,
+    joinedAt: '2026-10-15T03:00:00.000Z',
+    serverJoinedAt: '2026-10-15T03:00:00.000Z',
+    daysInServer: 7,
     games: 0,
     gamesAdjustment: 0,
   });

@@ -10,14 +10,10 @@
  */
 
 import type { Member } from '@prisma/client';
+import { GAMES_INVALID_MESSAGE, isValidGamesTotal } from '../../../shared/games.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { vnDaysBetween } from '../../lib/time.js';
-
-/** Số buổi do admin đặt phải nằm trong khoảng này (body `PUT /api/admin/members/:id/games`). */
-export const GAMES_MIN = 0;
-export const GAMES_MAX = 10_000;
-export const GAMES_INVALID_MESSAGE = 'Số buổi phải là số nguyên từ 0 đến 10000';
 
 type ActivityMember = Pick<Member, 'joinedAt' | 'guildJoinedAt' | 'status' | 'leftAt'>;
 
@@ -78,16 +74,34 @@ export async function gamesTotals(ctx: Ctx): Promise<Map<number, number>> {
  * tại`, nên buổi kết thúc sau đó vẫn cộng tiếp lên tổng vừa đặt. `games` phải là số nguyên
  * 0..10000 → `VALIDATION`; không có thành viên → `NOT_FOUND`. Trả về thành viên sau khi ghi
  * kèm số tự đếm (để dựng DTO không cần đếm lại) và tổng trước khi chỉnh (để ghi log).
+ *
+ * Đếm và ghi trong MỘT câu UPDATE: nếu đếm riêng rồi mới ghi, một buổi kết thúc chen giữa hai
+ * bước làm phần chỉnh lệch một — tổng hiện ra khác số admin vừa gõ. Số tự đếm suy ra từ phần
+ * chỉnh vừa ghi (`games − gamesAdjustment`) nên đúng với đúng thời điểm ghi.
  */
 export async function setGamesTotal(
   ctx: Ctx,
   memberId: number,
   games: number,
 ): Promise<{ member: Member; attended: number; previousGames: number }> {
-  if (!Number.isInteger(games) || games < GAMES_MIN || games > GAMES_MAX) throw appError('VALIDATION', GAMES_INVALID_MESSAGE);
+  if (!isValidGamesTotal(games)) throw appError('VALIDATION', GAMES_INVALID_MESSAGE);
   const existing = await ctx.db.member.findUnique({ where: { id: memberId } });
   if (!existing) throw appError('NOT_FOUND');
-  const attended = (await attendedGamesCounts(ctx, [memberId])).get(memberId) ?? 0;
-  const member = await ctx.db.member.update({ where: { id: memberId }, data: { gamesAdjustment: games - attended } });
+  const rows = await ctx.db.$queryRaw<{ gamesAdjustment: number }[]>`
+    UPDATE members
+    SET games_adjustment = ${games}::int - (
+      SELECT count(*)::int
+      FROM attendances a
+      JOIN game_sessions s ON s.id = a.session_id
+      WHERE a.member_id = ${memberId} AND a.status = 'going' AND s.status = 'ended'
+    )
+    WHERE id = ${memberId}
+    RETURNING games_adjustment AS "gamesAdjustment"
+  `;
+  const updated = rows[0];
+  // Dòng biến mất giữa hai câu (hiếm): coi như không có thành viên.
+  if (!updated) throw appError('NOT_FOUND');
+  const attended = games - updated.gamesAdjustment;
+  const member: Member = { ...existing, gamesAdjustment: updated.gamesAdjustment };
   return { member, attended, previousGames: gamesTotal(attended, existing.gamesAdjustment) };
 }

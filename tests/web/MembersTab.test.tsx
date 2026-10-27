@@ -200,6 +200,25 @@ test('saving sends the total, updates the row in place and refreshes the public 
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ['member'] });
 });
 
+test('saving updates the same member in every cached members list, not only the visible filter', async () => {
+  const saved: AdminMemberDto = { ...members[0]!, games: 20, gamesAdjustment: 18 };
+  stubFetch((url) => (url === '/api/admin/members/1/games' ? json(200, saved) : json(200, members)));
+  const queryClient = makeClient();
+  // Danh sách của bộ lọc khác đã xem trước đó (và một danh sách không có người này).
+  queryClient.setQueryData(['admin', 'members', '', 'active'], [members[0]]);
+  queryClient.setQueryData(['admin', 'members', 'kẹ', ''], [members[1]]);
+  renderMembers(viewer('admin'), queryClient);
+  const { item, input, save } = await openGamesForm(0);
+
+  fireEvent.change(input, { target: { value: '20' } });
+  fireEvent.click(save);
+  await waitFor(() => expect(within(item).queryByRole('spinbutton')).toBeNull());
+
+  expect(queryClient.getQueryData<AdminMemberDto[]>(['admin', 'members', '', ''])?.[0]).toMatchObject({ id: 1, games: 20 });
+  expect(queryClient.getQueryData<AdminMemberDto[]>(['admin', 'members', '', 'active'])).toEqual([saved]);
+  expect(queryClient.getQueryData<AdminMemberDto[]>(['admin', 'members', 'kẹ', ''])).toEqual([members[1]]);
+});
+
 test('a server error shows the message and keeps the form open', async () => {
   stubFetch((url) =>
     url === '/api/admin/members/1/games' ? json(400, { error: { code: 'VALIDATION', message: 'Số buổi phải là số nguyên từ 0 đến 10000' } }) : json(200, members),
@@ -211,6 +230,11 @@ test('a server error shows the message and keeps the form open', async () => {
   expect(await within(item).findByRole('alert')).toHaveTextContent('Số buổi phải là số nguyên từ 0 đến 10000');
   expect(within(item).getByRole('spinbutton', { name: 'Tổng số buổi' })).toBeInTheDocument();
   expect(item).toHaveTextContent('14 buổi');
+
+  // Gõ tiếp: lời nhắn lỗi của lần lưu trước biến mất.
+  fireEvent.change(input, { target: { value: '31' } });
+  await waitFor(() => expect(within(item).queryByRole('alert')).toBeNull());
+  expect(input).toHaveValue(31);
 });
 
 test('Thôi closes the form without saving', async () => {
