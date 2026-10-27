@@ -8,7 +8,7 @@ import type { Ctx } from '../../../src/server/ctx.js';
 import type { OAuthClient } from '../../../src/server/modules/auth/oauth.js';
 import { createWebSession } from '../../../src/server/modules/auth/sessions.js';
 import { ensureSeason } from '../../../src/server/modules/seasons/service.js';
-import type { FactionTopDto, HallDto, HeldRoleDto, LeaderboardRowDto, ReportDto, ReviewedReportDto, SeasonDto } from '../../../src/shared/api-types.js';
+import type { FactionTopDto, FactionTotalsDto, HallDto, HeldRoleDto, LeaderboardRowDto, ReportDto, ReviewedReportDto, SeasonDto } from '../../../src/shared/api-types.js';
 import { buildApp } from '../../../src/server/web/app.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
@@ -215,6 +215,7 @@ test('every stats route needs a login', async () => {
     () => review(undefined, 1, { approve: true }),
     () => get(`/api/leaderboard?roleId=${swordsman.id}`),
     () => get('/api/leaderboard/factions'),
+    () => get('/api/leaderboard/totals'),
     () => get('/api/hall'),
     () => get('/api/seasons'),
     () => get('/api/reports/highlight-config'),
@@ -683,6 +684,46 @@ test('faction top 3 API: three factions for the season, same season parsing as t
   const board = await get(`/api/leaderboard?roleId=${swordsman.id}`, sid);
   expect(board.statusCode).toBe(200);
   expect(board.json<LeaderboardRowDto[]>()).toHaveLength(1);
+});
+
+test('faction totals API: four boards for the season with the viewer row, same season parsing as the leaderboard', async () => {
+  const { member: me, sid } = await memberWithSid({ displayName: 'An' });
+  const { member: other, sid: otherSid } = await memberWithSid({ displayName: 'Bình' });
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
+  const emptyBoard = { top: [], me: null };
+  const empty = (seasonId: string): FactionTotalsDto => ({ seasonId, boards: { all: emptyBoard, goose: emptyBoard, duck: emptyBoard, neutral: emptyBoard } });
+  const mine = await submit(sid, 5);
+  const theirs = await submit(otherSid, 7);
+  // Chưa duyệt: mọi bảng trống, mùa mặc định là mùa hiện tại.
+  expect((await get('/api/leaderboard/totals', sid)).json()).toEqual(empty('2026-10'));
+
+  setNow('2026-10-22T13:00:00Z');
+  expect((await review(modSid, mine.id, { approve: true })).statusCode).toBe(204);
+  expect((await review(modSid, theirs.id, { approve: true })).statusCode).toBe(204);
+  const res = await get('/api/leaderboard/totals', sid);
+  expect(res.statusCode).toBe(200);
+  const anRow = { rank: 2, memberId: me.id, displayName: 'An', avatarUrl: null, points: 5 };
+  const binhRow = { rank: 1, memberId: other.id, displayName: 'Bình', avatarUrl: null, points: 7 };
+  expect(res.json<FactionTotalsDto>()).toEqual({
+    seasonId: '2026-10',
+    boards: {
+      all: { top: [binhRow, anRow], me: anRow },
+      goose: emptyBoard,
+      duck: { top: [binhRow, anRow], me: anRow },
+      neutral: emptyBoard,
+    },
+  });
+  // `me` theo người đang đăng nhập; không lộ email/discordId/quyền.
+  const theirView = (await get('/api/leaderboard/totals', otherSid)).json<FactionTotalsDto>();
+  expect(theirView.boards.duck.me).toEqual(binhRow);
+  expect(JSON.stringify(theirView)).not.toMatch(/email|discordId|accessLevel/);
+  expect((await get('/api/leaderboard/totals?season=2026-10', sid)).json()).toEqual(res.json());
+  expect((await get('/api/leaderboard/totals?season=2026-09', sid)).json()).toEqual(empty('2026-09'));
+  for (const season of ['2026-13', '202610', '2026-1', '10/2026', 'abc', '']) {
+    const bad = await get(`/api/leaderboard/totals?season=${encodeURIComponent(season)}`, sid);
+    expect(bad.statusCode, season).toBe(400);
+    expect(bad.json(), season).toEqual(INVALID);
+  }
 });
 
 test('hall lists 71 main roles', async () => {

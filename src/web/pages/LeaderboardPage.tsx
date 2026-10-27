@@ -1,5 +1,5 @@
 /**
- * Bảng xếp hạng (spec §8, §6): chọn mùa ở đầu trang, rồi hai phần cho mùa đó.
+ * Bảng xếp hạng (spec §8, §6): chọn mùa ở đầu trang, rồi ba phần cho mùa đó.
  *
  * "Top 3 mỗi phe": ba khối Phe Ngỗng / Phe Vịt / Phe thứ 3 (cạnh nhau từ `md`, xếp dọc ở
  * điện thoại), mỗi dòng là một cặp (người, role) với điểm = giá trị thô × hệ số của role
@@ -13,6 +13,9 @@
  * Role có chỉ số phụ (spec chỉ số phụ §7): dòng "Chỉ số:" ghi cả hai chỉ số kèm điểm mỗi đơn
  * vị; điểm mùa trên bục, trong bảng và ở "Top 3 mỗi phe" đọc "N điểm" thay cho `{N} {nhãn}`.
  *
+ * Cuối trang: "Tổng điểm theo phe" (`FactionTotals`) — bốn tab, mỗi tab top 20 người theo tổng
+ * điểm có hệ số của phe đó (hoặc cả ba phe), kèm dòng của chính người xem.
+ *
  * Role trong `?role={id}`, mùa trong `?mua=YYYY-MM` (Đại sảnh và dòng "Top 3 mỗi phe" dẫn
  * tới đây với cả hai); giá trị lạ về mặc định (role đầu danh mục, mùa mới nhất), không gửi lên API.
  */
@@ -24,8 +27,10 @@ import { formatSeasonScore, hasExtraMetric } from '../../shared/metric';
 import { apiGet } from '../api';
 import { Avatar } from '../components/Avatar';
 import { EmptyState } from '../components/EmptyState';
+import { FactionTotals } from '../components/FactionTotals';
 import { Podium } from '../components/Podium';
 import { QueryState } from '../components/QueryState';
+import { RankMedal } from '../components/RankMedal';
 import { SeasonSelect } from '../components/SeasonSelect';
 import { resolveSeason, SEASON_PARAM, useSeasons } from '../hooks/useSeasons';
 import { cx } from '../lib/cx';
@@ -112,6 +117,8 @@ export function LeaderboardPage() {
                   )
                 }
               </QueryState>
+
+              <FactionTotals seasonId={season.id} />
             </>
           )
         }
@@ -139,9 +146,6 @@ function resolveRole(requested: string | null, roles: RoleDto[] | undefined): Ro
 // ---------------------------------------------------------------------------
 // Top 3 mỗi phe
 // ---------------------------------------------------------------------------
-
-/** Huy chương theo hạng 1-2-3 (server trả tối đa 3 dòng mỗi phe; nhiều hơn thì ghi số). */
-const MEDALS = ['🥇', '🥈', '🥉'] as const;
 
 /** Ba khối phe cho mùa đang xem; tải riêng với bảng theo role để lỗi/chờ của phần này không che phần kia. */
 function FactionTop({ seasonId }: { seasonId: string }) {
@@ -205,11 +209,8 @@ function FactionBlock({ faction, rows, seasonId }: FactionBlockProps) {
 function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string }) {
   return (
     <li className="flex items-start gap-2 px-3 py-2">
-      {/* Emoji huy chương chỉ trang trí; trình đọc màn hình đọc "Hạng N". */}
-      <span className="w-7 shrink-0 pt-0.5 text-center text-lg leading-none" title={`Hạng ${row.rank}`}>
-        <span aria-hidden="true">{MEDALS[row.rank - 1] ?? row.rank}</span>
-        <span className="sr-only">Hạng {row.rank}</span>
-      </span>
+      {/* Huy chương 1-2-3 (server trả tối đa 3 dòng mỗi phe; nhiều hơn thì ghi số). */}
+      <RankMedal rank={row.rank} className="pt-0.5" />
       {/* Avatar chỉ trang trí: tên viết ngay bên cạnh. */}
       <Avatar name={row.displayName} url={row.avatarUrl} className="size-8 text-sm" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">

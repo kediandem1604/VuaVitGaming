@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleDto, SeasonDto } from '../../src/shared/api-types';
+import type { FactionTopDto, FactionTopRowDto, FactionTotalRowDto, FactionTotalsDto, LeaderboardRowDto, RoleDto, SeasonDto } from '../../src/shared/api-types';
 import { LeaderboardPage } from '../../src/web/pages/LeaderboardPage';
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'icon' | 'metricLabel'> & Partial<RoleDto>): RoleDto => ({
@@ -119,6 +119,36 @@ const factionTops: Record<string, FactionTopDto> = {
   '2026-09': { seasonId: '2026-09', factions: { goose: [], duck: [topRow(1, 2, 'Vịt Hai', SWORDSMAN, 12, 1, 5)], neutral: [] } },
 };
 
+// --- Tổng điểm theo phe ---
+
+const totalRow = (rank: number, memberId: number, displayName: string, points: number): FactionTotalRowDto => ({ rank, memberId, displayName, avatarUrl: null, points });
+const emptyBoard = { top: [], me: null };
+const emptyTotals = (seasonId: string): FactionTotalsDto => ({ seasonId, boards: { all: emptyBoard, goose: emptyBoard, duck: emptyBoard, neutral: emptyBoard } });
+/** 20 dòng Phe thứ 3 (điểm 40..21) để người xem (hạng 22) nằm ngoài top. */
+const crowd = Array.from({ length: 20 }, (_, i) => totalRow(i + 1, 100 + i, `Người ${i + 1}`, 40 - i));
+/** Người xem là thành viên 9 "Tôi": trong top ở "Cả 3 phe" (hạng 2) và Ngỗng (hạng 1), ngoài top ở Phe thứ 3, không có điểm Vịt. */
+const totals: Record<string, FactionTotalsDto> = {
+  '2026-10': {
+    seasonId: '2026-10',
+    boards: {
+      all: { top: [totalRow(1, 1, 'Ngỗng Một', 19), totalRow(2, 9, 'Tôi', 12), totalRow(3, 2, 'Vịt Hai', 11)], me: totalRow(2, 9, 'Tôi', 12) },
+      goose: { top: [totalRow(1, 9, 'Tôi', 12), totalRow(2, 1, 'Ngỗng Một', 10)], me: totalRow(1, 9, 'Tôi', 12) },
+      duck: { top: [totalRow(1, 2, 'Vịt Hai', 11), totalRow(2, 1, 'Ngỗng Một', 9)], me: null },
+      neutral: { top: crowd, me: totalRow(22, 9, 'Tôi', 1) },
+    },
+  },
+  '2026-09': {
+    seasonId: '2026-09',
+    boards: { all: { top: [totalRow(1, 2, 'Vịt Hai', 12)], me: null }, goose: emptyBoard, duck: { top: [totalRow(1, 2, 'Vịt Hai', 12)], me: null }, neutral: emptyBoard },
+  },
+};
+
+/** Một tab của mục "Tổng điểm theo phe". */
+const totalsTab = (name: string) => within(screen.getByRole('tablist', { name: 'Phe' })).getByRole('tab', { name });
+/** Danh sách của bảng đang hiện trong mục "Tổng điểm theo phe". */
+const totalsList = () => within(screen.getByRole('tabpanel')).getByRole('list');
+const totalsItems = () => within(totalsList()).getAllByRole('listitem');
+
 /** Các mục trên bục vinh danh (tối đa 3, thứ tự DOM theo hạng). */
 const podiumItems = () => within(screen.getByRole('list', { name: 'Bục vinh danh' })).getAllByRole('listitem');
 /** Các hàng của bảng đầy đủ bên dưới bục (mọi hạng, kể cả top 3). */
@@ -130,8 +160,8 @@ const factionList = (label: string) => screen.getByRole('list', { name: `Top 3 $
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-/** Mặc định "Top 3 mỗi phe" trống ở mọi mùa; truyền `tops` để có dữ liệu. */
-function stubFetch(tops: Record<string, FactionTopDto> = {}) {
+/** Mặc định "Top 3 mỗi phe" và "Tổng điểm theo phe" trống ở mọi mùa; truyền `tops`/`sums` để có dữ liệu. */
+function stubFetch(tops: Record<string, FactionTopDto> = {}, sums: Record<string, FactionTotalsDto> = {}) {
   const fetchMock = vi.fn((input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url === '/api/seasons') return Promise.resolve(json(200, seasons));
@@ -140,6 +170,8 @@ function stubFetch(tops: Record<string, FactionTopDto> = {}) {
     if (match) return Promise.resolve(json(200, boards[`${match[1]}@${match[2]}`] ?? []));
     const top = /^\/api\/leaderboard\/factions\?season=(\d{4}-\d{2})$/.exec(url);
     if (top?.[1]) return Promise.resolve(json(200, tops[top[1]] ?? emptyTop(top[1])));
+    const sum = /^\/api\/leaderboard\/totals\?season=(\d{4}-\d{2})$/.exec(url);
+    if (sum?.[1]) return Promise.resolve(json(200, sums[sum[1]] ?? emptyTotals(sum[1])));
     throw new Error(`Không có tuyến giả cho ${url}`);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -496,6 +528,7 @@ test('a failed board load shows the message and Thử lại recovers', async () 
     if (url === '/api/roles') return Promise.resolve(json(200, roles));
     // Chỉ bảng theo role lỗi; "Top 3 mỗi phe" vẫn tải được.
     if (url.startsWith('/api/leaderboard/factions?')) return Promise.resolve(json(200, emptyTop('2026-10')));
+    if (url.startsWith('/api/leaderboard/totals?')) return Promise.resolve(json(200, emptyTotals('2026-10')));
     if (fail) return Promise.resolve(json(500, { error: { code: 'INTERNAL', message: 'Có lỗi xảy ra, thử lại sau' } }));
     return Promise.resolve(json(200, boards['1@2026-10']));
   });
@@ -508,4 +541,108 @@ test('a failed board load shows the message and Thử lại recovers', async () 
   await findBoard();
   expect(boardItems()).toHaveLength(2);
   expect(podiumItems()).toHaveLength(2);
+});
+
+// ---------------------------------------------------------------------------
+// Tổng điểm theo phe
+// ---------------------------------------------------------------------------
+
+test('Tổng điểm theo phe: four tabs switch boards, arrow keys move between tabs, medals for 1-3 and names link to the member page', async () => {
+  const fetchMock = stubFetch({}, totals);
+  renderAt('/bang-xep-hang');
+  await findBoard();
+
+  expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/totals?season=2026-10', expect.anything());
+  expect(screen.getByRole('heading', { level: 2, name: 'Tổng điểm theo phe' })).toBeInTheDocument();
+  const tabs = within(screen.getByRole('tablist', { name: 'Phe' })).getAllByRole('tab');
+  expect(tabs.map((tab) => tab.textContent)).toEqual(['Cả 3 phe', 'Ngỗng', 'Vịt', 'Phe thứ 3']);
+  expect(totalsTab('Cả 3 phe')).toHaveAttribute('aria-selected', 'true');
+
+  // Mặc định "Cả 3 phe": ba dòng theo hạng với huy chương, tên là link tới trang thành viên, "{điểm} điểm".
+  const all = await within(screen.getByRole('tabpanel')).findAllByRole('listitem');
+  expect(all).toHaveLength(3);
+  const [first, second, third] = all as [HTMLElement, HTMLElement, HTMLElement];
+  expect(within(first).getByTitle('Hạng 1')).toHaveTextContent('🥇');
+  expect(within(first).getByRole('link', { name: 'Ngỗng Một' })).toHaveAttribute('href', '/thanh-vien/1');
+  expect(first).toHaveTextContent('19 điểm');
+  expect(within(second).getByTitle('Hạng 2')).toHaveTextContent('🥈');
+  expect(within(third).getByTitle('Hạng 3')).toHaveTextContent('🥉');
+  expect(third).toHaveTextContent('Vịt Hai');
+  expect(third).toHaveTextContent('11 điểm');
+
+  // Bấm tab Vịt: bảng Vịt, đúng hai dòng theo thứ tự hạng.
+  fireEvent.click(totalsTab('Vịt'));
+  expect(totalsTab('Vịt')).toHaveAttribute('aria-selected', 'true');
+  expect(totalsTab('Cả 3 phe')).toHaveAttribute('aria-selected', 'false');
+  expect(totalsItems().map((item) => item.textContent)).toEqual([expect.stringContaining('Vịt Hai'), expect.stringContaining('Ngỗng Một')]);
+  expect(totalsItems()[0]).toHaveTextContent('11 điểm');
+  expect(totalsItems()[1]).toHaveTextContent('9 điểm');
+
+  // Phím mũi tên: → sang Phe thứ 3 (tab nhận focus và được chọn), ← quay lại; Home về tab đầu; hai đầu vòng nhau.
+  totalsTab('Vịt').focus();
+  fireEvent.keyDown(totalsTab('Vịt'), { key: 'ArrowRight' });
+  expect(totalsTab('Phe thứ 3')).toHaveAttribute('aria-selected', 'true');
+  expect(totalsTab('Phe thứ 3')).toHaveFocus();
+  expect(totalsItems()).toHaveLength(20);
+  fireEvent.keyDown(totalsTab('Phe thứ 3'), { key: 'ArrowLeft' });
+  expect(totalsTab('Vịt')).toHaveAttribute('aria-selected', 'true');
+  fireEvent.keyDown(totalsTab('Vịt'), { key: 'Home' });
+  expect(totalsTab('Cả 3 phe')).toHaveAttribute('aria-selected', 'true');
+  fireEvent.keyDown(totalsTab('Cả 3 phe'), { key: 'ArrowLeft' });
+  expect(totalsTab('Phe thứ 3')).toHaveAttribute('aria-selected', 'true');
+  fireEvent.keyDown(totalsTab('Phe thứ 3'), { key: 'ArrowRight' });
+  expect(totalsTab('Cả 3 phe')).toHaveAttribute('aria-selected', 'true');
+  // Chỉ tab đang chọn nằm trong thứ tự Tab của bàn phím.
+  expect(totalsTab('Cả 3 phe')).not.toHaveAttribute('tabindex', '-1');
+  expect(totalsTab('Vịt')).toHaveAttribute('tabindex', '-1');
+});
+
+test('Tổng điểm theo phe: my row is highlighted with a screen-reader "(bạn)"; outside the top 20 a "Hạng của bạn" line is added; no points → nothing', async () => {
+  stubFetch({}, totals);
+  renderAt('/bang-xep-hang');
+  await findBoard();
+
+  // "Cả 3 phe": tôi ở hạng 2 trong top → dòng tô sáng, không thêm dòng "Hạng của bạn".
+  const all = await within(screen.getByRole('tabpanel')).findAllByRole('listitem');
+  const mine = all[1] as HTMLElement;
+  expect(mine).toHaveTextContent('Tôi');
+  expect(mine).toHaveAttribute('aria-current', 'true');
+  expect(within(mine).getByText('(bạn)')).toHaveClass('sr-only');
+  expect(all[0]).not.toHaveAttribute('aria-current');
+  expect(within(all[0] as HTMLElement).queryByText('(bạn)')).toBeNull();
+  expect(screen.queryByText(/Hạng của bạn/)).toBeNull();
+
+  // Phe thứ 3: tôi hạng 22, ngoài top 20 → không dòng nào tô sáng, thêm "Hạng của bạn: #22 · 1 điểm".
+  fireEvent.click(totalsTab('Phe thứ 3'));
+  expect(totalsItems()).toHaveLength(20);
+  expect(totalsItems().some((item) => item.getAttribute('aria-current') === 'true')).toBe(false);
+  expect(screen.getByText('Hạng của bạn: #22 · 1 điểm')).toBeInTheDocument();
+
+  // Vịt: tôi không có điểm → không tô sáng, không thêm gì.
+  fireEvent.click(totalsTab('Vịt'));
+  expect(totalsItems()).toHaveLength(2);
+  expect(screen.queryByText(/Hạng của bạn/)).toBeNull();
+  expect(screen.queryByText('(bạn)')).toBeNull();
+});
+
+test('Tổng điểm theo phe: an empty board shows its own empty copy, and the season select reloads the totals', async () => {
+  const fetchMock = stubFetch({}, totals);
+  renderAt('/bang-xep-hang?mua=2026-09');
+  // Role Ngỗng chưa có ai mùa 9 nên không chờ bảng theo role; chờ bảng tổng điểm.
+  expect(await within(await screen.findByRole('tabpanel')).findAllByRole('listitem')).toHaveLength(1);
+
+  expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/totals?season=2026-09', expect.anything());
+  expect(fetchMock).not.toHaveBeenCalledWith('/api/leaderboard/totals?season=2026-10', expect.anything());
+  fireEvent.click(totalsTab('Ngỗng'));
+  expect(within(screen.getByRole('tabpanel')).queryByRole('list')).toBeNull();
+  expect(screen.getByRole('tabpanel')).toHaveTextContent('Chưa có ai có điểm trong mùa này');
+
+  // Đổi mùa ở đầu trang: gọi lại API với mùa mới, tab đang chọn giữ nguyên, bảng Ngỗng của mùa 10 có hai dòng.
+  fireEvent.change(screen.getByRole('combobox', { name: 'Mùa' }), { target: { value: '2026-10' } });
+  expect(await within(screen.getByRole('tabpanel')).findByRole('list')).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/totals?season=2026-10', expect.anything());
+  expect(totalsTab('Ngỗng')).toHaveAttribute('aria-selected', 'true');
+  expect(totalsItems()).toHaveLength(2);
+  expect(totalsItems()[0]).toHaveTextContent('Tôi');
+  expect(totalsItems()[0]).toHaveAttribute('aria-current', 'true');
 });

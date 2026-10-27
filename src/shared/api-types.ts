@@ -252,6 +252,31 @@ export interface FactionTopDto {
   factions: Record<Faction, FactionTopRowDto[]>;
 }
 
+/**
+ * Một dòng "Tổng điểm theo phe" (`GET /api/leaderboard/totals`): một NGƯỜI trong một bảng.
+ * `points` = tổng điểm có hệ số của mọi cặp (người, role) thuộc phe đó trong mùa (cùng luật
+ * với `FactionTopRowDto.points`); bảng "Cả 3 phe" cộng ba phe. Hạng 1..n liên tiếp.
+ */
+export interface FactionTotalRowDto {
+  rank: number;
+  memberId: number;
+  displayName: string;
+  avatarUrl: string | null;
+  points: number;
+}
+
+/** Bảng tổng điểm: `all` là "Cả 3 phe", còn lại là từng phe. */
+export type TotalsScope = 'all' | Faction;
+
+/**
+ * Tổng điểm theo phe của một mùa: bốn bảng, mỗi bảng có `top` (20 dòng đầu) và `me` — dòng
+ * của người đang xem nếu họ có điểm > 0 ở bảng đó (kể cả khi đã nằm trong `top`), không thì `null`.
+ */
+export interface FactionTotalsDto {
+  seasonId: string;
+  boards: Record<TotalsScope, { top: FactionTotalRowDto[]; me: FactionTotalRowDto | null }>;
+}
+
 /** Người đang hoá thân một role trong Đại sảnh (top 1 của mùa, điểm > 0). */
 export interface HallHolderDto {
   memberId: number;

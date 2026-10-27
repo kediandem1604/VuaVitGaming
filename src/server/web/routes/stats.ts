@@ -13,6 +13,7 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import { z } from 'zod';
 import type {
   FactionTopDto,
+  FactionTotalsDto,
   HallDto,
   HeldRoleDto,
   HighlightConfigDto,
@@ -26,7 +27,7 @@ import { appError } from '../../lib/errors.js';
 import { seasonIdOf, toVnDate } from '../../lib/time.js';
 import { listSeasons } from '../../modules/seasons/service.js';
 import { attachHighlight, highlightConfig } from '../../modules/stats/highlight.js';
-import { getFactionTop, getHall, getHeldRoles, getRoleLeaderboard } from '../../modules/stats/leaderboard.js';
+import { getFactionTop, getFactionTotals, getHall, getHeldRoles, getRoleLeaderboard } from '../../modules/stats/leaderboard.js';
 import type { LeaderboardRow } from '../../modules/stats/leaderboard.js';
 import {
   getReportDto,
@@ -97,7 +98,7 @@ const mineQuery = z.object({ limit: limitQuery });
  */
 const adminListQuery = z.object({ status: z.enum(['pending', 'approved']) });
 const leaderboardQuery = z.object({ roleId: z.coerce.number().int().positive().max(2_147_483_647), season: seasonQueryParam, limit: limitQuery });
-/** Top mỗi phe và Đại sảnh chỉ nhận mùa (số dòng mỗi phe do service cố định). */
+/** Top mỗi phe, Tổng điểm theo phe và Đại sảnh chỉ nhận mùa (số dòng mỗi bảng do service cố định). */
 const seasonOnlyQuery = z.object({ season: seasonQueryParam });
 
 /** Duyệt: `reason` chỉ có nghĩa khi từ chối; khi duyệt thì bỏ qua (kể cả chuỗi rỗng). */
@@ -218,6 +219,12 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/leaderboard/factions', { preHandler: requireMember }, async (request): Promise<FactionTopDto> => {
     const { season } = seasonOnlyQuery.parse(request.query);
     return getFactionTop(app.ctx, season ?? currentSeason());
+  });
+
+  // Tổng điểm theo phe kèm dòng của chính người đang đăng nhập (`me`) ở mỗi bảng.
+  app.get('/api/leaderboard/totals', { preHandler: requireMember }, async (request): Promise<FactionTotalsDto> => {
+    const { season } = seasonOnlyQuery.parse(request.query);
+    return getFactionTotals(app.ctx, season ?? currentSeason(), currentMember(request).id);
   });
 
   app.get('/api/hall', { preHandler: requireMember }, async (request): Promise<HallDto> => {

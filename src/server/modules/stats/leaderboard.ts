@@ -10,7 +10,8 @@
  * giảm dần; hoà thì ai đạt mức điểm đó trước (lần duyệt gần nhất sớm hơn) xếp trên; vẫn
  * hoà thì theo id thành viên để thứ tự luôn xác định. Hạng 1..n liên tiếp, không đồng hạng.
  * Top mỗi phe (`getFactionTop`) xếp các cặp (người, role) của cùng phe theo điểm × hệ số
- * của role (`rolePointWeight`), cùng cách phân hoà, thêm id role ở cuối.
+ * của role (`rolePointWeight`), cùng cách phân hoà, thêm id role ở cuối. Tổng điểm theo phe
+ * (`getFactionTotals`) cộng các cặp đó theo người cho từng phe và cho cả ba phe.
  *
  * Chỉ người có điểm > 0 mới lên bảng: role mà mọi lần khai đã duyệt đều 0 thì chưa ai hoá
  * thân (§4.7 chỉ lưu top 1 "có điểm > 0"), và nhờ vậy `getRoleLeaderboard(...)[0]` luôn
@@ -24,7 +25,17 @@
  */
 
 import type { Faction, Prisma, PrismaClient } from '@prisma/client';
-import type { FactionTopDto, FactionTopRowDto, HallDto, HallHolderDto, HallPreviousDto, RoleDto } from '../../../shared/api-types.js';
+import type {
+  FactionTopDto,
+  FactionTopRowDto,
+  FactionTotalRowDto,
+  FactionTotalsDto,
+  HallDto,
+  HallHolderDto,
+  HallPreviousDto,
+  RoleDto,
+  TotalsScope,
+} from '../../../shared/api-types.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dateOnlyToDb, seasonDateRange } from '../../lib/time.js';
@@ -236,20 +247,15 @@ function compareWeighted(x: WeightedAgg, y: WeightedAgg): number {
 }
 
 /**
- * Top `limit` của mỗi phe trong một mùa (mặc định 3, tối đa 100 — lớn hơn bị cắt; không
- * nguyên hoặc < 1 → `VALIDATION`). Mỗi dòng là một cặp (người, role) có điểm mùa > 0, điểm
- * xếp hạng = điểm mùa × `rolePointWeight(role)` (`value` của dòng là điểm mùa, đã gồm chỉ
- * số phụ); một người có thể có nhiều dòng trong cùng phe. Mọi role tính cho phe của chính
- * nó, kể cả role chế độ đặc biệt và role đã tắt (lịch sử). Đúng một truy vấn gộp lần khai
- * (`aggregateSeason` không lọc role).
+ * Mọi ô (người, role) điểm > 0 của mùa kèm hệ số và điểm có hệ số, chia theo phe của role —
+ * phần gộp dùng chung của "Top mỗi phe" và "Tổng điểm theo phe". Mọi role tính cho phe của
+ * chính nó, kể cả role chế độ đặc biệt và role đã tắt (lịch sử). Đúng một truy vấn gộp lần
+ * khai (`aggregateSeason` không lọc role) cộng một truy vấn lấy role của các ô. Mỗi phe đã
+ * sắp theo `compareWeighted`.
  */
-export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Promise<FactionTopDto> {
-  checkSeasonId(seasonId);
-  if (!Number.isInteger(limit) || limit < 1) throw appError('VALIDATION', 'Giới hạn không hợp lệ');
-  const take = Math.min(limit, MAX_LIMIT);
-
-  const aggs = await aggregateSeason(ctx.db, seasonId);
-  const roles = await ctx.db.role.findMany({
+async function weightedAggsByFaction(db: DbClient, seasonId: string): Promise<Record<Faction, WeightedAgg[]>> {
+  const aggs = await aggregateSeason(db, seasonId);
+  const roles = await db.role.findMany({
     where: { id: { in: [...new Set(aggs.map((x) => x.roleId))] } },
     select: { id: true, faction: true, maxPerGame: true, nameVi: true, icon: true, metricLabel: true, extraMetricLabel: true, extraPoints: true },
   });
@@ -276,7 +282,24 @@ export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Prom
       points: agg.score * weight,
     });
   }
-  for (const faction of FACTIONS) perFaction[faction] = perFaction[faction].sort(compareWeighted).slice(0, take);
+  for (const faction of FACTIONS) perFaction[faction].sort(compareWeighted);
+  return perFaction;
+}
+
+/**
+ * Top `limit` của mỗi phe trong một mùa (mặc định 3, tối đa 100 — lớn hơn bị cắt; không
+ * nguyên hoặc < 1 → `VALIDATION`). Mỗi dòng là một cặp (người, role) có điểm mùa > 0, điểm
+ * xếp hạng = điểm mùa × `rolePointWeight(role)` (`value` của dòng là điểm mùa, đã gồm chỉ
+ * số phụ); một người có thể có nhiều dòng trong cùng phe. Phe và truy vấn: xem
+ * `weightedAggsByFaction`.
+ */
+export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Promise<FactionTopDto> {
+  checkSeasonId(seasonId);
+  if (!Number.isInteger(limit) || limit < 1) throw appError('VALIDATION', 'Giới hạn không hợp lệ');
+  const take = Math.min(limit, MAX_LIMIT);
+
+  const perFaction = await weightedAggsByFaction(ctx.db, seasonId);
+  for (const faction of FACTIONS) perFaction[faction] = perFaction[faction].slice(0, take);
 
   const shown = FACTIONS.flatMap((faction) => perFaction[faction]);
   const members = await membersById(ctx.db, [...new Set(shown.map((x) => x.memberId))]);
@@ -301,6 +324,85 @@ export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Prom
       duck: perFaction.duck.map(toFactionRow),
       neutral: perFaction.neutral.map(toFactionRow),
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tổng điểm theo phe
+// ---------------------------------------------------------------------------
+
+/** Số dòng đầu của mỗi bảng tổng điểm. */
+const TOTALS_TOP = 20;
+
+const TOTALS_SCOPES: readonly TotalsScope[] = ['all', ...FACTIONS];
+
+/** Tổng điểm có hệ số của một người trong một bảng, kèm mốc phân hoà. */
+interface Total {
+  memberId: number;
+  points: number;
+  /** Lần duyệt gần nhất trong các cặp được cộng — người đạt mức điểm đó sau xếp dưới. */
+  lastApprovedAt: Date;
+}
+
+/** Điểm giảm dần → đạt trước xếp trên → id thành viên nhỏ trước. */
+function compareTotal(x: Total, y: Total): number {
+  return y.points - x.points || x.lastApprovedAt.getTime() - y.lastApprovedAt.getTime() || x.memberId - y.memberId;
+}
+
+/** Cộng các ô theo người (bỏ qua role), xếp theo `compareTotal`. Mọi ô đã > 0 nên mọi tổng > 0. */
+function sumByMember(aggs: WeightedAgg[]): Total[] {
+  const totals = new Map<number, Total>();
+  for (const agg of aggs) {
+    const t = totals.get(agg.memberId);
+    if (!t) totals.set(agg.memberId, { memberId: agg.memberId, points: agg.points, lastApprovedAt: agg.lastApprovedAt });
+    else {
+      t.points += agg.points;
+      if (agg.lastApprovedAt > t.lastApprovedAt) t.lastApprovedAt = agg.lastApprovedAt;
+    }
+  }
+  return [...totals.values()].sort(compareTotal);
+}
+
+/**
+ * Tổng điểm theo phe của một mùa cho người xem `viewerId`: bốn bảng ("Cả 3 phe" và từng
+ * phe), điểm của một người trong bảng = tổng điểm có hệ số của mọi cặp (người, role) thuộc
+ * phe đó (cùng luật với `getFactionTop`: điểm mùa × `rolePointWeight`, role tính cho phe của
+ * chính nó). Chỉ người có tổng > 0; xếp điểm giảm dần → lần duyệt gần nhất (trong các cặp
+ * được cộng) sớm hơn xếp trên → id nhỏ trước; hạng 1..n. Mỗi bảng trả `TOTALS_TOP` dòng đầu
+ * và `me` — dòng của người xem nếu họ có điểm ở bảng đó (kể cả đã trong top), không thì `null`.
+ * Đúng một truy vấn gộp lần khai (`weightedAggsByFaction`).
+ */
+export async function getFactionTotals(ctx: Ctx, seasonId: string, viewerId: number): Promise<FactionTotalsDto> {
+  checkSeasonId(seasonId);
+  const perFaction = await weightedAggsByFaction(ctx.db, seasonId);
+  const ranked: Record<TotalsScope, Total[]> = {
+    all: sumByMember(FACTIONS.flatMap((faction) => perFaction[faction])),
+    goose: sumByMember(perFaction.goose),
+    duck: sumByMember(perFaction.duck),
+    neutral: sumByMember(perFaction.neutral),
+  };
+
+  // Một truy vấn tên/ảnh cho mọi dòng sẽ hiện (top bốn bảng + dòng của người xem).
+  const shownIds = new Set<number>();
+  for (const scope of TOTALS_SCOPES) {
+    for (const t of ranked[scope].slice(0, TOTALS_TOP)) shownIds.add(t.memberId);
+    if (ranked[scope].some((t) => t.memberId === viewerId)) shownIds.add(viewerId);
+  }
+  const members = await membersById(ctx.db, [...shownIds]);
+  const toTotalRow = (t: Total, index: number): FactionTotalRowDto => {
+    const m = members.get(t.memberId);
+    return { rank: index + 1, memberId: t.memberId, displayName: m?.displayName ?? '', avatarUrl: m?.avatarUrl ?? null, points: t.points };
+  };
+  const board = (totals: Total[]): FactionTotalsDto['boards'][TotalsScope] => {
+    const mine = totals.findIndex((t) => t.memberId === viewerId);
+    return {
+      top: totals.slice(0, TOTALS_TOP).map(toTotalRow),
+      me: mine === -1 ? null : toTotalRow(totals[mine] as Total, mine),
+    };
+  };
+  return {
+    seasonId,
+    boards: { all: board(ranked.all), goose: board(ranked.goose), duck: board(ranked.duck), neutral: board(ranked.neutral) },
   };
 }
 

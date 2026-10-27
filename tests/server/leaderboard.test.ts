@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../src/server/ctx.js';
 import { listRoles, updateRole } from '../../src/server/modules/roles/service.js';
 import { closeSeason, ensureSeason } from '../../src/server/modules/seasons/service.js';
-import { getFactionTop, getHall, getHeldRoles, getRoleLeaderboard, getSeasonLeaders, rolePointWeight } from '../../src/server/modules/stats/leaderboard.js';
+import { getFactionTop, getFactionTotals, getHall, getHeldRoles, getRoleLeaderboard, getSeasonLeaders, rolePointWeight } from '../../src/server/modules/stats/leaderboard.js';
 import { reviewReport, submitReport, updateOwnReport } from '../../src/server/modules/stats/reports.js';
 import type { FactionTopRowDto, HallDto } from '../../src/shared/api-types.js';
 import { makeTestCtx } from '../helpers/ctx.js';
@@ -508,6 +508,128 @@ test('faction top validates season and limit, and uses one grouped query', async
     expect(top.factions.duck.map((r) => r.memberId)).toEqual([a.id]);
     expect(top.factions.neutral.map((r) => [r.memberId, r.role.id])).toEqual([[b.id, cuckoo.id]]);
     expect(top.factions.goose).toEqual([]);
+  } finally {
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Tổng điểm theo phe
+// ---------------------------------------------------------------------------
+
+/** Một dòng tổng điểm với tên/ảnh lấy từ `members` (cùng dữ liệu mẫu: An có ảnh, người khác không). */
+const totalRow = (rank: number, m: Member, points: number) => ({
+  rank,
+  memberId: m.id,
+  displayName: m.displayName,
+  avatarUrl: m.avatarUrl,
+  points,
+});
+
+test('faction totals sum every (member, role) pair of the faction with role weights and extra metrics; "all" sums the three', async () => {
+  const vigilante = await roleByKey(testDb, 'vigilante'); // Ngỗng, ×5
+  const assassin = await roleByKey(testDb, 'assassin'); // Vịt, chỉ số phụ ×3
+  const dodo = await roleByKey(testDb, 'dodo'); // Phe thứ 3, ×5
+  // An: Vịt 4 + Kiếm sĩ 3 + Ám sát (2 + 1×3 = 5) = 12 Vịt; Dân phòng 1×5 = 5 Ngỗng → cả 3 phe 17.
+  await approved(a.id, { value: 4 });
+  await approved(a.id, { roleId: swordsman.id, value: 3 });
+  await approved(a.id, { roleId: assassin.id, value: 2, extraValue: 1 });
+  await approved(a.id, { roleId: vigilante.id, value: 1 });
+  // Bình: Cò gáy 2 + Chim đa đa 1×5 = 7 Phe thứ 3 → cả 3 phe 7.
+  await approved(b.id, { roleId: cuckoo.id, value: 2 });
+  await approved(b.id, { roleId: dodo.id, value: 1 });
+  // Cường: chỉ có lần khai 0 điểm → không lên bảng nào; lần chờ duyệt của Bình cũng không tính.
+  const c = await createMember(testDb, { displayName: 'Cường' });
+  await approved(c.id, { roleId: swordsman.id, value: 0 });
+  await submit(b.id, { value: 9 });
+
+  const forAn = await getFactionTotals(ctx, '2026-10', a.id);
+  expect(forAn).toEqual({
+    seasonId: '2026-10',
+    boards: {
+      all: { top: [totalRow(1, a, 17), totalRow(2, b, 7)], me: totalRow(1, a, 17) },
+      goose: { top: [totalRow(1, a, 5)], me: totalRow(1, a, 5) },
+      duck: { top: [totalRow(1, a, 12)], me: totalRow(1, a, 12) },
+      neutral: { top: [totalRow(1, b, 7)], me: null },
+    },
+  });
+  // Người xem khác không có điểm: `me` null ở mọi bảng, `top` giữ nguyên.
+  const forCuong = await getFactionTotals(ctx, '2026-10', c.id);
+  expect(forCuong.boards.all.top).toEqual(forAn.boards.all.top);
+  expect(Object.values(forCuong.boards).map((board) => board.me)).toEqual([null, null, null, null]);
+  // Mùa khác trống.
+  expect(await getFactionTotals(ctx, '2026-09', a.id)).toEqual({
+    seasonId: '2026-09',
+    boards: { all: { top: [], me: null }, goose: { top: [], me: null }, duck: { top: [], me: null }, neutral: { top: [], me: null } },
+  });
+});
+
+test('faction totals break ties by the latest approval among the summed pairs, then member id; top is 20 rows and `me` may sit outside', async () => {
+  // An: Vịt 3 duyệt sớm nhất rồi Kiếm sĩ 2 duyệt MUỘN nhất → tổng 5, mốc phân hoà là mốc muộn.
+  await approved(a.id, { value: 3, at: '2026-10-10T01:00:00Z' });
+  await approved(b.id, { value: 5, at: '2026-10-10T02:00:00Z' });
+  await approved(a.id, { roleId: swordsman.id, value: 2, at: '2026-10-10T03:00:00Z' });
+  // Cường và Dũng cùng 5 ở cùng mốc duyệt → id thành viên nhỏ trước.
+  const c = await createMember(testDb, { displayName: 'Cường' });
+  const d = await createMember(testDb, { displayName: 'Dũng' });
+  setNow('2026-10-10T04:00:00Z');
+  const rd = await submit(d.id, { value: 5 });
+  const rc = await submit(c.id, { value: 5 });
+  await reviewReport(ctx, modR(), rd, { approve: true });
+  await reviewReport(ctx, modR(), rc, { approve: true });
+
+  const duckBoard = (await getFactionTotals(ctx, '2026-10', a.id)).boards.duck;
+  expect(duckBoard.top.map((r) => [r.rank, r.memberId, r.points])).toEqual([
+    [1, b.id, 5],
+    [2, a.id, 5],
+    [3, c.id, 5],
+    [4, d.id, 5],
+  ]);
+  expect(duckBoard.me).toEqual(totalRow(2, a, 5));
+
+  // 22 người có điểm Cò gáy 22..1 (Phe thứ 3): top dừng ở 20; người hạng 22 vẫn thấy dòng của mình; người hạng 20 thấy mình trong top.
+  const crowd = [a, b, c, d];
+  while (crowd.length < 22) crowd.push(await createMember(testDb, { displayName: `Người ${crowd.length + 1}` }));
+  setNow('2026-10-10T05:00:00Z');
+  for (const [i, m] of crowd.entries()) await approved(m.id, { roleId: cuckoo.id, value: 22 - i });
+  const last = crowd[21] as Member;
+  const twentieth = crowd[19] as Member;
+  const forLast = (await getFactionTotals(ctx, '2026-10', last.id)).boards.neutral;
+  expect(forLast.top).toHaveLength(20);
+  expect(forLast.top.map((r) => r.rank)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+  expect(forLast.top[0]).toEqual(totalRow(1, a, 22));
+  expect(forLast.top.some((r) => r.memberId === last.id)).toBe(false);
+  expect(forLast.me).toEqual(totalRow(22, last, 1));
+  const forTwentieth = (await getFactionTotals(ctx, '2026-10', twentieth.id)).boards.neutral;
+  expect(forTwentieth.me).toEqual(totalRow(20, twentieth, 3));
+  expect(forTwentieth.top[19]).toEqual(forTwentieth.me);
+});
+
+test('faction totals validate the season and use one grouped query', async () => {
+  for (const bad of ['2026-13', '2026-00', '2026-1', '2026/10', '', '2026-10-01']) {
+    await expect(getFactionTotals(ctx, bad, a.id)).rejects.toMatchObject({ code: 'VALIDATION', message: 'Mùa không hợp lệ' });
+  }
+
+  await approved(a.id, { value: 5 });
+  await approved(b.id, { roleId: cuckoo.id, value: 2 });
+  let groupByCalls = 0;
+  const restore = patchDelegate(
+    testDb.statReport,
+    'groupBy',
+    (original) =>
+      ((args: never) => {
+        groupByCalls += 1;
+        return original(args);
+      }) as never,
+  );
+  try {
+    const totals = await getFactionTotals(ctx, '2026-10', b.id);
+    expect(groupByCalls).toBe(1);
+    expect(totals.boards.all.top.map((r) => [r.memberId, r.points])).toEqual([
+      [a.id, 5],
+      [b.id, 2],
+    ]);
+    expect(totals.boards.all.me).toEqual(totalRow(2, b, 2));
   } finally {
     restore();
   }
