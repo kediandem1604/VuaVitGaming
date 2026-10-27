@@ -492,7 +492,7 @@ function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
             id={listId}
             role="listbox"
             aria-label="Kết quả tìm role"
-            className="panel-inset flex max-h-80 flex-col gap-0.5 overflow-y-auto p-1"
+            className="popover flex max-h-80 flex-col gap-0.5 overflow-y-auto p-1"
           >
             {matches.map((role) => (
               // Viền focus lùi vào trong (-outline-offset) để không bị khung cuộn cắt mất.

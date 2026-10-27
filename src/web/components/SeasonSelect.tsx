@@ -1,5 +1,6 @@
 import type { SeasonDto } from '../../shared/api-types';
 import { formatSeasonLabel } from '../lib/format';
+import { Select } from './Select';
 
 interface SeasonSelectProps {
   seasons: SeasonDto[];
@@ -7,19 +8,14 @@ interface SeasonSelectProps {
   onChange: (seasonId: string) => void;
 }
 
-/** Ô chọn mùa kiểu `field` (nhãn "Mùa"): `Tháng 10/2026`, mùa đã chốt ghi thêm "(đã chốt)". */
+/**
+ * Ô chọn mùa (nhãn "Mùa", không nhóm, không ô tìm) trên ô chọn tự làm `Select`: dòng
+ * `Tháng 10/2026`, mùa đã chốt ghi thêm "(đã chốt)".
+ */
 export function SeasonSelect({ seasons, value, onChange }: SeasonSelectProps) {
-  return (
-    <label className="flex items-center gap-2 text-sm">
-      <span className="font-bold text-night-300">Mùa</span>
-      <select className="field w-auto py-1.5" value={value} onChange={(event) => onChange(event.target.value)}>
-        {seasons.map((season) => (
-          <option key={season.id} value={season.id}>
-            {formatSeasonLabel(season.id)}
-            {season.closed ? ' (đã chốt)' : ''}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+  const options = seasons.map((season) => ({
+    value: season.id,
+    label: `${formatSeasonLabel(season.id)}${season.closed ? ' (đã chốt)' : ''}`,
+  }));
+  return <Select label="Mùa" value={value} onChange={onChange} groups={[{ options }]} />;
 }

@@ -5,10 +5,10 @@
  * điện thoại), mỗi dòng là một cặp (người, role) với điểm = giá trị thô × hệ số của role
  * (server tính, `FactionTopDto`); cùng một người có thể có nhiều dòng. Phe trống → "Chưa có ai".
  *
- * Bên dưới: chọn role (nhóm theo phe, role chế độ đặc biệt thành nhóm riêng) rồi top 50 của
- * role đó trong mùa đó: bục vinh danh 1-2-3 (`Podium`) và bảng đầy đủ mọi hạng (👑 cho hạng
- * 1), avatar, tên, điểm, số trận. Tên người ở mọi chỗ (dòng phe, bục, bảng) là link tới trang
- * thành viên công khai (spec huy hiệu §9).
+ * Bên dưới: chọn role (ô chọn tự làm `Select` có ô tìm, nhóm theo phe, role chế độ đặc biệt
+ * thành nhóm riêng) rồi top 50 của role đó trong mùa đó: bục vinh danh 1-2-3 (`Podium`) và
+ * bảng đầy đủ mọi hạng (👑 cho hạng 1), avatar, tên, điểm, số trận. Tên người ở mọi chỗ (dòng
+ * phe, bục, bảng) là link tới trang thành viên công khai (spec huy hiệu §9).
  *
  * Role có chỉ số phụ (spec chỉ số phụ §7): dòng "Chỉ số:" ghi cả hai chỉ số kèm điểm mỗi đơn
  * vị; điểm mùa trên bục, trong bảng và ở "Top 3 mỗi phe" đọc "N điểm" thay cho `{N} {nhãn}`.
@@ -32,9 +32,10 @@ import { Podium } from '../components/Podium';
 import { QueryState } from '../components/QueryState';
 import { RankMedal } from '../components/RankMedal';
 import { SeasonSelect } from '../components/SeasonSelect';
+import { Select, type SelectGroup } from '../components/Select';
 import { resolveSeason, SEASON_PARAM, useSeasons } from '../hooks/useSeasons';
 import { cx } from '../lib/cx';
-import { FACTION_BAND, FACTION_LABEL, FACTIONS, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
+import { FACTION_BAND, FACTION_LABEL, FACTION_SHORT_LABEL, FACTION_TEXT, FACTIONS, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
 import { formatSeasonLabel } from '../lib/format';
 import { memberPath } from '../lib/links';
 
@@ -249,34 +250,35 @@ interface RoleSelectProps {
   onChange: (roleId: number) => void;
 }
 
+/**
+ * Ô chọn role (nhãn "Role") trên ô chọn tự làm `Select`: nhóm theo phe với tiêu đề màu phe
+ * ("Ngỗng" / "Vịt" / "Phe thứ 3"), role chế độ đặc biệt thành nhóm riêng; mỗi dòng
+ * `{icon} {tên}`; ô tìm khớp tên Việt, tên Anh và key không phân biệt dấu (như `RolePicker`
+ * ở trang Khai điểm).
+ */
 function RoleSelect({ roles, value, onChange }: RoleSelectProps) {
-  const groups = [
+  const toOption = (role: RoleDto) => ({
+    value: role.id,
+    label: `${role.icon} ${role.nameVi}`,
+    searchText: [role.nameVi, role.nameEn, role.key.replaceAll('_', ' ')],
+  });
+  const groups: SelectGroup<number>[] = [
     ...FACTIONS.map((faction) => ({
-      label: FACTION_LABEL[faction],
-      items: roles.filter((role) => !isSpecialRole(role) && role.faction === faction),
+      label: FACTION_SHORT_LABEL[faction],
+      labelClassName: FACTION_TEXT[faction],
+      options: roles.filter((role) => !isSpecialRole(role) && role.faction === faction).map(toOption),
     })),
-    { label: SPECIAL_LABEL, items: roles.filter(isSpecialRole) },
-  ].filter((group) => group.items.length > 0);
+    { label: SPECIAL_LABEL, options: roles.filter(isSpecialRole).map(toOption) },
+  ].filter((group) => group.options.length > 0);
 
   return (
-    <label className="flex items-center gap-2 text-sm">
-      <span className="font-bold text-night-300">Role</span>
-      <select
-        className="field min-w-0 flex-1 py-1.5 sm:w-auto sm:flex-none"
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      >
-        {groups.map((group) => (
-          <optgroup key={group.label} label={group.label}>
-            {group.items.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.icon} {role.nameVi}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-    </label>
+    <Select
+      label="Role"
+      value={value}
+      onChange={onChange}
+      groups={groups}
+      search={{ label: 'Tìm role', placeholder: 'Tìm role…', empty: 'Không có role nào khớp' }}
+    />
   );
 }
 

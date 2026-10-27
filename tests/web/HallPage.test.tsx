@@ -114,8 +114,8 @@ test('defaults to the newest season and the goose tab, showing only goose main r
   expect(screen.getByRole('heading', { level: 1, name: 'Đại sảnh hoá thân' })).toBeInTheDocument();
   expect(await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith('/api/hall?season=2026-10', expect.anything());
-  // Nhãn mùa trong đầu trang (ô chọn mùa cũng có một <option> cùng chữ).
-  expect(screen.getByText('Tháng 10/2026', { selector: 'span' })).toBeInTheDocument();
+  // Nhãn mùa trong đầu trang (nút của ô chọn mùa cũng hiện cùng chữ).
+  expect(screen.getByText('Tháng 10/2026', { selector: 'p > span' })).toBeInTheDocument();
   expect(screen.queryByText('Mùa đã chốt')).not.toBeInTheDocument();
 
   expect(screen.getByRole('button', { name: 'Phe Ngỗng' })).toHaveAttribute('aria-pressed', 'true');
@@ -292,8 +292,7 @@ test('?mua= and ?phe= select a closed season and a tab', async () => {
   expect(fetchMock).not.toHaveBeenCalledWith('/api/hall?season=2026-10', expect.anything());
   expect(screen.getByText('Tháng 9/2026', { selector: 'span' })).toBeInTheDocument();
   expect(screen.getByText('Mùa đã chốt')).toBeInTheDocument();
-  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveValue('2026-09');
-  expect(screen.getByRole('option', { name: 'Tháng 9/2026 (đã chốt)' })).toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveTextContent('Tháng 9/2026 (đã chốt)');
   expect(screen.getByRole('button', { name: 'Phe thứ 3' })).toHaveAttribute('aria-pressed', 'true');
 });
 
@@ -305,7 +304,7 @@ test('invalid ?mua= and ?phe= fall back to defaults and are never sent to the AP
   expect(fetchMock).toHaveBeenCalledWith('/api/hall?season=2026-10', expect.anything());
   expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('2030-01'), expect.anything());
   expect(screen.getByRole('button', { name: 'Phe Ngỗng' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveValue('2026-10');
+  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveTextContent('Tháng 10/2026');
 });
 
 test('?phe=special falls back to goose when no special-mode role exists', async () => {
@@ -320,7 +319,8 @@ test('choosing a season in the select updates the URL and reloads the hall', asy
   renderAt('/dai-sanh?phe=duck');
   await screen.findByRole('img', { name: 'Kiếm sĩ: Vịt Hai (mùa trước)' });
 
-  fireEvent.change(screen.getByRole('combobox', { name: 'Mùa' }), { target: { value: '2026-09' } });
+  fireEvent.click(screen.getByRole('combobox', { name: 'Mùa' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Tháng 9/2026 (đã chốt)' }));
 
   expect(await screen.findByRole('img', { name: 'Kiếm sĩ: Vịt Hai' })).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith('/api/hall?season=2026-09', expect.anything());

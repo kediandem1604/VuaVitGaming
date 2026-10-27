@@ -195,6 +195,18 @@
   }
 
   /*
+   * `<select>` gốc (trang Quản trị, MembersTab…): bỏ mũi tên hệ thống (vuông, không đổi màu
+   * được) và vẽ mũi tên ▾ `night-300` bằng SVG nền, chừa chỗ bên phải cho nó. Menu thả xuống
+   * vẫn là menu gốc của trình duyệt. Ô nhiều dòng (`multiple`/`size`) không có mũi tên.
+   */
+  &:is(select:not([multiple]):not([size])) {
+    @apply cursor-pointer appearance-none bg-no-repeat pr-9;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23AEB6FF' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 5 5 5-5'/%3E%3C/svg%3E");
+    background-position: right 0.625rem center;
+    background-size: 1rem 1rem;
+  }
+
+  /*
    * Ô bị tắt (vd ô giá trị ở trang Khai điểm khi chưa chọn role): nền lẫn vào panel
    * `night-800`, chữ `night-300` (6.2:1), giữ viền `night-600` (3.3:1 trên `night-800`) để
    * vẫn thấy khung ô.
@@ -202,6 +214,14 @@
   &:disabled {
     @apply cursor-not-allowed bg-night-800 text-night-300;
   }
+}
+
+/*
+ * Khung nổi thả xuống (ô chọn tự làm `Select`, gợi ý của `RolePicker`): bo góc `xl`, nền
+ * `night-800`, viền `night-600`, bóng đổ đậm để tách khỏi panel bên dưới.
+ */
+@utility popover {
+  @apply rounded-xl border-2 border-night-600 bg-night-800 shadow-xl shadow-night-950/70;
 }
 
 /* Viên thuốc bo tròn hẳn; biến thể phe thêm `bg-goose-strong` / `bg-duck-strong` / `bg-third` (chữ trắng). */

@@ -14,6 +14,20 @@ export const FACTION_LABEL: Record<Faction, string> = {
   neutral: 'Phe thứ 3',
 };
 
+/** Tên phe ngắn (bỏ chữ "Phe") cho chỗ hẹp như tiêu đề nhóm trong ô chọn role. */
+export const FACTION_SHORT_LABEL: Record<Faction, string> = {
+  goose: 'Ngỗng',
+  duck: 'Vịt',
+  neutral: 'Phe thứ 3',
+};
+
+/** Chữ màu phe trên nền tối (`night-800`/`night-900`): bản `-soft` để đủ tương phản (spec §5.3). */
+export const FACTION_TEXT: Record<Faction, string> = {
+  goose: 'text-goose-soft',
+  duck: 'text-duck-soft',
+  neutral: 'text-third-soft',
+};
+
 /**
  * Nền băng/nhãn phe mang chữ trắng (thẻ role, khối "Top 3 mỗi phe"): dùng `-strong` để chữ
  * trắng đủ tương phản — không đặt chữ trắng thẳng lên `goose`/`duck` (spec §5.3).

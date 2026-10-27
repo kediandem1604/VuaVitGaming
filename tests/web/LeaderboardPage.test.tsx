@@ -143,6 +143,12 @@ const totals: Record<string, FactionTotalsDto> = {
   },
 };
 
+/** Chọn một mùa trong ô chọn mùa ở đầu trang (mở rồi bấm dòng). */
+const pickSeason = (name: string) => {
+  fireEvent.click(screen.getByRole('combobox', { name: 'Mùa' }));
+  fireEvent.click(screen.getByRole('option', { name }));
+};
+
 /** Một tab của mục "Tổng điểm theo phe". */
 const totalsTab = (name: string) => within(screen.getByRole('tablist', { name: 'Phe' })).getByRole('tab', { name });
 /** Danh sách của bảng đang hiện trong mục "Tổng điểm theo phe". */
@@ -240,22 +246,32 @@ test('defaults to the first role and newest season; rank 1 wears the crown', asy
   expect(screen.getByRole('heading', { level: 2, name: /Ngỗng/ })).toBeInTheDocument();
   expect(screen.getByText('Chỉ số: Số lần vote trúng Vịt')).toBeInTheDocument();
 
-  const roleSelect = screen.getByRole('combobox', { name: 'Role' });
-  expect(roleSelect).toHaveValue('1');
-  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveValue('2026-10');
+  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveTextContent('🪿 Ngỗng');
+  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveTextContent('Tháng 10/2026');
 });
 
-test('the role select is grouped by faction with special-mode roles in their own group', async () => {
+test('the role select opens a searchable listbox grouped by faction with special-mode roles in their own group', async () => {
   stubFetch();
   renderAt('/bang-xep-hang');
   await screen.findAllByRole('listitem');
 
-  const groupNames = screen.getAllByRole('group').map((group) => group.getAttribute('label'));
-  expect(groupNames).toEqual(['Phe Ngỗng', 'Phe Vịt', 'Phe thứ 3', 'Chế độ đặc biệt']);
-  expect(within(screen.getByRole('group', { name: 'Phe Ngỗng' })).getByRole('option', { name: '🪿 Ngỗng' })).toBeInTheDocument();
-  expect(within(screen.getByRole('group', { name: 'Phe Ngỗng' })).queryByRole('option', { name: /Thanh tra/ })).toBeNull();
+  expect(screen.queryByRole('listbox')).toBeNull();
+  fireEvent.click(screen.getByRole('combobox', { name: 'Role' }));
+  const list = screen.getByRole('listbox', { name: 'Role' });
+  const groupName = (group: HTMLElement) => document.getElementById(group.getAttribute('aria-labelledby') ?? '')?.textContent;
+  expect(within(list).getAllByRole('group').map(groupName)).toEqual(['Ngỗng', 'Vịt', 'Phe thứ 3', 'Chế độ đặc biệt']);
+  expect(within(screen.getByRole('group', { name: 'Ngỗng' })).getByRole('option', { name: '🪿 Ngỗng' })).toHaveAttribute('aria-selected', 'true');
+  expect(within(screen.getByRole('group', { name: 'Ngỗng' })).queryByRole('option', { name: /Thanh tra/ })).toBeNull();
   expect(within(screen.getByRole('group', { name: 'Chế độ đặc biệt' })).getByRole('option', { name: '🪿 Thanh tra' })).toBeInTheDocument();
-  expect(within(screen.getByRole('group', { name: 'Phe Vịt' })).getByRole('option', { name: '⚔️ Kiếm sĩ' })).toBeInTheDocument();
+  expect(within(screen.getByRole('group', { name: 'Vịt' })).getByRole('option', { name: '⚔️ Kiếm sĩ' })).toBeInTheDocument();
+
+  // Ô tìm lọc không phân biệt dấu: "kiem" → Kiếm sĩ; không khớp → thông báo.
+  const search = screen.getByRole('textbox', { name: 'Tìm role' });
+  expect(search).toHaveAttribute('placeholder', 'Tìm role…');
+  fireEvent.change(search, { target: { value: 'kiem' } });
+  expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['⚔️ Kiếm sĩ']);
+  fireEvent.change(search, { target: { value: 'zzz' } });
+  expect(screen.getByText('Không có role nào khớp')).toBeInTheDocument();
 });
 
 test('?role= and ?mua= select a role and a closed season', async () => {
@@ -273,8 +289,8 @@ test('?role= and ?mua= select a role and a closed season', async () => {
   expect(podiumItems()).toHaveLength(1);
   expect(podiumItems()[0]).toHaveTextContent('12 mạng chém');
   expect(screen.getByRole('img', { name: 'Kiếm sĩ: Vịt Hai' })).toBeInTheDocument();
-  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveValue('61');
-  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveValue('2026-09');
+  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveTextContent('⚔️ Kiếm sĩ');
+  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveTextContent('Tháng 9/2026 (đã chốt)');
   expect(screen.getByText('Mùa đã chốt')).toBeInTheDocument();
 });
 
@@ -367,7 +383,7 @@ test('invalid ?role= and ?mua= fall back to defaults and are never sent to the A
   renderAt('/bang-xep-hang?role=999');
   await screen.findAllByRole('listitem');
   expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('roleId=999'), expect.anything());
-  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveValue('1');
+  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveTextContent('🪿 Ngỗng');
 });
 
 test('changing the selects updates the URL and loads the new board', async () => {
@@ -375,11 +391,17 @@ test('changing the selects updates the URL and loads the new board', async () =>
   renderAt('/bang-xep-hang');
   await screen.findAllByRole('listitem');
 
-  fireEvent.change(screen.getByRole('combobox', { name: 'Role' }), { target: { value: '61' } });
+  fireEvent.click(screen.getByRole('combobox', { name: 'Role' }));
+  fireEvent.click(screen.getByRole('option', { name: '⚔️ Kiếm sĩ' }));
   expect(await screen.findByText('Chưa có ai khai điểm mùa này')).toBeInTheDocument();
   expect(screen.getByTestId('location')).toHaveTextContent('/bang-xep-hang?role=61');
+  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveTextContent('⚔️ Kiếm sĩ');
 
-  fireEvent.change(screen.getByRole('combobox', { name: 'Mùa' }), { target: { value: '2026-09' } });
+  // Chọn mùa bằng bàn phím: ↓ mở, ↓ tới mùa trước, Enter chọn.
+  const seasonSelect = screen.getByRole('combobox', { name: 'Mùa' });
+  fireEvent.keyDown(seasonSelect, { key: 'ArrowDown' });
+  fireEvent.keyDown(seasonSelect, { key: 'ArrowDown' });
+  fireEvent.keyDown(seasonSelect, { key: 'Enter' });
   expect(await screen.findByRole('img', { name: 'Kiếm sĩ: Vịt Hai' })).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard?roleId=61&season=2026-09&limit=50', expect.anything());
   expect(screen.getByTestId('location')).toHaveTextContent('/bang-xep-hang?role=61&mua=2026-09');
@@ -429,7 +451,7 @@ test('Top 3 mỗi phe: three faction blocks, rows in rank order with medal, role
   // Bảng theo role bên dưới vẫn như cũ.
   expect(boardItems()).toHaveLength(2);
   expect(podiumItems()).toHaveLength(2);
-  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveValue('1');
+  expect(screen.getByRole('combobox', { name: 'Role' })).toHaveTextContent('🪿 Ngỗng');
 });
 
 test('Top 3 mỗi phe follows ?mua= and the season select', async () => {
@@ -444,7 +466,7 @@ test('Top 3 mỗi phe follows ?mua= and the season select', async () => {
   expect(within(factionList('Phe Vịt')).getByRole('link', { name: /Kiếm sĩ/ })).toHaveAttribute('href', '/bang-xep-hang?role=61&mua=2026-09');
   expect(screen.getAllByText('Chưa có ai')).toHaveLength(2);
 
-  fireEvent.change(screen.getByRole('combobox', { name: 'Mùa' }), { target: { value: '2026-10' } });
+  pickSeason('Tháng 10/2026');
   expect(within(await screen.findByRole('list', { name: 'Top 3 Phe Ngỗng' })).getAllByRole('listitem')).toHaveLength(3);
   expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/factions?season=2026-10', expect.anything());
   expect(screen.getByTestId('location')).toHaveTextContent('/bang-xep-hang?role=61&mua=2026-10');
@@ -638,7 +660,7 @@ test('Tổng điểm theo phe: an empty board shows its own empty copy, and the 
   expect(screen.getByRole('tabpanel')).toHaveTextContent('Chưa có ai có điểm trong mùa này');
 
   // Đổi mùa ở đầu trang: gọi lại API với mùa mới, tab đang chọn giữ nguyên, bảng Ngỗng của mùa 10 có hai dòng.
-  fireEvent.change(screen.getByRole('combobox', { name: 'Mùa' }), { target: { value: '2026-10' } });
+  pickSeason('Tháng 10/2026');
   expect(await within(screen.getByRole('tabpanel')).findByRole('list')).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/totals?season=2026-10', expect.anything());
   expect(totalsTab('Ngỗng')).toHaveAttribute('aria-selected', 'true');
