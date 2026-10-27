@@ -165,7 +165,8 @@ export interface ReportRoleDto {
 
 /**
  * Một lần khai điểm (lịch sử của tôi, hàng chờ duyệt). `playedOn` dạng `YYYY-MM-DD`
- * (ngày VN), `createdAt` ISO 8601 (UTC). `rejectReason` chỉ có khi `status = 'rejected'`.
+ * (ngày VN), `createdAt` ISO 8601 (UTC). `rejectReason` là lý do từ chối (`status = 'rejected'`)
+ * hoặc lý do huỷ duyệt (`status = 'revoked'`); `null` ở các trạng thái khác.
  * `highlightUrl` là link tới tin Discord chứa highlight (mở tab mới), `null` khi chưa kèm.
  * `extraValue` là chỉ số phụ (0 với role không có); `points = value + extraValue × extraPoints`
  * theo điểm mỗi lần hiện tại của role (spec chỉ số phụ §3).
@@ -185,6 +186,16 @@ export interface ReportDto {
   createdAt: string;
   highlightUrl: string | null;
 }
+
+/**
+ * Lần khai đã duyệt trong danh sách quản trị "Đã duyệt gần đây" (`GET /api/admin/reports?status=approved`):
+ * kèm người duyệt (`null` nếu dữ liệu không có) và giờ duyệt ISO 8601 (UTC). Chỉ mod/admin
+ * thấy — người khai không được xem tên người duyệt (như hiện nay).
+ */
+export type ReviewedReportDto = ReportDto & {
+  reviewedBy: { id: number; displayName: string } | null;
+  reviewedAt: string;
+};
 
 /**
  * Cấu hình highlight cho form Khai điểm (`GET /api/reports/highlight-config`): tính năng tắt
