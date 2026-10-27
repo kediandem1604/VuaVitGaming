@@ -5,13 +5,15 @@
  *
  * Quy tắc khai (kiểm tra theo đúng thứ tự này): role đang bật → giá trị nguyên trong
  * `[0, maxPerGame]` → chỉ số phụ nguyên trong `[0, extraMaxPerGame]` (role không có chỉ số
- * phụ thì phải là 0) → ngày chơi trong `[hôm nay − 3, hôm nay]` giờ VN → mùa của ngày
+ * phụ thì phải là 0) → chỉ số phạt nguyên trong `[0, penaltyMaxPerGame]` (role không có chỉ
+ * số phạt thì phải là 0) → ngày chơi trong `[hôm nay − 3, hôm nay]` giờ VN → mùa của ngày
  * chơi chưa chốt → chưa quá 30 lần khai trong ngày VN hôm nay → ghi chú ≤ 300 ký tự →
  * buổi (nếu có) bắt đầu cùng ngày VN với ngày chơi. Sửa lần khai của mình chạy lại
  * cùng bộ kiểm tra trên giá trị đã gộp, trừ giới hạn 30 lần/ngày.
  *
- * Điểm một lần khai = `value + extraValue × extraPoints` (spec chỉ số phụ §3), tính lúc đọc
- * theo `extraPoints` hiện tại của role — chỉ `value`/`extraValue` được lưu.
+ * Điểm một lần khai = `value × points + extraValue × extraPoints − penaltyValue × penaltyPoints
+ * + bonusPoints` (spec điểm role §3), tính lúc đọc theo điểm hiện tại của role — chỉ
+ * `value`/`extraValue`/`penaltyValue` (và `bonusPoints` khi báo cáo được duyệt) được lưu.
  *
  * Duyệt: mod không tự duyệt lần khai của mình (admin thì được — server chỉ có một
  * admin vẫn chạy); đổi trạng thái `pending → approved/rejected` là một cập nhật có
@@ -83,6 +85,11 @@ export interface ReportInput {
    * định 0. Role không có chỉ số phụ chỉ nhận 0.
    */
   extraValue?: number;
+  /**
+   * Chỉ số phạt (spec điểm role §3, §5): số nguyên trong `[0, penaltyMaxPerGame]` của role; mặc
+   * định 0. Role không có chỉ số phạt chỉ nhận 0.
+   */
+  penaltyValue?: number;
   /** Ngày chơi theo giờ VN, `YYYY-MM-DD`. */
   playedOn: string;
   /** Buổi chơi (không bắt buộc); phải bắt đầu cùng ngày VN với `playedOn`. */
@@ -110,6 +117,7 @@ const inputSchema = z
     roleId: idSchema,
     value: numberSchema,
     extraValue: numberSchema.optional(),
+    penaltyValue: numberSchema.optional(),
     playedOn: z.string(),
     sessionId: idSchema.nullish(),
     note: z.string().nullish(),
@@ -138,6 +146,7 @@ interface Normalised {
   roleId: number;
   value: number;
   extraValue: number;
+  penaltyValue: number;
   playedOn: string;
   sessionId: number | null;
   note: string | null;
@@ -170,14 +179,14 @@ async function assertActiveMember(ctx: Ctx, memberId: number): Promise<void> {
 }
 
 /**
- * Bộ kiểm tra của spec, đúng thứ tự: role bật → giá trị → chỉ số phụ → cửa sổ 3 ngày → mùa
- * chưa chốt → (giới hạn ngày, chỉ khi `dailyCap`) → ghi chú → buổi khớp ngày. Mọi mốc
- * "hôm nay" lấy từ `ctx.now()` theo giờ VN.
+ * Bộ kiểm tra của spec, đúng thứ tự: role bật → giá trị → chỉ số phụ → chỉ số phạt → cửa sổ
+ * 3 ngày → mùa chưa chốt → (giới hạn ngày, chỉ khi `dailyCap`) → ghi chú → buổi khớp ngày.
+ * Mọi mốc "hôm nay" lấy từ `ctx.now()` theo giờ VN.
  */
 async function validateReport(ctx: Ctx, memberId: number, r: Normalised, opts: { dailyCap: boolean }): Promise<void> {
   const role = await ctx.db.role.findUnique({
     where: { id: r.roleId },
-    select: { active: true, maxPerGame: true, extraMaxPerGame: true },
+    select: { active: true, maxPerGame: true, extraMaxPerGame: true, penaltyMaxPerGame: true },
   });
   if (!role) throw appError('VALIDATION', 'Role không hợp lệ');
   if (!role.active) throw appError('ROLE_INACTIVE');
@@ -191,6 +200,12 @@ async function validateReport(ctx: Ctx, memberId: number, r: Normalised, opts: {
     if (r.extraValue !== 0) throw appError('VALIDATION', 'Role này không có chỉ số phụ');
   } else if (!Number.isInteger(r.extraValue) || r.extraValue < 0 || r.extraValue > role.extraMaxPerGame) {
     throw appError('VALUE_OUT_OF_RANGE', `Chỉ số phụ phải từ 0 đến ${role.extraMaxPerGame}`);
+  }
+  // Role không có chỉ số phạt (ba trường phạt null): chỉ nhận 0 — cùng lý do như chỉ số phụ.
+  if (role.penaltyMaxPerGame === null) {
+    if (r.penaltyValue !== 0) throw appError('VALIDATION', 'Role này không có chỉ số phạt');
+  } else if (!Number.isInteger(r.penaltyValue) || r.penaltyValue < 0 || r.penaltyValue > role.penaltyMaxPerGame) {
+    throw appError('VALUE_OUT_OF_RANGE', `Chỉ số phạt phải từ 0 đến ${role.penaltyMaxPerGame}`);
   }
 
   // Chuỗi `YYYY-MM-DD` so sánh theo từ điển đúng bằng so sánh ngày.
@@ -229,6 +244,7 @@ export async function submitReport(ctx: Ctx, memberId: number, input: ReportInpu
     roleId: p.roleId,
     value: p.value,
     extraValue: p.extraValue ?? 0,
+    penaltyValue: p.penaltyValue ?? 0,
     playedOn: checkPlayedOn(p.playedOn),
     sessionId: p.sessionId ?? null,
     note: normaliseNote(p.note),
@@ -246,6 +262,7 @@ export async function submitReport(ctx: Ctx, memberId: number, input: ReportInpu
       playedOn: dateOnlyToDb(r.playedOn),
       value: r.value,
       extraValue: r.extraValue,
+      penaltyValue: r.penaltyValue,
       note: r.note,
       // Ghi rõ để đồng hồ của ctx (không phải giờ thật) quyết định "ngày khai".
       createdAt: ctx.now(),
@@ -271,6 +288,7 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
     roleId: p.roleId ?? existing.roleId,
     value: p.value ?? existing.value,
     extraValue: p.extraValue ?? existing.extraValue,
+    penaltyValue: p.penaltyValue ?? existing.penaltyValue,
     playedOn: p.playedOn === undefined ? dbToDateOnly(existing.playedOn) : checkPlayedOn(p.playedOn),
     sessionId: p.sessionId === undefined ? existing.sessionId : p.sessionId,
     note: p.note === undefined ? existing.note : normaliseNote(p.note),
@@ -284,6 +302,7 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
       roleId: merged.roleId,
       value: merged.value,
       extraValue: merged.extraValue,
+      penaltyValue: merged.penaltyValue,
       playedOn: dateOnlyToDb(merged.playedOn),
       sessionId: merged.sessionId,
       note: merged.note,
@@ -369,8 +388,8 @@ export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
 
   const { count } = await ctx.db.statReport.updateMany({
     // Khoá lạc quan: chỉ ghi khi lần khai vẫn chờ duyệt và vẫn đúng role/ngày/giá trị/chỉ số
-    // phụ mod đã xem — người khai sửa chen vào thì không duyệt nhầm nội dung mới, và
-    // `leaderBefore` ở trên luôn đúng với role/mùa thực sự được duyệt.
+    // phụ/chỉ số phạt mod đã xem — người khai sửa chen vào thì không duyệt nhầm nội dung mới,
+    // và `leaderBefore` ở trên luôn đúng với role/mùa thực sự được duyệt.
     where: {
       id: reportId,
       status: 'pending',
@@ -378,6 +397,7 @@ export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
       playedOn: report.playedOn,
       value: report.value,
       extraValue: report.extraValue,
+      penaltyValue: report.penaltyValue,
     },
     data: {
       status: d.approve ? 'approved' : 'rejected',

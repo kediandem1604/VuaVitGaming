@@ -17,8 +17,11 @@ import { formatSeasonScore } from '../../shared/metric.js';
 /** Tên lệnh — dùng ở định nghĩa và ở bộ định tuyến để hai bên không lệch nhau. */
 export const COMMAND = { report: 'baocao', leaderboard: 'bxh', profile: 'hoso' } as const;
 
-/** Tên tuỳ chọn của `/baocao` (và `role` của `/bxh`). `extraValue` là chỉ số phụ (spec chỉ số phụ §6). */
-export const OPTION = { role: 'role', value: 'so_lieu', extraValue: 'so_lieu_phu', day: 'ngay', note: 'ghi_chu' } as const;
+/**
+ * Tên tuỳ chọn của `/baocao` (và `role` của `/bxh`). `extraValue` là chỉ số phụ (spec chỉ số phụ
+ * §6), `penaltyValue` là chỉ số phạt (spec điểm role §5).
+ */
+export const OPTION = { role: 'role', value: 'so_lieu', extraValue: 'so_lieu_phu', penaltyValue: 'so_lieu_phat', day: 'ngay', note: 'ghi_chu' } as const;
 
 /** Discord cho tối đa 25 gợi ý autocomplete. */
 const MAX_CHOICES = 25;
@@ -26,7 +29,7 @@ const MAX_CHOICES = 25;
 const CHOICE_NAME_MAX = 100;
 /** Ghi chú lần khai tối đa 300 ký tự (như `reports.ts`). */
 const NOTE_MAX = 300;
-/** `maxPerGame` (và `extraMaxPerGame`) của role nằm trong 1–100 nên giá trị khai không bao giờ quá 100. */
+/** `maxPerGame` (và `extraMaxPerGame`, `penaltyMaxPerGame`) của role nằm trong 1–100 nên giá trị khai không bao giờ quá 100. */
 const VALUE_MAX = 100;
 
 /** Màu phe (global constraints): Ngỗng, Vịt, Phe thứ 3. */
@@ -38,10 +41,10 @@ const FACTION_COLOUR: Record<Faction, number> = { goose: 0x2f80ed, duck: 0xe5484
 
 /**
  * Ba lệnh chỉ dùng trong server (`dm_permission: false`): `/baocao role so_lieu
- * [so_lieu_phu] [ngay] [ghi_chu]`, `/bxh role`, `/hoso`. Tuỳ chọn bắt buộc đứng trước
- * tuỳ chọn không bắt buộc (Discord yêu cầu) nên `so_lieu_phu` đứng ngay sau `so_lieu`;
- * `role` có autocomplete. Role nào có chỉ số phụ do `submitReport` quyết — ở đây chỉ
- * giới hạn 0–100 như `so_lieu`.
+ * [so_lieu_phu] [so_lieu_phat] [ngay] [ghi_chu]`, `/bxh role`, `/hoso`. Tuỳ chọn bắt buộc
+ * đứng trước tuỳ chọn không bắt buộc (Discord yêu cầu) nên `so_lieu_phu` đứng ngay sau
+ * `so_lieu`, rồi `so_lieu_phat`; `role` có autocomplete. Role nào có chỉ số phụ/phạt do
+ * `submitReport` quyết — ở đây chỉ giới hạn 0–100 như `so_lieu`.
  */
 export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
   const roleOption = (description: string) => ({
@@ -71,6 +74,13 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           type: ApplicationCommandOptionType.Integer,
           name: OPTION.extraValue,
           description: 'Chỉ số phụ, nếu role có (vd số lần ám sát trong cuộc họp); bỏ trống = 0',
+          min_value: 0,
+          max_value: VALUE_MAX,
+        },
+        {
+          type: ApplicationCommandOptionType.Integer,
+          name: OPTION.penaltyValue,
+          description: 'Chỉ số phạt, nếu role có (vd số phát bắn sai, bị trừ điểm); bỏ trống = 0',
           min_value: 0,
           max_value: VALUE_MAX,
         },

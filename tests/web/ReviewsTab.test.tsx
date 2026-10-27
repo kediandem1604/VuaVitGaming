@@ -23,6 +23,7 @@ const reportRole = (id: number, nameVi: string, icon: string, metricLabel: strin
 });
 
 const ASSASSIN = reportRole(50, 'Ám sát', '🗡️', 'Số mạng đã giết', 15, { extraMetricLabel: 'Số lần ám sát trong cuộc họp', extraMaxPerGame: 2, extraPoints: 3 });
+const SHERIFF = reportRole(20, 'Cảnh sát trưởng', '⭐', 'Số phát bắn trúng kẻ xấu', 10, { points: 3, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 10, penaltyPoints: 1 });
 
 const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id'>): ReportDto => ({
   member: { id: 9, displayName: 'Ngỗng Chín' },
@@ -137,6 +138,24 @@ test('a report of an extra-metric role reads "x + y"; others are unchanged', asy
   expect(items[0]).toHaveTextContent('4 mạng đã giết + 2 lần ám sát trong cuộc họp');
   expect(items[1]).toHaveTextContent('4 mạng chém');
   expect(items[1]).not.toHaveTextContent('+');
+});
+
+test('a report of a penalty role reads "x − z" only when penaltyValue > 0', async () => {
+  stubFetch({
+    'GET /api/admin/reports?status=pending': () =>
+      json(200, [
+        report({ id: 4, member: { id: 12, displayName: 'Ngỗng Mười Hai' }, role: SHERIFF, value: 4, penaltyValue: 1, points: 11 }),
+        report({ id: 5, member: { id: 13, displayName: 'Ngỗng Mười Ba' }, role: SHERIFF, value: 2, penaltyValue: 0, points: 6 }),
+      ]),
+  });
+  renderTab();
+
+  const items = await screen.findAllByRole('listitem');
+  expect(items).toHaveLength(2);
+  expect(items[0]).toHaveTextContent('⭐ Cảnh sát trưởng');
+  expect(items[0]).toHaveTextContent('4 phát bắn trúng kẻ xấu − 1 phát bắn sai');
+  expect(items[1]).toHaveTextContent('2 phát bắn trúng kẻ xấu');
+  expect(items[1]).not.toHaveTextContent('−');
 });
 
 test('rejecting requires a reason before anything is sent', async () => {

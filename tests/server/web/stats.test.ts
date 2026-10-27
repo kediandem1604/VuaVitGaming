@@ -297,7 +297,7 @@ test('submit returns the created report; mine lists newest first; own pending re
   expect(foreign.json()).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
   expect((await patch('/api/reports/abc', sid, { value: 1 })).statusCode).toBe(400);
   expect((await patch('/api/reports/999', sid, { value: 1 })).statusCode).toBe(404);
-  for (const body of [undefined, { value: 'x' }, { extra: 1 }, { playedOn: '22/10/2026' }, { roleId: 0 }, { sessionId: 'x' }, { extraValue: 'x' }, { extraValue: null }]) {
+  for (const body of [undefined, { value: 'x' }, { extra: 1 }, { playedOn: '22/10/2026' }, { roleId: 0 }, { sessionId: 'x' }, { extraValue: 'x' }, { extraValue: null }, { penaltyValue: 'x' }, { penaltyValue: null }]) {
     const res = await patch(`/api/reports/${first.id}`, sid, body);
     expect(res.statusCode, JSON.stringify(body)).toBe(400);
     expect(res.json(), JSON.stringify(body)).toEqual(INVALID);
@@ -310,7 +310,51 @@ test('submit returns the created report; mine lists newest first; own pending re
   expect(noExtra.statusCode).toBe(400);
   expect(noExtra.json()).toEqual(errorBody('VALIDATION', 'Role này không có chỉ số phụ'));
   expect((await patch(`/api/reports/${first.id}`, sid, { extraValue: 0 })).statusCode).toBe(200);
+  // … và không có chỉ số phạt: penaltyValue khác 0 là lỗi nghiệp vụ; 0 thì được.
+  const noPenalty = await patch(`/api/reports/${first.id}`, sid, { penaltyValue: 1 });
+  expect(noPenalty.statusCode).toBe(400);
+  expect(noPenalty.json()).toEqual(errorBody('VALIDATION', 'Role này không có chỉ số phạt'));
+  expect((await patch(`/api/reports/${first.id}`, sid, { penaltyValue: 0 })).statusCode).toBe(200);
   expect((await reportRow(first.id)).value).toBe(6);
+});
+
+test('a penalty report over HTTP: penaltyValue in, points subtract it; PATCH keeps the penalty unless sent', async () => {
+  const { sid } = await memberWithSid({ displayName: 'An' });
+  const sheriff = await roleByKey(testDb, 'sheriff');
+
+  const res = await post('/api/reports', sid, { roleId: sheriff.id, value: 4, penaltyValue: 2, playedOn: '2026-10-22' });
+  expect(res.statusCode, res.body).toBe(201);
+  const dto = res.json<ReportDto>();
+  // 4 × 3 − 2 × 1 = 10.
+  expect(dto).toMatchObject({
+    role: { id: sheriff.id, nameVi: 'Cảnh sát trưởng', points: 3, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 10, penaltyPoints: 1 },
+    value: 4,
+    extraValue: 0,
+    penaltyValue: 2,
+    points: 10,
+  });
+  expect(await reportRow(dto.id)).toMatchObject({ value: 4, penaltyValue: 2 });
+
+  // Không gửi penaltyValue → 0; vượt giới hạn → thông báo của service; sai kiểu → 400 chung.
+  const bare = await post('/api/reports', sid, { roleId: sheriff.id, value: 1, playedOn: '2026-10-22' });
+  expect(bare.statusCode).toBe(201);
+  expect(bare.json<ReportDto>()).toMatchObject({ penaltyValue: 0, points: 3 });
+  const over = await post('/api/reports', sid, { roleId: sheriff.id, value: 1, penaltyValue: 11, playedOn: '2026-10-22' });
+  expect(over.statusCode).toBe(400);
+  expect(over.json()).toEqual(errorBody('VALUE_OUT_OF_RANGE', 'Chỉ số phạt phải từ 0 đến 10'));
+  for (const penaltyValue of ['2', null, true]) {
+    const bad = await post('/api/reports', sid, { roleId: sheriff.id, value: 1, penaltyValue, playedOn: '2026-10-22' });
+    expect(bad.statusCode, JSON.stringify(penaltyValue)).toBe(400);
+    expect(bad.json(), JSON.stringify(penaltyValue)).toEqual(INVALID);
+  }
+
+  // PATCH không gửi penaltyValue giữ nguyên; gửi thì đổi.
+  const edited = await patch(`/api/reports/${dto.id}`, sid, { value: 5 });
+  expect(edited.statusCode).toBe(200);
+  expect(edited.json<ReportDto>()).toEqual({ ...dto, value: 5, points: 13 });
+  const edited2 = await patch(`/api/reports/${dto.id}`, sid, { penaltyValue: 1 });
+  expect(edited2.json<ReportDto>()).toMatchObject({ value: 5, penaltyValue: 1, points: 14 });
+  expect(await reportRow(dto.id)).toMatchObject({ value: 5, penaltyValue: 1 });
 });
 
 test('an extra-metric report over HTTP: extraValue in, points and role limits out; PATCH keeps the extra', async () => {

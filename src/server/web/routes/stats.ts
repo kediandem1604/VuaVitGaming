@@ -78,6 +78,8 @@ const reportBody = z
     value: z.number(),
     // Chỉ số phụ, không bắt buộc (service mặc định 0); giới hạn và "role không có chỉ số phụ" do service báo.
     extraValue: z.number().optional(),
+    // Chỉ số phạt, không bắt buộc (service mặc định 0); giới hạn và "role không có chỉ số phạt" do service báo.
+    penaltyValue: z.number().optional(),
     playedOn: z.string().regex(VN_DATE),
     sessionId: int32Id.nullish(),
     note: z.string().nullish(),

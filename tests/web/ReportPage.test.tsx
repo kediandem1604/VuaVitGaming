@@ -42,9 +42,30 @@ const roles: RoleDto[] = [
     extraMaxPerGame: 2,
     extraPoints: 3,
   }),
+  // Role có chỉ số phạt và điểm mỗi lần ≠ 1 (như Cảnh sát trưởng trong seed).
+  role({ id: 20, key: 'sheriff', faction: 'goose', nameVi: 'Cảnh sát trưởng', nameEn: 'Sheriff', icon: '⭐', metricLabel: 'Số phát bắn trúng kẻ xấu', maxPerGame: 10, points: 3, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 10, penaltyPoints: 1 }),
 ];
 
 const EXTRA_LABEL = 'Số lần ám sát trong cuộc họp';
+const PENALTY_LABEL = 'Số phát bắn sai';
+const PENALTY_HINT = 'Tối đa 10 mỗi trận · −1 điểm mỗi lần';
+const PENALTY_OUT_OF_RANGE = 'Chỉ số phạt phải từ 0 đến 10';
+
+/** Cảnh sát trưởng (seed): ×3 (tối đa 10), phạt "Số phát bắn sai" tối đa 10, −1 mỗi phát; không có chỉ số phụ. */
+const SHERIFF_REPORT_ROLE: ReportDto['role'] = {
+  id: 20,
+  nameVi: 'Cảnh sát trưởng',
+  icon: '⭐',
+  metricLabel: 'Số phát bắn trúng kẻ xấu',
+  maxPerGame: 10,
+  points: 3,
+  extraMetricLabel: null,
+  extraMaxPerGame: null,
+  extraPoints: null,
+  penaltyMetricLabel: PENALTY_LABEL,
+  penaltyMaxPerGame: 10,
+  penaltyPoints: 1,
+};
 const EXTRA_HINT = 'Tối đa 2 mỗi trận · +3 điểm mỗi lần';
 const EXTRA_OUT_OF_RANGE = 'Chỉ số phụ phải từ 0 đến 2';
 
@@ -211,15 +232,16 @@ test('suggestions show a mini character and the faction, and the chosen role bec
   stubFetch(baseRoutes);
   renderPage();
 
-  // "o" khớp cả ba role (goose, swordsman, dodo) nên thấy đủ ba phe.
+  // "o" khớp bốn role (goose, swordsman, dodo, "Cảnh sát trưởng") nên thấy đủ ba phe.
   fireEvent.change(await screen.findByRole('combobox', { name: 'Role' }), { target: { value: 'o' } });
   const listbox = await screen.findByRole('listbox', { name: 'Kết quả tìm role' });
   const options = within(listbox).getAllByRole('option');
-  expect(options).toHaveLength(3);
+  expect(options).toHaveLength(4);
   const expected: Array<[string, string]> = [
     ['Ngỗng', 'Phe Ngỗng'],
     ['Kiếm sĩ', 'Phe Vịt'],
     ['Chim đa đa', 'Phe thứ 3'],
+    ['Cảnh sát trưởng', 'Phe Ngỗng'],
   ];
   expected.forEach(([name, faction], index) => {
     const option = options[index] as HTMLElement;
@@ -507,6 +529,135 @@ test('my reports read "x + y" for an extra-metric role, and its edit form has bo
   fireEvent.click(within(item).getByRole('button', { name: 'Lưu' }));
   await waitFor(() => expect(patched).toEqual({ value: 5, extraValue: 1, playedOn: today, note: null }));
   expect(await within(item).findByText('5 mạng đã giết + 1 lần ám sát trong cuộc họp')).toBeInTheDocument();
+  expect(within(item).queryByRole('button', { name: 'Lưu' })).not.toBeInTheDocument();
+});
+
+// ---------------------------------------------------------------------------
+// Chỉ số phạt (spec điểm role §5)
+// ---------------------------------------------------------------------------
+
+test('a penalty role adds a third input (label, hint, default 0) sent as penaltyValue, and the main hint names the points per unit', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    ...baseRoutes,
+    'POST /api/reports': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return json(201, report({ id: 4, status: 'pending', role: SHERIFF_REPORT_ROLE, value: 4, penaltyValue: 1, points: 11 }));
+    },
+  });
+  renderPage();
+  const search = await screen.findByRole('combobox', { name: 'Role' });
+
+  await pickRole('canh sat', /Cảnh sát trưởng/);
+  const value = screen.getByRole('spinbutton', { name: 'Số phát bắn trúng kẻ xấu' });
+  expect(value).toHaveAttribute('max', '10');
+  // points = 3 ≠ 1 → gợi ý nêu điểm mỗi lần.
+  expect(screen.getByText('Tối đa 10 mỗi trận · +3 điểm mỗi lần')).toBeInTheDocument();
+  // Không có chỉ số phụ → không có ô phụ; có chỉ số phạt → ô thứ ba.
+  expect(screen.queryByRole('spinbutton', { name: EXTRA_LABEL })).not.toBeInTheDocument();
+  const penalty = screen.getByRole('spinbutton', { name: PENALTY_LABEL });
+  expect(penalty).toHaveValue(0);
+  expect(penalty).toHaveAttribute('min', '0');
+  expect(penalty).toHaveAttribute('max', '10');
+  expect(screen.getByText(PENALTY_HINT)).toBeInTheDocument();
+  expect(screen.getAllByRole('spinbutton')).toHaveLength(2);
+
+  // Vượt tối đa: chặn tại chỗ, không gửi gì.
+  fireEvent.change(value, { target: { value: '4' } });
+  fireEvent.change(penalty, { target: { value: '11' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(PENALTY_OUT_OF_RANGE);
+  expect(posted).toBeNull();
+
+  fireEvent.change(penalty, { target: { value: '1' } });
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
+  expect(posted).toEqual({ roleId: 20, value: 4, penaltyValue: 1, playedOn: today });
+  // Lần khai mới đọc "x − z"; form về mặc định (ô chính trống, ô phạt 0).
+  expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('4 phát bắn trúng kẻ xấu − 1 phát bắn sai');
+  expect(value).toHaveValue(null);
+  expect(penalty).toHaveValue(0);
+
+  // Đổi sang role không có chỉ số phạt và points = 1: ô thứ ba và phần "+N điểm" biến mất.
+  fireEvent.change(search, { target: { value: 'kiem' } });
+  fireEvent.click(await screen.findByRole('option', { name: /Kiếm sĩ/ }));
+  expect(screen.queryByRole('spinbutton', { name: PENALTY_LABEL })).not.toBeInTheDocument();
+  expect(screen.queryByText(PENALTY_HINT)).not.toBeInTheDocument();
+  expect(screen.getByText('Tối đa 15 mỗi trận')).toBeInTheDocument();
+  expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
+});
+
+test('a blank penalty input counts as 0; a role without a penalty metric never sends penaltyValue', async () => {
+  const bodies: unknown[] = [];
+  stubFetch({
+    ...baseRoutes,
+    'POST /api/reports': (init) => {
+      const body = JSON.parse(String(init?.body)) as { roleId: number };
+      bodies.push(body);
+      return json(201, body.roleId === 20 ? report({ id: 4, status: 'pending', role: SHERIFF_REPORT_ROLE, value: 4, points: 12 }) : report({ id: 5, status: 'pending', value: 5 }));
+    },
+  });
+  renderPage();
+  await pickRole('canh sat', /Cảnh sát trưởng/);
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Số phát bắn trúng kẻ xấu' }), { target: { value: '4' } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: PENALTY_LABEL }), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
+  expect(bodies[0]).toEqual({ roleId: 20, value: 4, penaltyValue: 0, playedOn: today });
+
+  fireEvent.change(screen.getByRole('combobox', { name: 'Role' }), { target: { value: 'kiem' } });
+  fireEvent.click(await screen.findByRole('option', { name: /Kiếm sĩ/ }));
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '5' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  await waitFor(() => expect(bodies).toHaveLength(2));
+  expect(bodies[1]).toEqual({ roleId: 61, value: 5, playedOn: today });
+});
+
+test('my reports read "x − z" for a penalty role, and its edit form has the penalty input capped by the role', async () => {
+  let patched: unknown = null;
+  const sheriffReport = report({ id: 8, status: 'pending', role: SHERIFF_REPORT_ROLE, value: 4, penaltyValue: 2, points: 10 });
+  stubFetch({
+    ...baseRoutes,
+    'GET /api/reports/mine': () => json(200, [sheriffReport, report({ id: 7, status: 'approved', role: SHERIFF_REPORT_ROLE, value: 3, penaltyValue: 0, points: 9 }), ...mine]),
+    'PATCH /api/reports/8': (init) => {
+      patched = JSON.parse(String(init?.body));
+      return json(200, { ...sheriffReport, value: 5, penaltyValue: 1, points: 14 });
+    },
+  });
+  renderPage();
+
+  const items = await screen.findAllByRole('listitem');
+  const item = items[0] as HTMLElement;
+  expect(item).toHaveTextContent('⭐ Cảnh sát trưởng');
+  expect(item).toHaveTextContent('4 phát bắn trúng kẻ xấu − 2 phát bắn sai');
+  // penaltyValue 0 không nêu phần phạt.
+  expect(items[1]).toHaveTextContent('3 phát bắn trúng kẻ xấu');
+  expect(items[1]).not.toHaveTextContent('−');
+
+  fireEvent.click(within(item).getByRole('button', { name: 'Sửa' }));
+  const value = within(item).getByRole('spinbutton', { name: 'Số phát bắn trúng kẻ xấu' });
+  expect(value).toHaveValue(4);
+  expect(within(item).getByText('Tối đa 10 mỗi trận · +3 điểm mỗi lần')).toBeInTheDocument();
+  expect(within(item).queryByRole('spinbutton', { name: EXTRA_LABEL })).not.toBeInTheDocument();
+  const penalty = within(item).getByRole('spinbutton', { name: PENALTY_LABEL });
+  expect(penalty).toHaveValue(2);
+  expect(penalty).toHaveAttribute('min', '0');
+  expect(penalty).toHaveAttribute('max', '10');
+  expect(within(item).getByText(PENALTY_HINT)).toBeInTheDocument();
+
+  // Vượt tối đa: chặn tại chỗ.
+  fireEvent.change(penalty, { target: { value: '11' } });
+  fireEvent.click(within(item).getByRole('button', { name: 'Lưu' }));
+  expect(await within(item).findByRole('alert')).toHaveTextContent(PENALTY_OUT_OF_RANGE);
+  expect(patched).toBeNull();
+
+  fireEvent.change(value, { target: { value: '5' } });
+  fireEvent.change(penalty, { target: { value: '1' } });
+  expect(within(item).queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.click(within(item).getByRole('button', { name: 'Lưu' }));
+  await waitFor(() => expect(patched).toEqual({ value: 5, penaltyValue: 1, playedOn: today, note: null }));
+  expect(await within(item).findByText('5 phát bắn trúng kẻ xấu − 1 phát bắn sai')).toBeInTheDocument();
   expect(within(item).queryByRole('button', { name: 'Lưu' })).not.toBeInTheDocument();
 });
 

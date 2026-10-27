@@ -42,12 +42,13 @@ type SubmitOverrides = {
   roleId?: number;
   value?: number;
   extraValue?: number;
+  penaltyValue?: number;
   playedOn?: string;
   sessionId?: number | null;
   note?: string | null;
 };
 
-/** Khai mặc định: Vịt, 3 mạng, ngày 10/10, không buổi, không ghi chú, không chỉ số phụ; ghi đè từng trường. */
+/** Khai mặc định: Vịt, 3 mạng, ngày 10/10, không buổi, không ghi chú, không chỉ số phụ/phạt; ghi đè từng trường. */
 async function submit(o: SubmitOverrides = {}) {
   const roleId = o.roleId ?? (o.roleKey ? (await roleByKey(testDb, o.roleKey)).id : duck.id);
   return submitReport(ctx, o.memberId ?? member.id, {
@@ -55,6 +56,7 @@ async function submit(o: SubmitOverrides = {}) {
     value: o.value ?? 3,
     playedOn: o.playedOn ?? '2026-10-10',
     ...(o.extraValue !== undefined ? { extraValue: o.extraValue } : {}),
+    ...(o.penaltyValue !== undefined ? { penaltyValue: o.penaltyValue } : {}),
     ...(o.sessionId !== undefined ? { sessionId: o.sessionId } : {}),
     ...(o.note !== undefined ? { note: o.note } : {}),
   });
@@ -375,6 +377,148 @@ test('rejection DM of an extra-metric report reads "x + y"', async () => {
       discordId: member.discordId,
       text: 'Lần khai Ám sát (4 mạng đã giết + 2 lần ám sát trong cuộc họp) ngày 09/10 bị từ chối: Thiếu clip',
     },
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// Chỉ số phạt (spec điểm role §3, §5)
+// ---------------------------------------------------------------------------
+
+test('a penalty report stores penaltyValue; points subtract it and the DTO carries the role penalty fields', async () => {
+  // Cảnh sát trưởng (seed): ×3, tối đa 10; phạt "Số phát bắn sai" tối đa 10, −1 mỗi phát.
+  const sheriff = await roleByKey(testDb, 'sheriff');
+  expect(sheriff).toMatchObject({ points: 3, maxPerGame: 10, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 10, penaltyPoints: 1 });
+
+  const r = await submit({ roleId: sheriff.id, value: 4, penaltyValue: 2 });
+  expect(r).toMatchObject({ value: 4, extraValue: 0, penaltyValue: 2, status: 'pending' });
+  expect(await reportRow(r.id)).toMatchObject({ value: 4, penaltyValue: 2 });
+
+  // DTO: điểm = 4 × 3 − 2 × 1 = 10; role mang đủ ba trường phạt.
+  const [dto] = await listMyReports(ctx, member.id);
+  expect(dto).toMatchObject({ value: 4, penaltyValue: 2, points: 10, role: roleDtoOf(sheriff) });
+
+  // Không gửi penaltyValue → 0; điểm có thể âm (0 × 3 − 3 × 1).
+  const bare = await submit({ roleId: sheriff.id, value: 1 });
+  expect(bare.penaltyValue).toBe(0);
+  const negative = await submit({ roleId: sheriff.id, value: 0, penaltyValue: 3 });
+  const dtos = await listMyReports(ctx, member.id);
+  expect(dtos.find((d) => d.id === negative.id)?.points).toBe(-3);
+  expect(dtos.find((d) => d.id === bare.id)?.points).toBe(3);
+});
+
+test('penaltyValue bounds: 0..penaltyMaxPerGame on a penalty role, exactly 0 elsewhere, checked after the extra metric', async () => {
+  const sheriff = await roleByKey(testDb, 'sheriff');
+  const vigilante = await roleByKey(testDb, 'vigilante');
+  expect(vigilante).toMatchObject({ points: 5, maxPerGame: 1, penaltyMaxPerGame: 1, penaltyPoints: 3 });
+
+  await expect(submit({ roleId: sheriff.id, value: 4, penaltyValue: 11 })).rejects.toMatchObject({
+    code: 'VALUE_OUT_OF_RANGE',
+    message: 'Chỉ số phạt phải từ 0 đến 10',
+  });
+  await expect(submit({ roleId: vigilante.id, value: 1, penaltyValue: 2 })).rejects.toMatchObject({
+    code: 'VALUE_OUT_OF_RANGE',
+    message: 'Chỉ số phạt phải từ 0 đến 1',
+  });
+  await expect(submit({ roleId: sheriff.id, value: 1, penaltyValue: -1 })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE', message: 'Chỉ số phạt phải từ 0 đến 10' });
+  await expect(submit({ roleId: sheriff.id, value: 1, penaltyValue: 1.5 })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE' });
+  await expect(submit({ roleId: sheriff.id, value: 1, penaltyValue: Number.NaN })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE' });
+  // Sai kiểu là dữ liệu không hợp lệ chung.
+  await expect(submit({ roleId: sheriff.id, value: 1, penaltyValue: '1' as never })).rejects.toMatchObject({ code: 'VALIDATION' });
+  // Thứ tự kiểm: giá trị chính → chỉ số phụ → chỉ số phạt.
+  await expect(submit({ roleId: sheriff.id, value: 11, penaltyValue: 99 })).rejects.toMatchObject({
+    code: 'VALUE_OUT_OF_RANGE',
+    message: 'Giá trị phải từ 0 đến 10',
+  });
+  await expect(submit({ roleId: sheriff.id, value: 1, extraValue: 1, penaltyValue: 99 })).rejects.toMatchObject({
+    code: 'VALIDATION',
+    message: 'Role này không có chỉ số phụ',
+  });
+  // Hai đầu mút hợp lệ.
+  await expect(submit({ roleId: sheriff.id, value: 10, penaltyValue: 10 })).resolves.toMatchObject({ value: 10, penaltyValue: 10 });
+  await expect(submit({ roleId: vigilante.id, value: 0, penaltyValue: 1 })).resolves.toMatchObject({ value: 0, penaltyValue: 1 });
+  await expect(submit({ roleId: sheriff.id, value: 0, penaltyValue: 0 })).resolves.toMatchObject({ penaltyValue: 0 });
+
+  // Role không có chỉ số phạt: penaltyValue phải là 0 (0 hoặc vắng mặt đều được).
+  await expect(submit({ penaltyValue: 1 })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Role này không có chỉ số phạt' });
+  await expect(submit({ roleKey: 'assassin', penaltyValue: 1 })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Role này không có chỉ số phạt' });
+  await expect(submit({ penaltyValue: 0 })).resolves.toMatchObject({ penaltyValue: 0 });
+  await expect(submit()).resolves.toMatchObject({ penaltyValue: 0 });
+});
+
+test('editing keeps the stored penaltyValue unless sent, and re-checks it against the merged role', async () => {
+  const sheriff = await roleByKey(testDb, 'sheriff');
+  const r = await submit({ roleId: sheriff.id, value: 4, penaltyValue: 2 });
+
+  // Không gửi penaltyValue → giữ nguyên; gửi thì đổi và kiểm giới hạn.
+  expect(await updateOwnReport(ctx, member.id, r.id, { value: 5 })).toMatchObject({ value: 5, penaltyValue: 2 });
+  expect(await updateOwnReport(ctx, member.id, r.id, { note: 'x' })).toMatchObject({ value: 5, penaltyValue: 2 });
+  expect(await updateOwnReport(ctx, member.id, r.id, { penaltyValue: 1 })).toMatchObject({ value: 5, penaltyValue: 1 });
+  await expect(updateOwnReport(ctx, member.id, r.id, { penaltyValue: 11 })).rejects.toMatchObject({
+    code: 'VALUE_OUT_OF_RANGE',
+    message: 'Chỉ số phạt phải từ 0 đến 10',
+  });
+  await expect(updateOwnReport(ctx, member.id, r.id, { penaltyValue: -1 })).rejects.toMatchObject({ code: 'VALUE_OUT_OF_RANGE' });
+  await expect(updateOwnReport(ctx, member.id, r.id, { penaltyValue: '2' as never })).rejects.toMatchObject({ code: 'VALIDATION' });
+
+  // Đổi sang role không có chỉ số phạt khi còn penaltyValue > 0 → lỗi; gửi kèm penaltyValue 0 thì được.
+  await expect(updateOwnReport(ctx, member.id, r.id, { roleId: duck.id })).rejects.toMatchObject({
+    code: 'VALIDATION',
+    message: 'Role này không có chỉ số phạt',
+  });
+  expect(await reportRow(r.id)).toMatchObject({ roleId: sheriff.id, value: 5, penaltyValue: 1 });
+  expect(await updateOwnReport(ctx, member.id, r.id, { roleId: duck.id, penaltyValue: 0 })).toMatchObject({ roleId: duck.id, value: 5, penaltyValue: 0 });
+
+  // Role thường không nhận penaltyValue > 0 khi sửa; đổi về Cảnh sát trưởng kèm penaltyValue thì được.
+  await expect(updateOwnReport(ctx, member.id, r.id, { penaltyValue: 1 })).rejects.toMatchObject({ code: 'VALIDATION', message: 'Role này không có chỉ số phạt' });
+  expect(await updateOwnReport(ctx, member.id, r.id, { roleId: sheriff.id, penaltyValue: 3 })).toMatchObject({ roleId: sheriff.id, penaltyValue: 3 });
+  expect(await reportRow(r.id)).toMatchObject({ roleId: sheriff.id, value: 5, penaltyValue: 3, status: 'pending' });
+});
+
+test('a penaltyValue edit between the mod reading and approving is refused', async () => {
+  const sheriff = await roleByKey(testDb, 'sheriff');
+  const m = await mod();
+  const r = await submit({ roleId: sheriff.id, value: 4, penaltyValue: 1 });
+
+  // Người khai sửa chỉ số phạt ngay sau lần đọc đầu tiên của mod (role/ngày/giá trị chính/chỉ số phụ không đổi).
+  let intercepted = false;
+  const restore = patchDelegate(testDb.statReport, 'findUnique', (original) =>
+    (async (args: Prisma.StatReportFindUniqueArgs) => {
+      const row = await original(args);
+      if (!intercepted) {
+        intercepted = true;
+        await updateOwnReport(ctx, member.id, r.id, { penaltyValue: 2 });
+      }
+      return row;
+    }) as never,
+  );
+  try {
+    await expect(reviewReport(ctx, asReviewer(m), r.id, { approve: true })).rejects.toMatchObject({
+      code: 'NOT_PENDING',
+      message: 'Lần khai vừa được sửa, hãy xem lại',
+    });
+  } finally {
+    restore();
+  }
+  expect(intercepted).toBe(true);
+  expect(await reportRow(r.id)).toMatchObject({ status: 'pending', value: 4, penaltyValue: 2, reviewedById: null });
+  expect(notifier.announcements).toEqual([]);
+
+  // Mod xem lại rồi duyệt: tính đúng số mới (4 × 3 − 2 × 1 = 10).
+  await reviewReport(ctx, asReviewer(m), r.id, { approve: true });
+  expect(await reportRow(r.id)).toMatchObject({ status: 'approved', penaltyValue: 2 });
+  expect(notifier.announcements).toEqual(['👑 An đã hoá thân Cảnh sát trưởng mùa 2026-10!']);
+});
+
+test('rejection DM of a penalty report reads "x − z"; penaltyValue 0 is not mentioned', async () => {
+  const sheriff = await roleByKey(testDb, 'sheriff');
+  const m = await mod();
+  const r = await submit({ roleId: sheriff.id, value: 4, penaltyValue: 1, playedOn: '2026-10-09' });
+  await reviewReport(ctx, asReviewer(m), r.id, { approve: false, reason: 'Thiếu clip' });
+  const zero = await submit({ roleId: sheriff.id, value: 2, penaltyValue: 0, playedOn: '2026-10-09' });
+  await reviewReport(ctx, asReviewer(m), zero.id, { approve: false, reason: 'Sai ngày' });
+  expect(notifier.dms).toEqual([
+    { discordId: member.discordId, text: 'Lần khai Cảnh sát trưởng (4 phát bắn trúng kẻ xấu − 1 phát bắn sai) ngày 09/10 bị từ chối: Thiếu clip' },
+    { discordId: member.discordId, text: 'Lần khai Cảnh sát trưởng (2 phát bắn trúng kẻ xấu) ngày 09/10 bị từ chối: Sai ngày' },
   ]);
 });
 

@@ -60,17 +60,20 @@ test('definitions are valid for Discord', () => {
   }
 
   const [baocao, bxh, hoso] = defs;
-  expect(baocao?.options).toHaveLength(5);
-  // `so_lieu_phu` (chỉ số phụ, không bắt buộc) đứng ngay sau `so_lieu` (spec chỉ số phụ §6).
-  expect(baocao?.options?.map((o) => o.name)).toEqual(['role', 'so_lieu', 'so_lieu_phu', 'ngay', 'ghi_chu']);
+  expect(baocao?.options).toHaveLength(6);
+  // `so_lieu_phu` (chỉ số phụ, không bắt buộc) đứng ngay sau `so_lieu` (spec chỉ số phụ §6);
+  // `so_lieu_phat` (chỉ số phạt, không bắt buộc) đứng ngay sau `so_lieu_phu` (spec điểm role §5).
+  expect(baocao?.options?.map((o) => o.name)).toEqual(['role', 'so_lieu', 'so_lieu_phu', 'so_lieu_phat', 'ngay', 'ghi_chu']);
   expect(baocao?.options?.[0]).toMatchObject({ type: ApplicationCommandOptionType.String, required: true, autocomplete: true });
   expect(baocao?.options?.[1]).toMatchObject({ type: ApplicationCommandOptionType.Integer, required: true, min_value: 0, max_value: 100 });
   expect(baocao?.options?.[2]).toMatchObject({ type: ApplicationCommandOptionType.Integer, min_value: 0, max_value: 100 });
   expect(baocao?.options?.[2]?.required ?? false).toBe(false);
-  expect(baocao?.options?.[3]).toMatchObject({ type: ApplicationCommandOptionType.String });
+  expect(baocao?.options?.[3]).toMatchObject({ type: ApplicationCommandOptionType.Integer, min_value: 0, max_value: 100 });
   expect(baocao?.options?.[3]?.required ?? false).toBe(false);
-  expect(baocao?.options?.[4]).toMatchObject({ type: ApplicationCommandOptionType.String, max_length: 300 });
+  expect(baocao?.options?.[4]).toMatchObject({ type: ApplicationCommandOptionType.String });
   expect(baocao?.options?.[4]?.required ?? false).toBe(false);
+  expect(baocao?.options?.[5]).toMatchObject({ type: ApplicationCommandOptionType.String, max_length: 300 });
+  expect(baocao?.options?.[5]?.required ?? false).toBe(false);
 
   expect(bxh?.options).toHaveLength(1);
   expect(bxh?.options?.[0]).toMatchObject({ type: ApplicationCommandOptionType.String, name: 'role', required: true, autocomplete: true });
@@ -499,6 +502,33 @@ test('/baocao answers secondary-metric rule violations with the business message
   expect(noExtra.lastText).toBe('Role này không có chỉ số phụ');
 
   expect(await reports()).toEqual([]);
+  expect(errors).not.toHaveBeenCalled();
+});
+
+test('/baocao passes so_lieu_phat as the penalty count and confirms with "x − z"', async () => {
+  const sheriff = await roleByKey(testDb, 'sheriff');
+  const i = baocao({ role: 'sheriff', so_lieu: 4, so_lieu_phat: 1 });
+  await handleInteraction(ctx, i);
+  expect(i.steps).toEqual([
+    { step: 'defer', ephemeral: true },
+    { step: 'edit', content: 'Đã gửi: ⭐ Cảnh sát trưởng — 4 phát bắn trúng kẻ xấu − 1 phát bắn sai ngày 22/10. Chờ mod duyệt nhé!' },
+  ]);
+  expect((await reports())[0]).toMatchObject({ roleId: sheriff.id, value: 4, extraValue: 0, penaltyValue: 1, status: 'pending' });
+
+  // Bỏ trống `so_lieu_phat` → 0; tin xác nhận không nêu phần phạt.
+  const none = baocao({ role: 'sheriff', so_lieu: 3 });
+  await handleInteraction(ctx, none);
+  expect(none.lastText).toBe('Đã gửi: ⭐ Cảnh sát trưởng — 3 phát bắn trúng kẻ xấu ngày 22/10. Chờ mod duyệt nhé!');
+  expect((await reports())[1]).toMatchObject({ value: 3, penaltyValue: 0 });
+
+  // Vượt giới hạn và role không có chỉ số phạt: lời của service.
+  const over = baocao({ role: 'sheriff', so_lieu: 1, so_lieu_phat: 11 });
+  await handleInteraction(ctx, over);
+  expect(over.lastText).toBe('Chỉ số phạt phải từ 0 đến 10');
+  const noPenalty = baocao({ role: 'swordsman', so_lieu: 1, so_lieu_phat: 1 });
+  await handleInteraction(ctx, noPenalty);
+  expect(noPenalty.lastText).toBe('Role này không có chỉ số phạt');
+  expect(await reports()).toHaveLength(2);
   expect(errors).not.toHaveBeenCalled();
 });
 

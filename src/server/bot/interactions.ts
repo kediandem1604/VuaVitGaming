@@ -221,9 +221,10 @@ async function handleCommand(ctx: Ctx, interaction: CommandInteractionLike): Pro
 /**
  * `/baocao`: hồ sơ người gõ từ GuildMember → tra role (theo `key` từ autocomplete, hoặc
  * gõ tay đúng tên tiếng Việt) → đọc ngày → `submitReport` (mọi quy tắc khai nằm ở đó,
- * kể cả chỉ số phụ `so_lieu_phu`: role không có mà điền ≠ 0 → lỗi của service) → xác
- * nhận ẩn `Đã gửi: … Chờ mod duyệt nhé!` (role có chỉ số phụ đọc "4 mạng đã giết + 2 lần
- * ám sát trong cuộc họp").
+ * kể cả chỉ số phụ `so_lieu_phu` và chỉ số phạt `so_lieu_phat`: role không có mà điền ≠ 0 →
+ * lỗi của service) → xác nhận ẩn `Đã gửi: … Chờ mod duyệt nhé!` (đọc "x + y − z" theo
+ * `formatReportValue`: "4 mạng đã giết + 2 lần ám sát trong cuộc họp", "4 phát bắn trúng kẻ
+ * xấu − 1 phát bắn sai").
  */
 async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Promise<void> {
   await interaction.deferReply(EPHEMERAL);
@@ -245,7 +246,9 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
     const value = interaction.options.getInteger(OPTION.value) ?? Number.NaN;
     // `so_lieu_phu` không bắt buộc; bỏ trống → 0 (như web).
     const extraValue = interaction.options.getInteger(OPTION.extraValue) ?? 0;
-    const report = await submitReport(ctx, member.id, { roleId: role.id, value, extraValue, playedOn, note: interaction.options.getString(OPTION.note) });
+    // `so_lieu_phat` cũng không bắt buộc; bỏ trống → 0.
+    const penaltyValue = interaction.options.getInteger(OPTION.penaltyValue) ?? 0;
+    const report = await submitReport(ctx, member.id, { roleId: role.id, value, extraValue, penaltyValue, playedOn, note: interaction.options.getString(OPTION.note) });
     await interaction.editReply(
       `Đã gửi: ${role.icon} ${role.nameVi} — ${formatReportValue(report, role)} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
     );
