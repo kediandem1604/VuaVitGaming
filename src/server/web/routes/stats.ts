@@ -1,5 +1,5 @@
 /**
- * Khai điểm, duyệt, bảng xếp hạng, Đại sảnh hoá thân và mùa qua HTTP (spec §4.6, §4.7);
+ * Khai điểm, duyệt và huỷ duyệt, bảng xếp hạng, Đại sảnh hoá thân và mùa qua HTTP (spec §4.6, §4.7);
  * highlight kèm lần khai (spec highlight §8). Cùng gọi một service với lệnh slash nên khai
  * trên web hay `/baocao` cho kết quả như nhau. Thân ghi là JSON `.strict()`, trừ highlight
  * gửi lên dưới dạng body thô với content-type video/ảnh (guard JSON trong app.ts đã cho qua
@@ -11,7 +11,16 @@
 
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { FactionTopDto, HallDto, HeldRoleDto, HighlightConfigDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../shared/api-types.js';
+import type {
+  FactionTopDto,
+  HallDto,
+  HeldRoleDto,
+  HighlightConfigDto,
+  LeaderboardRowDto,
+  ReportDto,
+  ReviewedReportDto,
+  SeasonDto,
+} from '../../../shared/api-types.js';
 import { HIGHLIGHT_CONTENT_TYPES, highlightLimitMessage } from '../../../shared/highlight.js';
 import { appError } from '../../lib/errors.js';
 import { seasonIdOf, toVnDate } from '../../lib/time.js';
@@ -23,7 +32,9 @@ import {
   getReportDto,
   listMyReports,
   listPendingReports,
+  listRecentlyApproved,
   reviewReport,
+  revokeReport,
   submitReport,
   updateOwnReport,
 } from '../../modules/stats/reports.js';
@@ -80,14 +91,19 @@ const limitQuery = z.coerce.number().int().min(1).max(100).optional();
 const seasonQueryParam = z.string().regex(SEASON_ID).optional();
 
 const mineQuery = z.object({ limit: limitQuery });
-/** Hàng chờ duyệt là danh sách duy nhất có — trạng thái khác chưa hỗ trợ. */
-const pendingQuery = z.object({ status: z.literal('pending') });
+/**
+ * Danh sách quản trị: `pending` là hàng chờ duyệt, `approved` là "Đã duyệt gần đây" (mùa chưa
+ * chốt, kèm người duyệt — spec huỷ duyệt §5). Trạng thái khác chưa hỗ trợ → `VALIDATION`.
+ */
+const adminListQuery = z.object({ status: z.enum(['pending', 'approved']) });
 const leaderboardQuery = z.object({ roleId: z.coerce.number().int().positive().max(2_147_483_647), season: seasonQueryParam, limit: limitQuery });
 /** Top mỗi phe và Đại sảnh chỉ nhận mùa (số dòng mỗi phe do service cố định). */
 const seasonOnlyQuery = z.object({ season: seasonQueryParam });
 
 /** Duyệt: `reason` chỉ có nghĩa khi từ chối; khi duyệt thì bỏ qua (kể cả chuỗi rỗng). */
 const reviewBody = z.object({ approve: z.boolean(), reason: z.string().optional() }).strict();
+/** Huỷ duyệt: chỉ kiểm DẠNG — lý do rỗng/quá dài, không còn `approved`, tự huỷ… do service báo. */
+const revokeBody = z.object({ reason: z.string() }).strict();
 
 function toLeaderboardRowDto(r: LeaderboardRow): LeaderboardRowDto {
   return { ...r, lastApprovedAt: r.lastApprovedAt.toISOString() };
@@ -167,9 +183,9 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
 
   // --- Duyệt (mod/admin) ---
 
-  app.get('/api/admin/reports', { preHandler: requireMod }, async (request): Promise<ReportDto[]> => {
-    pendingQuery.parse(request.query);
-    return listPendingReports(app.ctx);
+  app.get('/api/admin/reports', { preHandler: requireMod }, async (request): Promise<ReportDto[] | ReviewedReportDto[]> => {
+    const { status } = adminListQuery.parse(request.query);
+    return status === 'pending' ? listPendingReports(app.ctx) : listRecentlyApproved(app.ctx);
   });
 
   app.post('/api/admin/reports/:id/review', { preHandler: requireMod }, async (request, reply) => {
@@ -178,6 +194,15 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
     const me = currentMember(request);
     const decision = approve ? ({ approve: true } as const) : ({ approve: false, reason: reason ?? '' } as const);
     await reviewReport(app.ctx, { id: me.id, accessLevel: me.accessLevel }, id, decision);
+    return reply.code(204).send();
+  });
+
+  // Huỷ một lần khai đã duyệt kèm lý do (spec huỷ duyệt §5) — người huỷ là người đang đăng nhập.
+  app.post('/api/admin/reports/:id/revoke', { preHandler: requireMod }, async (request, reply) => {
+    const { id } = idParams.parse(request.params);
+    const { reason } = revokeBody.parse(request.body);
+    const me = currentMember(request);
+    await revokeReport(app.ctx, { id: me.id, accessLevel: me.accessLevel }, id, reason);
     return reply.code(204).send();
   });
 

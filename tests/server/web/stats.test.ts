@@ -8,7 +8,7 @@ import type { Ctx } from '../../../src/server/ctx.js';
 import type { OAuthClient } from '../../../src/server/modules/auth/oauth.js';
 import { createWebSession } from '../../../src/server/modules/auth/sessions.js';
 import { ensureSeason } from '../../../src/server/modules/seasons/service.js';
-import type { FactionTopDto, HallDto, HeldRoleDto, LeaderboardRowDto, ReportDto, SeasonDto } from '../../../src/shared/api-types.js';
+import type { FactionTopDto, HallDto, HeldRoleDto, LeaderboardRowDto, ReportDto, ReviewedReportDto, SeasonDto } from '../../../src/shared/api-types.js';
 import { buildApp } from '../../../src/server/web/app.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
@@ -183,6 +183,7 @@ async function submit(sid: string, value: number, extra: Record<string, unknown>
 }
 
 const review = (sid: string | undefined, id: number | string, body: unknown) => post(`/api/admin/reports/${id}/review`, sid, body);
+const revoke = (sid: string | undefined, id: number | string, body: unknown) => post(`/api/admin/reports/${id}/revoke`, sid, body);
 const reportRow = (id: number) => testDb.statReport.findUniqueOrThrow({ where: { id } });
 
 // ---------------------------------------------------------------------------
@@ -491,7 +492,7 @@ test('review decisions: approve ignores an empty reason, reject needs one and DM
   expect((await reportRow(c.id)).status).toBe('pending');
 });
 
-test('pending queue lists everyone, oldest first; only status=pending is supported', async () => {
+test('pending queue lists everyone, oldest first; status must be pending or approved', async () => {
   const { sid } = await memberWithSid({ displayName: 'An' });
   const { sid: otherSid } = await memberWithSid({ displayName: 'Bình' });
   const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
@@ -509,11 +510,90 @@ test('pending queue lists everyone, oldest first; only status=pending is support
   expect(rows[0]).toEqual(a);
   expect(rows[0]?.member).toEqual({ id: a.member.id, displayName: 'An' });
 
-  for (const q of ['', '?status=approved', '?status=', '?status=pending&status=x']) {
+  for (const q of ['', '?status=rejected', '?status=', '?status=pending&status=x']) {
     const res = await get(`/api/admin/reports${q}`, modSid);
     expect(res.statusCode, q).toBe(400);
     expect(res.json(), q).toEqual(INVALID);
   }
+});
+
+test('member cannot list approved reports or revoke', async () => {
+  const { sid } = await memberWithSid();
+  const { sid: otherSid } = await memberWithSid({ displayName: 'Bình' });
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
+  const r = await submit(otherSid, 5);
+  expect((await review(modSid, r.id, { approve: true })).statusCode).toBe(204);
+
+  const list = await get('/api/admin/reports?status=approved', sid);
+  expect(list.statusCode).toBe(403);
+  expect(list.json()).toEqual(FORBIDDEN);
+
+  const res = await revoke(sid, r.id, { reason: 'Khai gian' });
+  expect(res.statusCode).toBe(403);
+  expect(res.json()).toEqual(FORBIDDEN);
+  expect((await reportRow(r.id)).status).toBe('approved');
+});
+
+test('mods list recently approved reports with the approver', async () => {
+  const { sid } = await memberWithSid({ displayName: 'An' });
+  const { member: mod, sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
+  const a = await submit(sid, 5);
+  const b = await submit(sid, 4);
+  expect((await review(modSid, a.id, { approve: true })).statusCode).toBe(204);
+  setNow('2026-10-22T12:10:00Z');
+  expect((await review(modSid, b.id, { approve: true })).statusCode).toBe(204);
+
+  const list = await get('/api/admin/reports?status=approved', modSid);
+  expect(list.statusCode).toBe(200);
+  const rows = list.json<ReviewedReportDto[]>();
+  // Duyệt sau lên trước; người duyệt và giờ duyệt đi kèm.
+  expect(rows.map((r) => r.id)).toEqual([b.id, a.id]);
+  expect(rows[0]).toMatchObject({
+    status: 'approved',
+    member: { id: a.member.id, displayName: 'An' },
+    reviewedBy: { id: mod.id, displayName: 'Mod' },
+    reviewedAt: '2026-10-22T12:10:00.000Z',
+  });
+
+  const other = await get('/api/admin/reports?status=other', modSid);
+  expect(other.statusCode).toBe(400);
+  expect(other.json()).toEqual(INVALID);
+});
+
+test('revoke: 204 then 409 NOT_APPROVED; empty reason 400; DMs the reporter', async () => {
+  const { sid } = await memberWithSid({ displayName: 'An', discordId: 'an-discord' });
+  const { member: mod, sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
+  const r = await submit(sid, 5);
+  expect((await review(modSid, r.id, { approve: true })).statusCode).toBe(204);
+  notifier.dms.length = 0;
+
+  // Dạng sai → 400 chung, lần khai vẫn đã duyệt.
+  for (const body of [undefined, {}, { reason: 1 }, { reason: 'Khai gian', extra: 1 }]) {
+    const res = await revoke(modSid, r.id, body);
+    expect(res.statusCode, JSON.stringify(body)).toBe(400);
+    expect(res.json(), JSON.stringify(body)).toEqual(INVALID);
+  }
+  const empty = await revoke(modSid, r.id, { reason: '' });
+  expect(empty.statusCode).toBe(400);
+  expect(empty.json()).toEqual(errorBody('REASON_REQUIRED', 'Cần ghi lý do huỷ duyệt'));
+  expect((await reportRow(r.id)).status).toBe('approved');
+  expect(notifier.dms).toEqual([]);
+
+  const ok = await revoke(modSid, r.id, { reason: '  Khai gian  ' });
+  expect(ok.statusCode).toBe(204);
+  expect(ok.body).toBe('');
+  expect(await reportRow(r.id)).toMatchObject({ status: 'revoked', revokedById: mod.id, rejectReason: 'Khai gian', reviewedById: mod.id });
+  expect(notifier.dms).toEqual([{ discordId: 'an-discord', text: 'Lần khai Kiếm sĩ (5 mạng chém) ngày 22/10 đã bị huỷ duyệt: Khai gian' }]);
+  expect((await get('/api/admin/reports?status=approved', modSid)).json<ReviewedReportDto[]>()).toEqual([]);
+
+  const again = await revoke(modSid, r.id, { reason: 'Khai gian' });
+  expect(again.statusCode).toBe(409);
+  expect(again.json()).toEqual(errorBody('NOT_APPROVED', 'Lần khai không còn ở trạng thái đã duyệt'));
+
+  // id lạ → 404; id hỏng → 400.
+  expect((await revoke(modSid, 999, { reason: 'Khai gian' })).statusCode).toBe(404);
+  expect((await revoke(modSid, 0, { reason: 'Khai gian' })).statusCode).toBe(400);
+  expect((await revoke(modSid, 'abc', { reason: 'Khai gian' })).statusCode).toBe(400);
 });
 
 // ---------------------------------------------------------------------------
