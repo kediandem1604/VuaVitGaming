@@ -319,14 +319,18 @@ export interface BadgeDto {
 
 /**
  * Trang thành viên công khai (`GET /api/members/:id`, mọi thành viên đã đăng nhập xem được):
- * KHÔNG có email, quyền hay Discord id. `joinedAt` ISO 8601 (UTC); `left` = đã rời server;
- * `badges` mọi danh hiệu của người đó, mới nhất trước.
+ * KHÔNG có email, quyền hay Discord id. `joinedAt` ISO 8601 (UTC) là ngày vào server hiệu lực
+ * (theo Discord khi biết, không thì lúc app thấy lần đầu); `daysInServer` số ngày lịch VN từ đó
+ * tới lúc rời (hoặc bây giờ); `games` số buổi đã đi (đã gồm phần admin chỉnh, không dưới 0);
+ * `left` = đã rời server; `badges` mọi danh hiệu của người đó, mới nhất trước.
  */
 export interface PublicMemberDto {
   id: number;
   displayName: string;
   avatarUrl: string | null;
   joinedAt: string;
+  daysInServer: number;
+  games: number;
   left: boolean;
   badges: BadgeDto[];
 }
@@ -334,8 +338,12 @@ export interface PublicMemberDto {
 export type MemberStatus = 'active' | 'left';
 
 /**
- * Một thành viên trong trang quản trị (`GET /api/admin/members`, mod/admin). `email`
- * chỉ có giá trị khi NGƯỜI XEM là admin — mod luôn nhận `null`. `joinedAt` ISO 8601 (UTC).
+ * Một thành viên trong trang quản trị (`GET /api/admin/members`, mod/admin; `PUT
+ * /api/admin/members/:id/games` trả về dòng mới). `email` chỉ có giá trị khi NGƯỜI XEM là admin —
+ * mod luôn nhận `null`. `joinedAt` ISO 8601 (UTC) là lúc app thấy người đó lần đầu;
+ * `serverJoinedAt` ngày vào server hiệu lực (theo Discord khi biết, không thì `joinedAt`);
+ * `daysInServer` số ngày lịch VN từ đó tới lúc rời (hoặc bây giờ); `games` tổng số buổi sau
+ * chỉnh (không dưới 0); `gamesAdjustment` phần admin đã chỉnh (có thể âm, 0 = chưa chỉnh).
  */
 export interface AdminMemberDto {
   id: number;
@@ -345,6 +353,10 @@ export interface AdminMemberDto {
   status: MemberStatus;
   email: string | null;
   joinedAt: string;
+  serverJoinedAt: string;
+  daysInServer: number;
+  games: number;
+  gamesAdjustment: number;
 }
 
 export type ReminderKind = 'pre15' | 'start';

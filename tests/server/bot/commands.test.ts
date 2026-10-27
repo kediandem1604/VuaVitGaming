@@ -202,6 +202,7 @@ const guildMember = (id: string, name = `User ${id}`): GuildMemberSource => ({
   id,
   displayName: name,
   displayAvatarURL: () => `https://cdn.test/${id}.png`,
+  joinedAt: null,
   roles: { cache: new Map([['test-guild', {}]]) },
   guild: { id: 'test-guild' },
 });

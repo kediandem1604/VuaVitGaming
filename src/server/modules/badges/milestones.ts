@@ -10,7 +10,8 @@
  * chỉ những dòng lời gọi này thực sự tạo mới được đăng thành một tin (§8); lỗi Discord chỉ ghi
  * log, không có cờ nợ và không đăng bù (khác tổng kết tháng — cột mốc lẻ không đáng đăng trễ).
  *
- * Số liệu (§4): một trận đã đi = điểm danh `going` ở buổi `ended`; một lần thắng MVP = một
+ * Số liệu (§4): một trận đã đi = điểm danh `going` ở buổi `ended`, cộng phần admin chỉnh
+ * (`members.games_adjustment`, xem `modules/members/activity.ts`); một lần thắng MVP = một
  * dòng `awards` ở hạng mục nhóm `mvp` (đọc nhóm HIỆN TẠI); hoá thân = dòng `role_titles`
  * (một role ở một mùa đã chốt), đếm role khác nhau; Đạo diễn = lần khai `approved` có
  * `highlightMessageId`. Thành viên đã rời server vẫn được tính — danh hiệu không mất.
@@ -22,6 +23,7 @@ import type { Ctx } from '../../ctx.js';
 import { chunkLines } from '../../lib/chunk.js';
 import { escapeDiscordMarkdown } from '../../lib/discord-text.js';
 import { HOT_TX } from '../../lib/tx.js';
+import { gamesTotals } from '../members/activity.js';
 import type { BadgeGrant } from './monthly.js';
 
 /** Khoá `app_settings` đánh dấu đã trao bù cột mốc lần đầu; giá trị là giờ ISO của lượt đó. */
@@ -76,14 +78,13 @@ function reachedSteps(steps: readonly Step[], counts: Map<number, number>): Badg
   return grants;
 }
 
-/** Số trận đã đi trọn đời: điểm danh `going` ở buổi đã `ended`, mỗi người một số. */
-async function gamesPlayedCounts(ctx: Ctx): Promise<Map<number, number>> {
-  const rows = await ctx.db.attendance.groupBy({
-    by: ['memberId'],
-    where: { status: 'going', session: { status: 'ended' } },
-    _count: { _all: true },
-  });
-  return new Map(rows.map((r) => [r.memberId, r._count._all]));
+/**
+ * Số trận đã đi trọn đời, mỗi người một số: điểm danh `going` ở buổi đã `ended` cộng phần
+ * admin chỉnh (`gamesAdjustment`) — cùng tổng với tab Thành viên và trang thành viên công khai.
+ * Chỉnh giảm không thu hồi cột mốc đã trao (dòng đã ghi không bao giờ đổi).
+ */
+function gamesPlayedCounts(ctx: Ctx): Promise<Map<number, number>> {
+  return gamesTotals(ctx);
 }
 
 /** Số lần thắng vote trọn đời ở hạng mục nhóm Khen (đọc nhóm hiện tại), mỗi người một số. */

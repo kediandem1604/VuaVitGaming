@@ -75,6 +75,7 @@ const guildInfo = (discordId: string, roleIds: string[] = []): GuildMemberInfo =
   displayName: `User ${discordId}`,
   avatarUrl: null,
   roleIds,
+  joinedAt: null,
 });
 
 const cookieNamed = (res: LightMyRequestResponse, name: string) => res.cookies.find((c) => c.name === name);
@@ -277,7 +278,7 @@ test('not in guild', async () => {
 // ---------------------------------------------------------------------------
 
 test('login refreshes access level and stores email', async () => {
-  directory.members.set('1', { discordId: '1', displayName: 'Kẹ', avatarUrl: null, roleIds: ['r-mod'] });
+  directory.members.set('1', { discordId: '1', displayName: 'Kẹ', avatarUrl: null, roleIds: ['r-mod'], joinedAt: null });
   const sid = await loginAs('1', { email: 'ke@example.com', emailVerified: true });
 
   const res = await getMe(sid);
@@ -294,7 +295,7 @@ test('login refreshes access level and stores email', async () => {
   });
 
   // Role Discord đổi → lần đăng nhập sau cập nhật quyền; email đã có thì giữ nguyên.
-  directory.members.set('1', { discordId: '1', displayName: 'Kẹ', avatarUrl: 'https://cdn/a.png', roleIds: [] });
+  directory.members.set('1', { discordId: '1', displayName: 'Kẹ', avatarUrl: 'https://cdn/a.png', roleIds: [], joinedAt: null });
   const sid2 = await loginAs('1', { email: 'other@example.com', emailVerified: true });
   expect((await getMe(sid2)).json()).toMatchObject({
     memberCode: 'GGD-0001',

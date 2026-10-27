@@ -17,6 +17,8 @@ export interface GuildMemberSource {
   displayAvatarURL(options?: ImageURLOptions): string;
   roles: { cache: ReadonlyMap<string, unknown> };
   guild: { id: string };
+  /** Ngày vào server; discord.js để null khi gateway không gửi `joined_at`. */
+  joinedAt: Date | null;
 }
 
 /** Role @everyone có id trùng id server và không mang quyền gì — bỏ khỏi `roleIds`. */
@@ -26,6 +28,7 @@ export function toGuildMemberInfo(gm: GuildMemberSource): GuildMemberInfo {
     displayName: gm.displayName,
     avatarUrl: gm.displayAvatarURL({ size: 128 }),
     roleIds: [...gm.roles.cache.keys()].filter((id) => id !== gm.guild.id),
+    joinedAt: gm.joinedAt,
   };
 }
 

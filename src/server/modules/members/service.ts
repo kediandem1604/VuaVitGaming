@@ -76,6 +76,7 @@ export async function upsertMemberFromGuild(ctx: Ctx, info: GuildMemberInfo): Pr
         accessLevel: accessLevelFromRoles(info.roleIds, ctx.config.discord),
         status: 'active',
         joinedAt: ctx.now(),
+        guildJoinedAt: info.joinedAt,
       },
     });
     return { member, created: true, reactivated: false };
@@ -97,6 +98,8 @@ async function refreshFromGuild(ctx: Ctx, existing: Member, info: GuildMemberInf
       accessLevel: accessLevelFromRoles(info.roleIds, ctx.config.discord),
       status: 'active',
       leftAt: null,
+      // Discord không cho biết ngày vào (null) thì giữ giá trị đã có; có thì ghi đè (ngày thật mới nhất).
+      ...(info.joinedAt !== null ? { guildJoinedAt: info.joinedAt } : {}),
     },
   });
   return { member, created: false, reactivated: existing.status === 'left' };

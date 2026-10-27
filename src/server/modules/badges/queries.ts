@@ -15,6 +15,7 @@ import { BADGES } from '../../../shared/badges.js';
 import type { BadgeKind } from '../../../shared/badges.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
+import { attendedGamesCounts, daysInServer, gamesTotal, serverJoinedAt } from '../members/activity.js';
 
 /** Số dòng mỗi trang của tường vinh danh khi client không gửi `limit`. */
 export const DEFAULT_LIMIT = 50;
@@ -106,26 +107,32 @@ async function afterCursor(ctx: Ctx, before: number): Promise<Prisma.MemberBadge
 }
 
 /**
- * Trang thành viên công khai: tên, avatar, ngày vào server, đã rời hay chưa và mọi danh hiệu
- * (mới nhất trước). Chỉ chọn đúng các cột công khai — không bao giờ đọc email, quyền hay
- * Discord id ra khỏi DB ở đây. Id lạ hay không có → `NOT_FOUND`. Người đã rời server vẫn có
- * trang (danh hiệu không mất).
+ * Trang thành viên công khai: tên, avatar, ngày vào server (theo Discord khi biết), số ngày
+ * trong server, số buổi đã đi (đã gồm phần admin chỉnh), đã rời hay chưa và mọi danh hiệu
+ * (mới nhất trước). Chỉ chọn đúng các cột cần — không bao giờ đọc email, quyền hay Discord id
+ * ra khỏi DB ở đây; `gamesAdjustment` chỉ dùng để cộng, không ra DTO. Id lạ hay không có →
+ * `NOT_FOUND`. Người đã rời server vẫn có trang (danh hiệu không mất).
  */
 export async function getPublicMember(ctx: Ctx, memberId: number): Promise<PublicMemberDto> {
   const member = isId(memberId)
     ? await ctx.db.member.findUnique({
         where: { id: memberId },
-        select: { id: true, displayName: true, avatarUrl: true, joinedAt: true, status: true },
+        select: { id: true, displayName: true, avatarUrl: true, joinedAt: true, guildJoinedAt: true, status: true, leftAt: true, gamesAdjustment: true },
       })
     : null;
   if (!member) throw appError('NOT_FOUND');
 
-  const rows = await ctx.db.memberBadge.findMany({ where: { memberId: member.id }, orderBy: NEWEST_FIRST, select: BADGE_SELECT });
+  const [rows, attended] = await Promise.all([
+    ctx.db.memberBadge.findMany({ where: { memberId: member.id }, orderBy: NEWEST_FIRST, select: BADGE_SELECT }),
+    attendedGamesCounts(ctx, [member.id]),
+  ]);
   return {
     id: member.id,
     displayName: member.displayName,
     avatarUrl: member.avatarUrl,
-    joinedAt: member.joinedAt.toISOString(),
+    joinedAt: serverJoinedAt(member).toISOString(),
+    daysInServer: daysInServer(member, ctx.now()),
+    games: gamesTotal(attended.get(member.id) ?? 0, member.gamesAdjustment),
     left: member.status === 'left',
     badges: rows.map(toBadgeDto),
   };

@@ -14,6 +14,7 @@ import {
   toVnDate,
   vnDateTimeToUtc,
   vnDayRange,
+  vnDaysBetween,
 } from '../../src/server/lib/time.js';
 
 test('VN date crosses UTC midnight', () => {
@@ -30,6 +31,21 @@ test('VN day range', () => {
 test('local time to UTC', () => {
   expect(vnDateTimeToUtc('2026-10-22', '21:00').toISOString()).toBe('2026-10-22T14:00:00.000Z');
   expect(vnDateTimeToUtc('2026-10-23', '02:30').toISOString()).toBe('2026-10-22T19:30:00.000Z');
+});
+
+test('vnDaysBetween counts Vietnam calendar days, never negative', () => {
+  // Cùng một ngày VN (23:00 và 23:59 ngày 22/10 giờ VN) → 0.
+  expect(vnDaysBetween(new Date('2026-10-22T16:00:00Z'), new Date('2026-10-22T16:59:00Z'))).toBe(0);
+  // Qua nửa đêm VN (17:00Z) dù chỉ một phút → 1.
+  expect(vnDaysBetween(new Date('2026-10-22T16:59:00Z'), new Date('2026-10-22T17:00:00Z'))).toBe(1);
+  // Theo múi giờ VN, không phải UTC: 01:00Z và 23:00Z cùng ngày UTC nhưng 23:00Z đã là ngày hôm sau ở VN.
+  expect(vnDaysBetween(new Date('2026-10-22T01:00:00Z'), new Date('2026-10-22T23:00:00Z'))).toBe(1);
+  // Khác ngày UTC nhưng cùng ngày VN: 17:00Z ngày 21 và 10:00Z ngày 22 → 0.
+  expect(vnDaysBetween(new Date('2026-10-21T17:00:00Z'), new Date('2026-10-22T10:00:00Z'))).toBe(0);
+  // Nhiều ngày, qua tháng.
+  expect(vnDaysBetween(new Date('2026-09-30T17:00:00Z'), new Date('2026-10-22T12:00:00Z'))).toBe(21);
+  // `to` trước `from` → 0, không âm.
+  expect(vnDaysBetween(new Date('2026-10-25T00:00:00Z'), new Date('2026-10-22T00:00:00Z'))).toBe(0);
 });
 
 test('add days across month', () => {

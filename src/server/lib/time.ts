@@ -105,6 +105,17 @@ export function vnDateTimeToUtc(vnDate: string, hhmm: string): Date {
   return vnWallClockToUtc(y, m, d, hh, mm);
 }
 
+/**
+ * Số ngày lịch VN từ `from` tới `to`: cùng một ngày VN → 0, qua nửa đêm VN → 1 (dù chỉ một
+ * phút). Tính theo ngày Việt Nam, không theo ngày UTC. `to` trước `from` → 0, không âm.
+ */
+export function vnDaysBetween(from: Date, to: Date): number {
+  const a = vnYmd(from);
+  const b = vnYmd(to);
+  const days = Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / DAY_MS);
+  return Math.max(0, days);
+}
+
 /** Cộng `n` ngày (âm để lùi) vào một ngày VN. */
 export function addDaysVn(vnDate: string, n: number): string {
   const { y, m, d } = parseVnDate(vnDate);

@@ -107,7 +107,7 @@ test('FakeMailer records sends and fails for listed addresses', async () => {
 
 test('FakeDirectory looks up members and can go down', async () => {
   const { directory } = makeTestCtx();
-  const info = { discordId: 'd-1', displayName: 'An', avatarUrl: null, roleIds: ['r-mod'] };
+  const info = { discordId: 'd-1', displayName: 'An', avatarUrl: null, roleIds: ['r-mod'], joinedAt: null };
   directory.members.set('d-1', info);
   expect(await directory.getMember('d-1')).toEqual(info);
   expect(await directory.getMember('d-2')).toBeNull();

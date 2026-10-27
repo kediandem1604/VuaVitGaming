@@ -10,7 +10,7 @@ import { BADGES, badgeDef, monthlyBadgeTitle } from '../../../src/shared/badges.
 import type { BadgeKey } from '../../../src/shared/badges.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
-import { createMember } from '../../helpers/factories.js';
+import { createMember, createSession } from '../../helpers/factories.js';
 
 /** Không route nào ở đây đụng tới OAuth. */
 const oauth: OAuthClient = {
@@ -287,6 +287,9 @@ test('public member page lists only that member’s badges, newest first', async
     displayName: 'An',
     avatarUrl: 'https://cdn.test/an.png',
     joinedAt: '2026-08-01T05:00:00.000Z',
+    // now = 2026-10-22T12:00Z (ngày 22/10 VN); 01/08 → 22/10 = 82 ngày.
+    daysInServer: 82,
+    games: 0,
     left: false,
     badges: [
       {
@@ -339,6 +342,30 @@ test('a member without badges has an empty list; one who left is flagged', async
   expect(theirs.json<PublicMemberDto>()).toMatchObject({ id: gone.id, displayName: 'Kẹ Rời', left: true, badges: [] });
 });
 
+test('public member page uses the Discord join date when known, counts to leftAt, and shows adjusted games', async () => {
+  const { sid } = await memberWithSid();
+  // Ngày vào Discord có → `joinedAt` của DTO là ngày đó (không phải ngày app thấy lần đầu).
+  const guildJoinedAt = new Date('2026-09-30T17:30:00.000Z'); // 00:30 VN ngày 01/10 → tới 22/10 = 21 ngày
+  const an = await createMember(testDb, { displayName: 'An', joinedAt: new Date('2026-10-20T00:00:00Z'), guildJoinedAt, gamesAdjustment: 5 });
+  const s = await createSession(testDb, { status: 'ended', endedAt: new Date('2026-10-20T16:00:00Z') });
+  await testDb.attendance.create({ data: { sessionId: s.id, memberId: an.id, status: 'going' } });
+
+  const res = await get(`/api/members/${an.id}`, sid);
+  expect(res.statusCode, res.body).toBe(200);
+  expect(res.json<PublicMemberDto>()).toMatchObject({ joinedAt: guildJoinedAt.toISOString(), daysInServer: 21, games: 6 });
+
+  // Đã rời: đếm tới `leftAt` (01/10 → 05/10 VN = 4 ngày); chỉnh âm quá số tự đếm → 0.
+  const gone = await createMember(testDb, {
+    displayName: 'Rời',
+    joinedAt: new Date('2026-10-01T03:00:00Z'),
+    status: 'left',
+    leftAt: new Date('2026-10-05T03:00:00Z'),
+    gamesAdjustment: -2,
+  });
+  const theirs = await get(`/api/members/${gone.id}`, sid);
+  expect(theirs.json<PublicMemberDto>()).toMatchObject({ joinedAt: '2026-10-01T03:00:00.000Z', daysInServer: 4, games: 0, left: true });
+});
+
 test('public member page never exposes email, Discord id, access level or member code', async () => {
   const { sid } = await memberWithSid();
   const admin = await createMember(testDb, {
@@ -353,11 +380,11 @@ test('public member page never exposes email, Discord id, access level or member
   const res = await get(`/api/members/${admin.id}`, sid);
   expect(res.statusCode).toBe(200);
   // Soi thân phản hồi THÔ: không chỉ kiểm DTO đã parse.
-  for (const leak of ['email', 'secret@example.com', 'discordId', '123456789012345678', 'accessLevel', 'admin', 'memberCode', 'GGD-0777', 'notifyEmail', 'status', 'leftAt']) {
+  for (const leak of ['email', 'secret@example.com', 'discordId', '123456789012345678', 'accessLevel', 'admin', 'memberCode', 'GGD-0777', 'notifyEmail', 'status', 'leftAt', 'gamesAdjustment']) {
     expect(res.body, leak).not.toContain(leak);
   }
   const body = res.json<PublicMemberDto>();
-  expect(Object.keys(body).sort()).toEqual(['avatarUrl', 'badges', 'displayName', 'id', 'joinedAt', 'left']);
+  expect(Object.keys(body).sort()).toEqual(['avatarUrl', 'badges', 'daysInServer', 'displayName', 'games', 'id', 'joinedAt', 'left']);
   expect(Object.keys(body.badges[0]!.member).sort()).toEqual(['avatarUrl', 'displayName', 'id']);
 });
 

@@ -102,6 +102,8 @@ export interface GuildMemberInfo {
   displayName: string;
   avatarUrl: string | null;
   roleIds: string[];
+  /** Ngày vào server theo Discord (`GuildMember.joinedAt`); null khi Discord không cho biết. */
+  joinedAt: Date | null;
 }
 
 export interface GuildDirectory {

@@ -35,6 +35,7 @@ const info = (id: string, roles: string[] = []): GuildMemberInfo => ({
   displayName: `User ${id}`,
   avatarUrl: null,
   roleIds: roles,
+  joinedAt: null,
 });
 
 const memberByDiscordId = (id: string) => testDb.member.findUniqueOrThrow({ where: { discordId: id } });
@@ -43,11 +44,12 @@ const memberByDiscordId = (id: string) => testDb.member.findUniqueOrThrow({ wher
 const fakeMember = (
   id: string,
   guildId: string,
-  opts: { bot?: boolean; roles?: string[]; name?: string } = {},
+  opts: { bot?: boolean; roles?: string[]; name?: string; joinedAt?: Date | null } = {},
 ) => ({
   id,
   displayName: opts.name ?? `User ${id}`,
   displayAvatarURL: () => `https://cdn.test/${id}.png`,
+  joinedAt: opts.joinedAt === undefined ? new Date('2026-01-05T03:00:00Z') : opts.joinedAt,
   roles: { cache: new Map((opts.roles ?? []).map((r) => [r, {}])) },
   guild: { id: guildId },
   user: { bot: opts.bot ?? false },
@@ -206,12 +208,16 @@ test('handlers map GuildMember fields and skip bots', async () => {
 });
 
 test('toGuildMemberInfo maps fields and drops the @everyone role', () => {
-  expect(toGuildMemberInfo(fakeMember('1', 'g', { roles: ['g', 'r-a', 'r-b'], name: 'An' }))).toEqual({
+  const joinedAt = new Date('2025-12-24T10:00:00Z');
+  expect(toGuildMemberInfo(fakeMember('1', 'g', { roles: ['g', 'r-a', 'r-b'], name: 'An', joinedAt }))).toEqual({
     discordId: '1',
     displayName: 'An',
     avatarUrl: 'https://cdn.test/1.png',
     roleIds: ['r-a', 'r-b'],
+    joinedAt,
   });
+  // Discord không cho biết ngày vào (`joinedAt: null`) → chép nguyên null.
+  expect(toGuildMemberInfo(fakeMember('2', 'g', { joinedAt: null })).joinedAt).toBeNull();
 });
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import type { Member } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Ctx } from '../../../src/server/ctx.js';
 import { createWebSession } from '../../../src/server/modules/auth/sessions.js';
 import type { OAuthClient } from '../../../src/server/modules/auth/oauth.js';
@@ -34,6 +34,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await app.close();
 });
 
@@ -55,6 +56,15 @@ const get = (url: string, sid?: string) => app.inject({ url, cookies: cookies(si
 const patch = (url: string, sid: string | undefined, payload?: unknown) =>
   app.inject({
     method: 'PATCH',
+    url,
+    cookies: cookies(sid),
+    headers: { 'content-type': 'application/json' },
+    payload: payload === undefined ? '' : JSON.stringify(payload),
+  });
+
+const put = (url: string, sid: string | undefined, payload?: unknown) =>
+  app.inject({
+    method: 'PUT',
     url,
     cookies: cookies(sid),
     headers: { 'content-type': 'application/json' },
@@ -88,6 +98,10 @@ test('member search', async () => {
     status: 'active',
     email: null, // mod không thấy email
     joinedAt: ke.joinedAt.toISOString(),
+    serverJoinedAt: ke.joinedAt.toISOString(),
+    daysInServer: 0,
+    games: 0,
+    gamesAdjustment: 0,
   });
 
   // Lọc trạng thái; kết hợp với q.
@@ -124,6 +138,110 @@ test('mods do not see emails', async () => {
 
   const asAdmin = (await get('/api/admin/members', adminSid)).json<AdminMemberDto[]>();
   expect(asAdmin.map((m) => m.email)).toEqual([null, 'admin@example.com', 'co@example.com', null]);
+});
+
+/** Một buổi đã kết thúc (hoặc `status` khác) mà `memberIds` đều điểm danh `going`. */
+async function endedSession(memberIds: number[], status: 'ended' | 'scheduled' | 'cancelled' = 'ended'): Promise<number> {
+  const s = await createSession(testDb, { status, endedAt: status === 'ended' ? new Date('2026-10-20T16:00:00Z') : null });
+  for (const memberId of memberIds) await testDb.attendance.create({ data: { sessionId: s.id, memberId, status: 'going' } });
+  return s.id;
+}
+
+const GAMES_INVALID = errorBody('VALIDATION', 'Số buổi phải là số nguyên từ 0 đến 10000');
+
+test('members list days in server (Discord join date when known, until leftAt for leavers) and games', async () => {
+  const { sid } = await memberWithSid({ accessLevel: 'mod' });
+  // now = 2026-10-22T12:00Z (19:00 VN ngày 22/10). 2026-09-30T17:30Z là 00:30 VN ngày 01/10 → 21 ngày.
+  const discordJoin = new Date('2026-09-30T17:30:00Z');
+  const an = await createMember(testDb, { displayName: 'An', joinedAt: new Date('2026-10-20T00:00:00Z'), guildJoinedAt: discordJoin });
+  // Không biết ngày vào Discord → dùng joinedAt của app: 2026-10-21T17:00Z = 00:00 VN ngày 22/10 → 0 ngày.
+  const binh = await createMember(testDb, { displayName: 'Bình', joinedAt: new Date('2026-10-21T17:00:00Z') });
+  // Đã rời: đếm tới leftAt, không tới bây giờ. 01/10 → 05/10 VN = 4 ngày.
+  const gone = await createMember(testDb, {
+    displayName: 'Rời',
+    joinedAt: new Date('2026-10-01T03:00:00Z'),
+    status: 'left',
+    leftAt: new Date('2026-10-05T03:00:00Z'),
+    gamesAdjustment: 3,
+  });
+
+  // An đi 2 buổi đã kết thúc; buổi scheduled/cancelled và điểm danh đã huỷ không tính.
+  await endedSession([an.id, binh.id]);
+  await endedSession([an.id]);
+  await endedSession([an.id], 'scheduled');
+  await endedSession([an.id], 'cancelled');
+  const dropped = await endedSession([]);
+  await testDb.attendance.create({ data: { sessionId: dropped, memberId: an.id, status: 'cancelled' } });
+  // Bình bị chỉnh âm quá số tự đếm → tổng không âm.
+  await testDb.member.update({ where: { id: binh.id }, data: { gamesAdjustment: -5 } });
+
+  const res = await get('/api/admin/members', sid);
+  expect(res.statusCode, res.body).toBe(200);
+  const byName = new Map(res.json<AdminMemberDto[]>().map((m) => [m.displayName, m]));
+  expect(byName.get('An')).toMatchObject({
+    joinedAt: '2026-10-20T00:00:00.000Z',
+    serverJoinedAt: discordJoin.toISOString(),
+    daysInServer: 21,
+    games: 2,
+    gamesAdjustment: 0,
+  });
+  expect(byName.get('Bình')).toMatchObject({ serverJoinedAt: '2026-10-21T17:00:00.000Z', daysInServer: 0, games: 0, gamesAdjustment: -5 });
+  expect(byName.get('Rời')).toMatchObject({ serverJoinedAt: '2026-10-01T03:00:00.000Z', daysInServer: 4, games: 3, gamesAdjustment: 3 });
+});
+
+test('PUT /api/admin/members/:id/games sets the total; later sessions keep adding', async () => {
+  const { member: admin, sid: adminSid } = await memberWithSid({ accessLevel: 'admin', displayName: 'Quản trị' });
+  const an = await createMember(testDb, { displayName: 'An' });
+  await endedSession([an.id]);
+  await endedSession([an.id]);
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+  const res = await put(`/api/admin/members/${an.id}/games`, adminSid, { games: 12 });
+  expect(res.statusCode, res.body).toBe(200);
+  expect(res.json<AdminMemberDto>()).toMatchObject({ id: an.id, displayName: 'An', email: null, games: 12, gamesAdjustment: 10 });
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: an.id } })).gamesAdjustment).toBe(10);
+  expect(info).toHaveBeenCalledTimes(1);
+  const line = String(info.mock.calls[0]?.[0]);
+  for (const part of ['Quản trị', String(admin.id), 'An', String(an.id), '2', '12']) expect(line).toContain(part);
+
+  // Buổi kết thúc sau đó vẫn cộng tiếp lên tổng đã chỉnh.
+  await endedSession([an.id]);
+  const list = (await get('/api/admin/members', adminSid)).json<AdminMemberDto[]>();
+  expect(list.find((m) => m.id === an.id)).toMatchObject({ games: 13, gamesAdjustment: 10 });
+
+  // Đặt tổng 0 khi số tự đếm lớn hơn: chỉnh âm, tổng về 0.
+  const zero = await put(`/api/admin/members/${an.id}/games`, adminSid, { games: 0 });
+  expect(zero.statusCode).toBe(200);
+  expect(zero.json<AdminMemberDto>()).toMatchObject({ games: 0, gamesAdjustment: -3 });
+  // Biên trên.
+  expect((await put(`/api/admin/members/${an.id}/games`, adminSid, { games: 10000 })).statusCode).toBe(200);
+});
+
+test('PUT games: admin only, strict body, unknown member → 404', async () => {
+  const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod' });
+  const { sid: memberSid } = await memberWithSid();
+  const an = await createMember(testDb, { displayName: 'An' });
+
+  for (const sid of [modSid, memberSid]) {
+    const res = await put(`/api/admin/members/${an.id}/games`, sid, { games: 5 });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual(FORBIDDEN);
+  }
+  expect((await put(`/api/admin/members/${an.id}/games`, undefined, { games: 5 })).statusCode).toBe(401);
+
+  for (const body of [{ games: -1 }, { games: 10001 }, { games: 1.5 }, { games: '5' }, { games: 5, extra: 1 }, {}, undefined]) {
+    const bad = await put(`/api/admin/members/${an.id}/games`, adminSid, body);
+    expect(bad.statusCode, JSON.stringify(body)).toBe(400);
+    expect(bad.json(), JSON.stringify(body)).toEqual(GAMES_INVALID);
+  }
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: an.id } })).gamesAdjustment).toBe(0);
+
+  for (const id of [an.id + 1000, 'abc', '0']) {
+    const missing = await put(`/api/admin/members/${id}/games`, adminSid, { games: 5 });
+    expect(missing.statusCode, String(id)).toBe(404);
+    expect(missing.json(), String(id)).toEqual(errorBody('NOT_FOUND', 'Không tìm thấy'));
+  }
 });
 
 // ---------------------------------------------------------------------------

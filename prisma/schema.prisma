@@ -92,6 +92,10 @@ model Member {
   status      MemberStatus @default(active)
   joinedAt    DateTime     @default(now()) @map("joined_at") @db.Timestamptz(3)
   leftAt      DateTime?    @map("left_at") @db.Timestamptz(3)
+  /// Ngày vào server theo Discord; null khi Discord không cho biết (ngày vào hiệu lực lùi về `joinedAt`).
+  guildJoinedAt DateTime? @map("guild_joined_at") @db.Timestamptz(3)
+  /// Phần admin chỉnh cộng vào số buổi tự đếm (điểm danh `going` ở buổi `ended`); có thể âm.
+  gamesAdjustment Int @default(0) @map("games_adjustment")
 
   webSessions     WebSession[]
   createdSessions GameSession[]     @relation("SessionCreator")

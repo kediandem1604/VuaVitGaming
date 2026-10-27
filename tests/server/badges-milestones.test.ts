@@ -153,6 +153,23 @@ test('games thresholds count going attendances of ended sessions only', async ()
   expect(grants[2]).toMatchObject({ title: 'Lão làng', icon: '🏅', periodId: '' });
 });
 
+test('games thresholds read the admin-adjusted total, including members with no attendance', async () => {
+  // An đi 2 buổi, admin chỉnh tổng lên 10 (gamesAdjustment = 8) → Quen mặt.
+  await playGames(a.id, 2);
+  await testDb.member.update({ where: { id: a.id }, data: { gamesAdjustment: 8 } });
+  // Bình chưa điểm danh lần nào, chỉ có chỉnh 50 → Quen mặt và Lão làng.
+  await testDb.member.update({ where: { id: b.id }, data: { gamesAdjustment: 50 } });
+  // Mod đi 12 buổi nhưng bị chỉnh −5 → 7, chưa đạt.
+  await playGames(mod.id, 12);
+  await testDb.member.update({ where: { id: mod.id }, data: { gamesAdjustment: -5 } });
+
+  expect((await computeMilestones(ctx)).map((g) => [g.badgeKey, g.memberId])).toEqual([
+    ['games_10', a.id],
+    ['games_10', b.id],
+    ['games_50', b.id],
+  ]);
+});
+
 test('mvp milestones count only the mvp group', async () => {
   const none = await testDb.awardCategory.create({
     data: { name: 'Hạng mục khác', scope: 'optional', sortOrder: 99, badgeGroup: 'none' },

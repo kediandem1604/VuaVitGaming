@@ -25,6 +25,7 @@ const info = (id: string, roles: string[] = []): GuildMemberInfo => ({
   displayName: `User ${id}`,
   avatarUrl: null,
   roleIds: roles,
+  joinedAt: null,
 });
 
 const addWebSession = (memberId: number) =>
@@ -123,6 +124,26 @@ test('rejoin keeps code', async () => {
   // Ngày vào hội giữ nguyên lần đầu, không bị đặt lại khi quay lại.
   expect(r.member.joinedAt).toEqual(original.member.joinedAt);
   expect(await testDb.member.count()).toBe(1);
+});
+
+test('guildJoinedAt is taken from Discord on create and only overwritten by a non-null value', async () => {
+  const { ctx } = makeTestCtx();
+  // Tạo mới mà Discord không cho biết ngày vào → null (ngày vào hiệu lực lùi về `joinedAt`).
+  const unknown = await upsertMemberFromGuild(ctx, info('1'));
+  expect(unknown.member.guildJoinedAt).toBeNull();
+  expect(unknown.member.gamesAdjustment).toBe(0);
+
+  // Tạo mới có ngày vào thật → ghi.
+  const joinedAt = new Date('2025-06-01T03:00:00Z');
+  const known = await upsertMemberFromGuild(ctx, { ...info('2'), joinedAt });
+  expect(known.member.guildJoinedAt).toEqual(joinedAt);
+
+  // Cập nhật: null giữ giá trị cũ; giá trị mới thì ghi đè.
+  expect((await upsertMemberFromGuild(ctx, info('2'))).member.guildJoinedAt).toEqual(joinedAt);
+  const later = new Date('2026-02-02T02:00:00Z');
+  expect((await upsertMemberFromGuild(ctx, { ...info('2'), joinedAt: later })).member.guildJoinedAt).toEqual(later);
+  // Người tạo lúc chưa biết, lần đồng bộ sau mới có → điền vào.
+  expect((await upsertMemberFromGuild(ctx, { ...info('1'), joinedAt })).member.guildJoinedAt).toEqual(joinedAt);
 });
 
 test('losing a creation race falls back to updating the winner row', async () => {

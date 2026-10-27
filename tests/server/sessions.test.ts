@@ -474,6 +474,7 @@ const guildInfo = (discordId: string, displayName: string): GuildMemberInfo => (
   displayName,
   avatarUrl: null,
   roleIds: [],
+  joinedAt: null,
 });
 
 test('leaving the server frees the seat, and rejoining does not take it back', async () => {
