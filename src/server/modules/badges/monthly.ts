@@ -121,7 +121,8 @@ async function approvedRoleCounts(ctx: Ctx, periodId: string): Promise<Map<numbe
   const { first, last } = seasonDateRange(periodId);
   const pairs = await ctx.db.statReport.groupBy({
     by: ['memberId', 'roleId'],
-    where: { status: 'approved', playedOn: { gte: dateOnlyToDb(first), lte: dateOnlyToDb(last) } },
+    // Mục trừ điểm do báo cáo (`source = 'accusation'`) không phải role người đó tự khai.
+    where: { status: 'approved', source: 'self', playedOn: { gte: dateOnlyToDb(first), lte: dateOnlyToDb(last) } },
   });
   const counts = new Map<number, number>();
   for (const { memberId } of pairs) counts.set(memberId, (counts.get(memberId) ?? 0) + 1);

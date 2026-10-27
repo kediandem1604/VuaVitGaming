@@ -12,6 +12,7 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type {
+  AccusationInputDto,
   FactionTopDto,
   FactionTotalsDto,
   HallDto,
@@ -39,6 +40,7 @@ import {
   submitReport,
   updateOwnReport,
 } from '../../modules/stats/reports.js';
+import type { ReviewDecision } from '../../modules/stats/reports.js';
 import { currentMember, requireMember, requireMod } from '../auth-plugin.js';
 import { SEASON_ID, VN_DATE, idParams, int32Id } from '../schemas.js';
 
@@ -83,6 +85,9 @@ const reportBody = z
     playedOn: z.string().regex(VN_DATE),
     sessionId: int32Id.nullish(),
     note: z.string().nullish(),
+    // Báo cáo người chơi (spec điểm role §6): chỉ cần là object hoặc null — thiếu trường, người/role
+    // không hợp lệ, tự báo cáo… do service báo với lời nhắn cụ thể. PATCH `null` = bỏ báo cáo.
+    accusation: z.custom<AccusationInputDto>((v) => typeof v === 'object' && v !== null && !Array.isArray(v)).nullish(),
   })
   .strict();
 
@@ -103,8 +108,12 @@ const leaderboardQuery = z.object({ roleId: z.coerce.number().int().positive().m
 /** Top mỗi phe, Tổng điểm theo phe và Đại sảnh chỉ nhận mùa (số dòng mỗi bảng do service cố định). */
 const seasonOnlyQuery = z.object({ season: seasonQueryParam });
 
-/** Duyệt: `reason` chỉ có nghĩa khi từ chối; khi duyệt thì bỏ qua (kể cả chuỗi rỗng). */
-const reviewBody = z.object({ approve: z.boolean(), reason: z.string().optional() }).strict();
+/**
+ * Duyệt: `reason` là lý do từ chối, hoặc lý do bỏ báo cáo khi duyệt với `accusation: 'reject'`;
+ * duyệt thường thì bỏ qua (kể cả chuỗi rỗng). `accusation` bắt buộc khi lần khai có báo cáo đang
+ * hiện (service báo `VALIDATION`).
+ */
+const reviewBody = z.object({ approve: z.boolean(), reason: z.string().optional(), accusation: z.enum(['approve', 'reject']).optional() }).strict();
 /** Huỷ duyệt: chỉ kiểm DẠNG — lý do rỗng/quá dài, không còn `approved`, tự huỷ… do service báo. */
 const revokeBody = z.object({ reason: z.string() }).strict();
 
@@ -193,9 +202,11 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/api/admin/reports/:id/review', { preHandler: requireMod }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
-    const { approve, reason } = reviewBody.parse(request.body);
+    const { approve, reason, accusation } = reviewBody.parse(request.body);
     const me = currentMember(request);
-    const decision = approve ? ({ approve: true } as const) : ({ approve: false, reason: reason ?? '' } as const);
+    const decision: ReviewDecision = approve
+      ? { approve: true, ...(accusation ? { accusation } : {}), ...(accusation === 'reject' ? { reason: reason ?? '' } : {}) }
+      : { approve: false, reason: reason ?? '', ...(accusation ? { accusation } : {}) };
     await reviewReport(app.ctx, { id: me.id, accessLevel: me.accessLevel }, id, decision);
     return reply.code(204).send();
   });

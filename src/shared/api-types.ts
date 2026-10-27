@@ -207,6 +207,65 @@ export interface ReportDto {
   rejectReason: string | null;
   createdAt: string;
   highlightUrl: string | null;
+  /**
+   * Báo cáo người chơi gửi KÈM lần khai này (chỉ lần khai `source = 'self'`, spec điểm role §6), hoặc
+   * `null` khi không có. Ở "Lần khai của tôi" (`GET /api/reports/mine`, POST/PATCH `/api/reports`) và
+   * "Đã duyệt gần đây": luôn có mặt nếu lần khai có báo cáo, ở mọi trạng thái. Ở hàng chờ duyệt
+   * (`GET /api/admin/reports?status=pending`): chỉ có khi báo cáo đang được HIỆN để mod quyết — báo
+   * cáo trùng bị ẩn thì `null` và `accusationDuplicate = true`.
+   */
+  accusation: AccusationDto | null;
+  /**
+   * `true` khi lần khai có báo cáo `pending` nhưng nó trùng vụ với một báo cáo khác đang được hiện
+   * (sớm hơn) hoặc vụ đã bị trừ điểm rồi — hàng chờ không kèm khung báo cáo, chỉ ghi chú nhỏ "Báo
+   * cáo của bạn trùng với một báo cáo khác đang chờ". Mod duyệt lần khai này thì báo cáo trùng thành
+   * `superseded`, từ chối thì `rejected`. Mọi trường hợp khác `false`.
+   */
+  accusationDuplicate: boolean;
+  /**
+   * Chỉ với mục trừ điểm (`source = 'accusation'`): báo cáo đã tạo ra mục này (để hiện "Bị báo cáo:
+   * bắn {victim.displayName} ({phe}) − {penaltyPoints} điểm"); `null` với lần khai thường.
+   */
+  penaltyOf: AccusationDto | null;
+}
+
+/** Trạng thái báo cáo người chơi: chờ duyệt, đúng, bị bác, bị thay thế (trùng vụ đã duyệt trước). */
+export type AccusationStatus = 'pending' | 'approved' | 'rejected' | 'superseded';
+
+/**
+ * Báo cáo người chơi gửi kèm `POST/PATCH /api/reports` (trường `accusation`; PATCH `null` = bỏ báo
+ * cáo, vắng mặt = giữ nguyên). Bốn trường bắt buộc: người bị báo cáo (thành viên đang hoạt động,
+ * khác chính mình), role của họ (đang bật, có chỉ số phạt), người bị bắn (đang hoạt động, khác người
+ * bị báo cáo), phe của người bị bắn.
+ */
+export interface AccusationInputDto {
+  accusedId: number;
+  accusedRoleId: number;
+  victimId: number;
+  victimFaction: Faction;
+}
+
+/**
+ * Một báo cáo người chơi (trong `ReportDto.accusation` / `penaltyOf`). Không chứa người báo cáo —
+ * đó là người khai của lần khai chứa nó. `rejectReason`: lý do bác (`rejected`) hoặc "Đã có người
+ * báo cáo trước" (`superseded`); `null` ở trạng thái khác. Khung hàng chờ: "Báo cáo: {accused}
+ * ({accusedRole}) bắn {victim} — phe {victimFaction}".
+ */
+export interface AccusationDto {
+  id: number;
+  status: AccusationStatus;
+  accused: { id: number; displayName: string };
+  accusedRole: { id: number; nameVi: string; icon: string; penaltyPoints: number | null };
+  victim: { id: number; displayName: string };
+  victimFaction: Faction;
+  rejectReason: string | null;
+}
+
+/** Một dòng ô chọn người (`GET /api/members/options`): thành viên đang hoạt động, theo tên. */
+export interface MemberOptionDto {
+  id: number;
+  displayName: string;
+  avatarUrl: string | null;
 }
 
 /**

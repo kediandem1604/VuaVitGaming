@@ -232,6 +232,9 @@ test('an extra-metric report stores extraValue and the DTO carries points and th
     rejectReason: null,
     createdAt: '2026-10-10T05:00:00.000Z',
     highlightUrl: null,
+    accusation: null,
+    accusationDuplicate: false,
+    penaltyOf: null,
   });
 
   // Không gửi extraValue → 0; chỉ chỉ số phụ cũng được (0 + 1 × 3).
@@ -969,6 +972,9 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       rejectReason: null,
       createdAt: '2026-10-10T05:00:01.000Z',
       highlightUrl: null,
+      accusation: null,
+      accusationDuplicate: false,
+      penaltyOf: null,
     },
     {
       id: r2.id,
@@ -987,6 +993,9 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       rejectReason: null,
       createdAt: '2026-10-10T05:00:01.000Z',
       highlightUrl: null,
+      accusation: null,
+      accusationDuplicate: false,
+      penaltyOf: null,
     },
     {
       id: r1.id,
@@ -1005,6 +1014,9 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       rejectReason: 'Thiếu ảnh',
       createdAt: '2026-10-10T05:00:00.000Z',
       highlightUrl: null,
+      accusation: null,
+      accusationDuplicate: false,
+      penaltyOf: null,
     },
   ];
   expect(list).toEqual(expected);
@@ -1082,6 +1094,9 @@ test('listPendingReports: oldest first across members, pending only', async () =
       rejectReason: null,
       createdAt: '2026-10-10T05:00:01.000Z',
       highlightUrl: null,
+      accusation: null,
+      accusationDuplicate: false,
+      penaltyOf: null,
     },
   ]);
 

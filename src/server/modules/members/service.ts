@@ -271,6 +271,18 @@ export async function listMembers(ctx: Ctx, filter: { status?: MemberStatus; q?:
   return ctx.db.member.findMany({ where, orderBy: { memberCode: 'asc' } });
 }
 
+/**
+ * Ô chọn người (báo cáo người chơi, spec điểm role §6): thành viên đang hoạt động, theo tên hiển
+ * thị (rồi id cho ổn định), chỉ id, tên và avatar.
+ */
+export async function listMemberOptions(ctx: Ctx): Promise<{ id: number; displayName: string; avatarUrl: string | null }[]> {
+  return ctx.db.member.findMany({
+    where: { status: 'active' },
+    select: { id: true, displayName: true, avatarUrl: true },
+    orderBy: [{ displayName: 'asc' }, { id: 'asc' }],
+  });
+}
+
 /** `avatarUrl` theo id của những thành viên này, một truy vấn; id không có thì vắng trong Map. */
 export async function avatarUrlsByMemberId(ctx: Ctx, memberIds: number[]): Promise<Map<number, string | null>> {
   if (memberIds.length === 0) return new Map();

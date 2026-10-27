@@ -396,3 +396,22 @@ test('unknown or malformed member id → 404', async () => {
     expect(res.json(), String(id)).toEqual(NOT_FOUND);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Ô chọn người (báo cáo người chơi)
+// ---------------------------------------------------------------------------
+
+test('member options: login required; active members only, by name, just id/name/avatar', async () => {
+  expect((await get('/api/members/options')).statusCode).toBe(401);
+
+  const { member: me, sid } = await memberWithSid({ displayName: 'Chi', avatarUrl: 'https://cdn.test/chi.png' });
+  const an = await createMember(testDb, { displayName: 'An' });
+  await createMember(testDb, { displayName: 'Bảo', status: 'left' });
+
+  const res = await get('/api/members/options', sid);
+  expect(res.statusCode).toBe(200);
+  expect(res.json()).toEqual([
+    { id: an.id, displayName: 'An', avatarUrl: null },
+    { id: me.id, displayName: 'Chi', avatarUrl: 'https://cdn.test/chi.png' },
+  ]);
+});

@@ -34,13 +34,21 @@
  * nơi đọc `status = 'approved'` tự bỏ lần khai đã huỷ. `listRecentlyApproved` là danh sách
  * quản trị để huỷ: lần khai `approved` của mùa chưa chốt, duyệt gần nhất trước, tối đa 50.
  *
+ * Báo cáo người chơi (spec điểm role §6, phần riêng ở `accusations.ts`): gửi kèm khi khai hoặc sửa
+ * lần khai còn chờ duyệt (cùng giao dịch với lần khai); mod quyết báo cáo đang hiện cùng lúc với lần
+ * khai (`accusation: 'approve' | 'reject'`). Duyệt và huỷ duyệt đều ghi trong một giao dịch khoá
+ * dòng `seasons` (`FOR UPDATE`) rồi kiểm lại `closedAt`, nên mọi lượt duyệt/huỷ cùng mùa xếp hàng
+ * với nhau và với chốt mùa — báo cáo trùng không bao giờ trừ điểm hai lần. Mục trừ điểm
+ * (`source = 'accusation'`) tạo sẵn ở trạng thái `approved`: không vào hàng chờ, không sửa được,
+ * không tính vào giới hạn 30 lần/ngày; huỷ duyệt lần khai người báo cáo kéo theo huỷ nó.
+ *
  * Giới hạn 30 lần/ngày là đếm-rồi-ghi (không khoá): hai lần khai cùng một mili giây có
  * thể lọt thành 31 — chấp nhận được cho một giới hạn chống spam.
  */
 
 import type { Prisma, StatReport } from '@prisma/client';
 import { z } from 'zod';
-import type { AccessLevel, ReportDto, ReviewedReportDto } from '../../../shared/api-types.js';
+import type { AccessLevel, AccusationInputDto, ReportDto, ReviewedReportDto } from '../../../shared/api-types.js';
 import { formatReportValue, reportPoints } from '../../../shared/metric.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
@@ -57,6 +65,22 @@ import {
 } from '../../lib/time.js';
 import { HOT_TX } from '../../lib/tx.js';
 import { ensureSeason, isSeasonClosed } from '../seasons/service.js';
+import {
+  ACCUSATION_SELECT,
+  applyAccusationReview,
+  createAccusation,
+  hiddenAccusationIds,
+  livePenaltyOfReport,
+  pendingAccusationOf,
+  penaltyDmText,
+  penaltyNoticeOf,
+  penaltyRemovedDmText,
+  revokePenalty,
+  syncAccusationOnEdit,
+  toAccusationDto,
+  validateAccusation,
+} from './accusations.js';
+import type { AccusationDecision, PenaltyNotice, PendingAccusation } from './accusations.js';
 import { announceHolderChange, getRoleLeader } from './leaderboard.js';
 import type { LeaderboardRow } from './leaderboard.js';
 
@@ -96,12 +120,24 @@ export interface ReportInput {
   sessionId?: number | null;
   /** Cắt khoảng trắng, tối đa 300 ký tự; rỗng → null. */
   note?: string | null;
+  /**
+   * Báo cáo người chơi kèm lần khai (chỉ web, spec điểm role §6). Khai mới: vắng mặt hoặc `null` =
+   * không báo cáo. Sửa: vắng mặt = giữ nguyên, `null` = bỏ báo cáo, một báo cáo = đặt/thay.
+   */
+  accusation?: AccusationInputDto | null;
 }
 
 /** Các trường sửa được của lần khai còn chờ duyệt; trường vắng mặt giữ nguyên. */
 export type ReportPatch = Partial<ReportInput>;
 
-export type ReviewDecision = { approve: true } | { approve: false; reason: string };
+/**
+ * Quyết định của mod. `accusation` bắt buộc khi lần khai có báo cáo đang hiện ('approve' = báo cáo
+ * đúng, 'reject' = bác); khi duyệt mà bác báo cáo thì `reason` là lý do bỏ báo cáo (bắt buộc);
+ * từ chối lần khai thì báo cáo bị bác cùng lý do (không nhận 'approve').
+ */
+export type ReviewDecision =
+  | { approve: true; accusation?: AccusationDecision; reason?: string | null }
+  | { approve: false; reason: string; accusation?: AccusationDecision };
 
 export interface Reviewer {
   id: number;
@@ -121,15 +157,20 @@ const inputSchema = z
     playedOn: z.string(),
     sessionId: idSchema.nullish(),
     note: z.string().nullish(),
+    // Kiểm riêng (`validateAccusation`) để báo lời nhắn cụ thể thay vì "Dữ liệu không hợp lệ".
+    accusation: z.unknown().optional(),
   })
   .strict();
 
 const patchSchema = inputSchema.partial();
 
+const accusationDecisionSchema = z.enum(['approve', 'reject']).optional();
+
 const decisionSchema = z.discriminatedUnion('approve', [
-  z.object({ approve: z.literal(true) }).strict(),
+  // `reason` khi duyệt chỉ có nghĩa là lý do bỏ báo cáo (`accusation: 'reject'`).
+  z.object({ approve: z.literal(true), accusation: accusationDecisionSchema, reason: z.string().nullish() }).strict(),
   // Thiếu lý do hẳn cũng là "chưa ghi lý do" (REASON_REQUIRED), không phải sai kiểu.
-  z.object({ approve: z.literal(false), reason: z.string().nullish() }).strict(),
+  z.object({ approve: z.literal(false), reason: z.string().nullish(), accusation: accusationDecisionSchema }).strict(),
 ]);
 
 /** Lý do huỷ duyệt từ ngoài: thiếu hẳn cũng là "chưa ghi lý do" (REASON_REQUIRED), không phải sai kiểu. */
@@ -216,7 +257,8 @@ async function validateReport(ctx: Ctx, memberId: number, r: Normalised, opts: {
 
   if (opts.dailyCap) {
     const { start, end } = vnDayRange(today);
-    const count = await ctx.db.statReport.count({ where: { memberId, createdAt: { gte: start, lt: end } } });
+    // Mục trừ điểm do báo cáo (`source = 'accusation'`) không phải lần khai của người đó.
+    const count = await ctx.db.statReport.count({ where: { memberId, source: 'self', createdAt: { gte: start, lt: end } } });
     if (count >= MAX_REPORTS_PER_DAY) throw appError('RATE_LIMITED');
   }
 
@@ -252,21 +294,26 @@ export async function submitReport(ctx: Ctx, memberId: number, input: ReportInpu
 
   await assertActiveMember(ctx, memberId);
   await validateReport(ctx, memberId, r, { dailyCap: true });
+  const accusation = p.accusation == null ? null : await validateAccusation(ctx.db, memberId, p.accusation);
   await ensureSeason(ctx, seasonIdOf(r.playedOn));
 
-  return ctx.db.statReport.create({
-    data: {
-      memberId,
-      roleId: r.roleId,
-      sessionId: r.sessionId,
-      playedOn: dateOnlyToDb(r.playedOn),
-      value: r.value,
-      extraValue: r.extraValue,
-      penaltyValue: r.penaltyValue,
-      note: r.note,
-      // Ghi rõ để đồng hồ của ctx (không phải giờ thật) quyết định "ngày khai".
-      createdAt: ctx.now(),
-    },
+  return ctx.db.$transaction(async (tx) => {
+    const created = await tx.statReport.create({
+      data: {
+        memberId,
+        roleId: r.roleId,
+        sessionId: r.sessionId,
+        playedOn: dateOnlyToDb(r.playedOn),
+        value: r.value,
+        extraValue: r.extraValue,
+        penaltyValue: r.penaltyValue,
+        note: r.note,
+        // Ghi rõ để đồng hồ của ctx (không phải giờ thật) quyết định "ngày khai".
+        createdAt: ctx.now(),
+      },
+    });
+    if (accusation) await createAccusation(tx, created, accusation, ctx.now());
+    return created;
   });
 }
 
@@ -294,22 +341,29 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
     note: p.note === undefined ? existing.note : normaliseNote(p.note),
   };
   await validateReport(ctx, memberId, merged, { dailyCap: false });
+  const accusation =
+    p.accusation === undefined ? undefined : p.accusation === null ? null : await validateAccusation(ctx.db, memberId, p.accusation);
   await ensureSeason(ctx, seasonIdOf(merged.playedOn));
 
-  const { count } = await ctx.db.statReport.updateMany({
-    where: { id: reportId, memberId, status: 'pending' },
-    data: {
-      roleId: merged.roleId,
-      value: merged.value,
-      extraValue: merged.extraValue,
-      penaltyValue: merged.penaltyValue,
-      playedOn: dateOnlyToDb(merged.playedOn),
-      sessionId: merged.sessionId,
-      note: merged.note,
-    },
+  // Lần khai và báo cáo đổi cùng nhau: lần khai vừa được duyệt đúng lúc này → không đụng báo cáo.
+  return ctx.db.$transaction(async (tx) => {
+    const { count } = await tx.statReport.updateMany({
+      where: { id: reportId, memberId, status: 'pending' },
+      data: {
+        roleId: merged.roleId,
+        value: merged.value,
+        extraValue: merged.extraValue,
+        penaltyValue: merged.penaltyValue,
+        playedOn: dateOnlyToDb(merged.playedOn),
+        sessionId: merged.sessionId,
+        note: merged.note,
+      },
+    });
+    if (count === 0) throw appError('NOT_PENDING');
+    const updated = await tx.statReport.findUniqueOrThrow({ where: { id: reportId } });
+    await syncAccusationOnEdit(tx, updated, accusation, ctx.now());
+    return updated;
   });
-  if (count === 0) throw appError('NOT_PENDING');
-  return ctx.db.statReport.findUniqueOrThrow({ where: { id: reportId } });
 }
 
 // ---------------------------------------------------------------------------
@@ -350,9 +404,9 @@ async function loadReviewable(ctx: Ctx, reportId: number): Promise<ReviewableRep
 
 /**
  * Lý do từ chối/huỷ duyệt: cắt khoảng trắng, phải có (`REASON_REQUIRED`), tối đa 200 ký tự
- * (`VALIDATION`). `what` là "từ chối" hay "huỷ duyệt" để lời nhắn đúng ngữ cảnh.
+ * (`VALIDATION`). `what` là "từ chối", "huỷ duyệt" hay "bỏ báo cáo" để lời nhắn đúng ngữ cảnh.
  */
-function checkReason(raw: string | null | undefined, what: 'từ chối' | 'huỷ duyệt'): string {
+function checkReason(raw: string | null | undefined, what: 'từ chối' | 'huỷ duyệt' | 'bỏ báo cáo'): string {
   const reason = raw?.trim() ?? '';
   if (reason === '') throw appError('REASON_REQUIRED', `Cần ghi lý do ${what}`);
   if (reason.length > REASON_MAX) throw appError('VALIDATION', `Lý do ${what} tối đa 200 ký tự`);
@@ -363,12 +417,16 @@ function checkReason(raw: string | null | undefined, what: 'từ chối' | 'hu�
  * Duyệt hoặc từ chối. Người duyệt phải là mod/admin (`FORBIDDEN` — phòng thủ thêm
  * ngoài tầng web); lần khai phải có (`NOT_FOUND`) và còn `pending` (`NOT_PENDING`);
  * mod không tự duyệt (`SELF_REVIEW`); từ chối phải có lý do sau khi cắt khoảng trắng
- * (`REASON_REQUIRED`), tối đa 200 ký tự (`VALIDATION`); mùa của ngày chơi chưa chốt
- * (`SEASON_CLOSED`). Đổi trạng thái có điều kiện `status = 'pending'` và đúng
- * role/ngày/giá trị đã đọc: hai người duyệt cùng lúc chỉ một người thành công, người kia
- * nhận `NOT_PENDING`; người khai sửa chen vào giữa lúc đọc và ghi → `NOT_PENDING` với
- * lời nhắn xem lại (lần khai vẫn chờ duyệt).
- * Sau khi lưu: từ chối → DM người khai (lỗi chỉ ghi log); duyệt → `announceIfLeaderChanged`.
+ * (`REASON_REQUIRED`), tối đa 200 ký tự (`VALIDATION`); quyết định về báo cáo kèm theo
+ * (`checkAccusationDecision`); mùa của ngày chơi chưa chốt (`SEASON_CLOSED`).
+ *
+ * Ghi trong một giao dịch khoá dòng mùa (như huỷ duyệt): kiểm lại `closedAt`, đổi trạng thái có
+ * điều kiện `status = 'pending'` và đúng role/ngày/giá trị đã đọc — hai người duyệt cùng lúc chỉ
+ * một người thành công, người kia nhận `NOT_PENDING`; người khai sửa chen vào → `NOT_PENDING` với
+ * lời nhắn xem lại (lần khai vẫn chờ duyệt) — rồi áp dụng quyết định về báo cáo
+ * (`applyAccusationReview`: báo cáo đúng → `bonusPoints = 1`, mục trừ điểm, báo cáo trùng
+ * `superseded`). Sau khi lưu: từ chối → DM người khai; duyệt → `announceIfLeaderChanged`; có mục trừ
+ * điểm → DM người bị báo cáo và kiểm tra người hoá thân của role bị trừ. Lỗi Discord chỉ ghi log.
  */
 export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: number, decision: ReviewDecision): Promise<void> {
   assertReviewer(reviewer);
@@ -379,48 +437,110 @@ export async function reviewReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
   if (report.memberId === reviewer.id && reviewer.accessLevel !== 'admin') throw appError('SELF_REVIEW');
 
   const reason = d.approve ? null : checkReason(d.reason, 'từ chối');
+  const seen = await pendingAccusationOf(ctx.db, reportId);
+  const accusationReason = checkAccusationDecision(seen, d, reviewer, reason);
+  const approvesAccusation = d.approve && d.accusation === 'approve';
 
   const seasonId = seasonIdOf(dbToDateOnly(report.playedOn));
   if (await isSeasonClosed(ctx, seasonId)) throw appError('SEASON_CLOSED');
 
-  // Top 1 của (role, mùa) TRƯỚC khi duyệt — so với sau khi duyệt để biết có đổi người hoá thân.
+  // Top 1 của (role, mùa) TRƯỚC khi duyệt — so với sau khi duyệt để biết có đổi người hoá thân;
+  // cả role bị trừ điểm nếu báo cáo được duyệt đúng (cùng role thì một lần so là đủ).
   const leaderBefore = d.approve ? await getRoleLeader(ctx, report.roleId, seasonId) : null;
+  const penaltyRoleId = approvesAccusation && seen && seen.row.accusedRoleId !== report.roleId ? seen.row.accusedRoleId : null;
+  const penaltyLeaderBefore = penaltyRoleId !== null ? await getRoleLeader(ctx, penaltyRoleId, seasonId) : null;
 
-  const { count } = await ctx.db.statReport.updateMany({
-    // Khoá lạc quan: chỉ ghi khi lần khai vẫn chờ duyệt và vẫn đúng role/ngày/giá trị/chỉ số
-    // phụ/chỉ số phạt mod đã xem — người khai sửa chen vào thì không duyệt nhầm nội dung mới,
-    // và `leaderBefore` ở trên luôn đúng với role/mùa thực sự được duyệt.
-    where: {
-      id: reportId,
-      status: 'pending',
-      roleId: report.roleId,
-      playedOn: report.playedOn,
-      value: report.value,
-      extraValue: report.extraValue,
-      penaltyValue: report.penaltyValue,
-    },
-    data: {
-      status: d.approve ? 'approved' : 'rejected',
-      reviewedById: reviewer.id,
-      reviewedAt: ctx.now(),
-      rejectReason: reason,
-    },
-  });
-  if (count === 0) throw await notPendingError(ctx, reportId);
+  // Lần khai chờ duyệt thì mùa đã được tạo; gọi lại vô hại (cần dòng để khoá).
+  await ensureSeason(ctx, seasonId);
+  const penalty = await ctx.db.$transaction(async (tx) => {
+    await lockOpenSeason(tx, seasonId);
+    const { count } = await tx.statReport.updateMany({
+      // Khoá lạc quan: chỉ ghi khi lần khai vẫn chờ duyệt và vẫn đúng role/ngày/giá trị/chỉ số
+      // phụ/chỉ số phạt mod đã xem — người khai sửa chen vào thì không duyệt nhầm nội dung mới,
+      // và `leaderBefore` ở trên luôn đúng với role/mùa thực sự được duyệt.
+      where: {
+        id: reportId,
+        status: 'pending',
+        roleId: report.roleId,
+        playedOn: report.playedOn,
+        value: report.value,
+        extraValue: report.extraValue,
+        penaltyValue: report.penaltyValue,
+      },
+      data: {
+        status: d.approve ? 'approved' : 'rejected',
+        reviewedById: reviewer.id,
+        reviewedAt: ctx.now(),
+        rejectReason: reason,
+        ...(approvesAccusation ? { bonusPoints: 1 } : {}),
+      },
+    });
+    if (count === 0) throw await notPendingError(tx, reportId);
+    return applyAccusationReview(tx, reportId, seen, {
+      reportApproved: d.approve,
+      decision: d.accusation,
+      reason: accusationReason,
+      reviewerId: reviewer.id,
+      now: ctx.now(),
+    });
+  }, HOT_TX);
 
-  if (d.approve) await announceIfLeaderChanged(ctx, report, seasonId, leaderBefore);
+  if (d.approve) await announceIfLeaderChanged(ctx, report.roleId, report.role.nameVi, seasonId, leaderBefore);
   else await notifyRejected(ctx, report, reason ?? '');
+  if (penalty) {
+    await dmPenalised(ctx, penalty, 'trừ điểm', penaltyDmText(penalty));
+    if (penaltyRoleId !== null) await announceIfLeaderChanged(ctx, penalty.roleId, penalty.roleName, seasonId, penaltyLeaderBefore);
+  }
+}
+
+/**
+ * Quyết định về báo cáo kèm lần khai (`seen` — báo cáo `pending`, null nếu không có). Báo cáo đang
+ * hiện: phải có quyết định (`VALIDATION`); từ chối lần khai không đi với "báo cáo đúng"
+ * (`VALIDATION`); mod không quyết báo cáo về chính mình (`SELF_REVIEW`; admin thì được); duyệt mà bác
+ * báo cáo phải có lý do (`REASON_REQUIRED`/`VALIDATION`). Không có báo cáo hiện mà vẫn gửi quyết
+ * định → mod đang xem bản cũ (`NOT_PENDING` "xem lại"). Trả về lý do ghi vào báo cáo (null nếu không).
+ */
+function checkAccusationDecision(
+  seen: PendingAccusation | null,
+  d: z.infer<typeof decisionSchema>,
+  reviewer: Reviewer,
+  reportReason: string | null,
+): string | null {
+  if (!seen?.shown) {
+    if (d.accusation !== undefined) throw appError('NOT_PENDING', 'Lần khai vừa được sửa, hãy xem lại');
+    return reportReason;
+  }
+  if (d.accusation === undefined) throw appError('VALIDATION', 'Cần chọn duyệt hay bỏ báo cáo kèm lần khai');
+  if (!d.approve && d.accusation === 'approve') throw appError('VALIDATION', 'Lần khai bị từ chối thì báo cáo cũng bị bác');
+  if (seen.row.accusedId === reviewer.id && reviewer.accessLevel !== 'admin') {
+    throw appError('SELF_REVIEW', 'Mod không được duyệt báo cáo về chính mình');
+  }
+  if (!d.approve) return reportReason;
+  return d.accusation === 'reject' ? checkReason(d.reason, 'bỏ báo cáo') : null;
+}
+
+/**
+ * Trong giao dịch: khoá dòng mùa (`FOR UPDATE`) rồi kiểm lại `closedAt`. Chốt mùa (`closeSeason`)
+ * cập nhật đúng dòng này trong giao dịch của nó, nên hai bên xếp hàng — hoặc việc này xong trước khi
+ * chốt tính danh hiệu, hoặc chốt xong trước và ở đây thấy `closed_at` đã có (`SEASON_CLOSED`). Các
+ * lượt duyệt/huỷ cùng mùa cũng xếp hàng với nhau.
+ */
+async function lockOpenSeason(tx: Prisma.TransactionClient, seasonId: string): Promise<void> {
+  const [season] = await tx.$queryRaw<{ closed_at: Date | null }[]>`SELECT closed_at FROM seasons WHERE id = ${seasonId} FOR UPDATE`;
+  if (season?.closed_at != null) throw appError('SEASON_CLOSED');
 }
 
 /**
  * Huỷ một lần khai đã duyệt kèm lý do (spec huỷ duyệt §3). Kiểm tra theo thứ tự: người huỷ
  * là mod/admin (`FORBIDDEN`) → lần khai có (`NOT_FOUND`) → đang `approved` (`NOT_APPROVED`)
- * → mod không huỷ lần khai của mình (`SELF_REVIEW`; admin thì được) → lý do sau khi cắt
- * khoảng trắng 1–200 ký tự (`REASON_REQUIRED`/`VALIDATION`) → mùa của ngày chơi chưa chốt
- * (`SEASON_CLOSED`). Rồi trong một giao dịch: khoá dòng mùa (`FOR UPDATE`), kiểm lại
- * `closedAt` (chốt mùa chen vào → `SEASON_CLOSED`), đổi trạng thái có điều kiện
- * `status = 'approved'` — không trúng dòng nào (người khác vừa huỷ) → `NOT_APPROVED`.
- * Sau khi lưu: DM người khai, rồi so top 1 trước/sau; cả hai lỗi Discord chỉ ghi log.
+ * → mod không huỷ lần khai của mình (`SELF_REVIEW`; admin thì được), cũng không huỷ lần khai mà
+ * việc huỷ sẽ gỡ mục trừ điểm của chính mình → lý do sau khi cắt khoảng trắng 1–200 ký tự
+ * (`REASON_REQUIRED`/`VALIDATION`) → mùa của ngày chơi chưa chốt (`SEASON_CLOSED`). Rồi trong một
+ * giao dịch: khoá dòng mùa (`lockOpenSeason`), đổi trạng thái có điều kiện `status = 'approved'` —
+ * không trúng dòng nào (người khác vừa huỷ) → `NOT_APPROVED` — và huỷ dây chuyền mục trừ điểm do
+ * báo cáo kèm lần khai này tạo ra (spec điểm role §6; mục đã huỷ riêng trước thì thôi). Sau khi lưu:
+ * DM người khai (mục trừ điểm: DM "đã được gỡ"), DM người bị báo cáo nếu mục trừ vừa được gỡ dây
+ * chuyền, rồi so top 1 trước/sau của từng role đổi điểm; lỗi Discord chỉ ghi log.
  */
 export async function revokeReport(ctx: Ctx, reviewer: Reviewer, reportId: number, reason: string): Promise<void> {
   assertReviewer(reviewer);
@@ -431,6 +551,10 @@ export async function revokeReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
   if (report.memberId === reviewer.id && reviewer.accessLevel !== 'admin') {
     throw appError('SELF_REVIEW', 'Mod không được huỷ duyệt lần khai của mình');
   }
+  const cascade = report.source === 'self' ? await livePenaltyOfReport(ctx.db, reportId) : null;
+  if (cascade && cascade.accusedId === reviewer.id && reviewer.accessLevel !== 'admin') {
+    throw appError('SELF_REVIEW', 'Mod không được gỡ mục trừ điểm của chính mình');
+  }
   const trimmed = checkReason(rawReason, 'huỷ duyệt');
 
   const seasonId = seasonIdOf(dbToDateOnly(report.playedOn));
@@ -438,46 +562,58 @@ export async function revokeReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
 
   // Top 1 của (role, mùa) TRƯỚC khi huỷ — so với sau khi huỷ để biết có đổi người hoá thân.
   const leaderBefore = await getRoleLeader(ctx, report.roleId, seasonId);
+  const penaltyRoleId = cascade && cascade.roleId !== report.roleId ? cascade.roleId : null;
+  const penaltyLeaderBefore = penaltyRoleId !== null ? await getRoleLeader(ctx, penaltyRoleId, seasonId) : null;
 
   // Dòng `seasons` phải có để khoá được; lần khai đã duyệt thì mùa đã được tạo, gọi lại vô hại.
   await ensureSeason(ctx, seasonId);
-  await ctx.db.$transaction(async (tx) => {
-    // Khoá dòng mùa: chốt mùa (`closeSeason`) cập nhật đúng dòng này trong giao dịch của nó,
-    // nên hai bên xếp hàng — hoặc huỷ xong trước khi chốt tính danh hiệu, hoặc chốt xong
-    // trước và ở đây thấy `closed_at` đã có.
-    const [season] = await tx.$queryRaw<{ closed_at: Date | null }[]>`SELECT closed_at FROM seasons WHERE id = ${seasonId} FOR UPDATE`;
-    if (season?.closed_at != null) throw appError('SEASON_CLOSED');
-
+  const lifted = await ctx.db.$transaction(async (tx) => {
+    await lockOpenSeason(tx, seasonId);
     const { count } = await tx.statReport.updateMany({
       where: { id: reportId, status: 'approved' },
       data: { status: 'revoked', revokedById: reviewer.id, revokedAt: ctx.now(), rejectReason: trimmed },
     });
     if (count === 0) throw appError('NOT_APPROVED');
+    return cascade ? revokePenalty(tx, cascade.penaltyReportId, { revokerId: reviewer.id, now: ctx.now(), reason: trimmed }) : null;
   }, HOT_TX);
 
-  await notifyRevoked(ctx, report, trimmed);
-  await announceIfLeaderChanged(ctx, report, seasonId, leaderBefore);
+  const own = report.source === 'accusation' ? await penaltyNoticeOf(ctx.db, reportId) : null;
+  if (own) await dmPenalised(ctx, own, 'gỡ trừ điểm', penaltyRemovedDmText(own, trimmed));
+  else await notifyRevoked(ctx, report, trimmed);
+  if (lifted) await dmPenalised(ctx, lifted, 'gỡ trừ điểm', penaltyRemovedDmText(lifted, trimmed));
+
+  await announceIfLeaderChanged(ctx, report.roleId, report.role.nameVi, seasonId, leaderBefore);
+  if (lifted && penaltyRoleId !== null) await announceIfLeaderChanged(ctx, lifted.roleId, lifted.roleName, seasonId, penaltyLeaderBefore);
 }
 
 /**
  * Cập nhật có điều kiện không trúng dòng nào: hoặc đã có người xử lý (thông báo mặc
  * định), hoặc lần khai vẫn chờ duyệt nhưng người khai vừa sửa — nhắc mod xem lại.
  */
-async function notPendingError(ctx: Ctx, reportId: number): Promise<Error> {
-  const fresh = await ctx.db.statReport.findUnique({ where: { id: reportId }, select: { status: true } });
+async function notPendingError(db: Prisma.TransactionClient, reportId: number): Promise<Error> {
+  const fresh = await db.statReport.findUnique({ where: { id: reportId }, select: { status: true } });
   return fresh?.status === 'pending' ? appError('NOT_PENDING', 'Lần khai vừa được sửa, hãy xem lại') : appError('NOT_PENDING');
 }
 
 /**
- * Sau khi điểm đã duyệt của một role đổi (duyệt thêm hoặc huỷ duyệt, đã lưu xong): tính lại
- * top 1 của role trong mùa của ngày chơi; có người dẫn đầu và khác người so với `before` →
+ * Sau khi điểm đã duyệt của một role đổi (duyệt thêm, trừ điểm hoặc huỷ duyệt, đã lưu xong): tính
+ * lại top 1 của role trong mùa của ngày chơi; có người dẫn đầu và khác người so với `before` →
  * đăng "👑 … đã hoá thân …" (spec §4.6). Không còn ai dẫn đầu (role chỉ có điểm 0, hoặc huỷ
  * lần khai duy nhất) → không đăng gì. Lỗi Discord chỉ ghi log.
  */
-async function announceIfLeaderChanged(ctx: Ctx, report: ReviewableReport, seasonId: string, before: LeaderboardRow | null): Promise<void> {
-  const after = await getRoleLeader(ctx, report.roleId, seasonId);
+async function announceIfLeaderChanged(ctx: Ctx, roleId: number, roleName: string, seasonId: string, before: LeaderboardRow | null): Promise<void> {
+  const after = await getRoleLeader(ctx, roleId, seasonId);
   if (after && after.memberId !== before?.memberId) {
-    await announceHolderChange(ctx, after.displayName, report.role.nameVi, seasonId);
+    await announceHolderChange(ctx, after.displayName, roleName, seasonId);
+  }
+}
+
+/** DM người bị báo cáo (bị trừ điểm / được gỡ); Discord lỗi chỉ ghi log — DB đã lưu rồi. */
+async function dmPenalised(ctx: Ctx, n: PenaltyNotice, what: string, text: string): Promise<void> {
+  try {
+    await ctx.notifier.sendDm(n.accusedDiscordId, text);
+  } catch (err) {
+    console.error(`[stats] Không gửi được DM ${what} tới ${n.accusedDiscordId}: ${messageOf(err)}`);
   }
 }
 
@@ -544,15 +680,26 @@ const REPORT_SELECT = {
       penaltyPoints: true,
     },
   },
+  accusation: { select: ACCUSATION_SELECT },
+  penaltyFor: { select: ACCUSATION_SELECT },
 } satisfies Prisma.StatReportSelect;
 
 type ReportRow = Prisma.StatReportGetPayload<{ select: typeof REPORT_SELECT }>;
 
 /**
- * DTO của một dòng; `guildId` để dựng link tới tin Discord chứa highlight (hai cột phải cùng
- * có). `points` tính lúc đọc theo điểm hiện tại của role (`reportPoints`, spec điểm role §3).
+ * DTO của các dòng (`ReportDto` trong api-types giải thích từng trường); `guildId` để dựng link tới
+ * tin Discord chứa highlight (hai cột phải cùng có). `points` tính lúc đọc theo điểm hiện tại của
+ * role (`reportPoints`, spec điểm role §3). `queue`: hàng chờ duyệt — báo cáo trùng bị ẩn thì
+ * `accusation = null`; ngoài hàng chờ người khai luôn thấy báo cáo của mình. Một truy vấn thêm để
+ * xác định báo cáo trùng.
  */
-function toReportDto(r: ReportRow, guildId: string): ReportDto {
+async function toReportDtos<R extends ReportRow>(ctx: Ctx, rows: R[], o: { queue: boolean } = { queue: false }): Promise<{ row: R; dto: ReportDto }[]> {
+  const hidden = await hiddenAccusationIds(ctx.db, rows.flatMap((r) => (r.accusation ? [r.accusation] : [])));
+  return rows.map((row) => ({ row, dto: toReportDto(row, ctx.config.discord.guildId, hidden, o.queue) }));
+}
+
+function toReportDto(r: ReportRow, guildId: string, hidden: Set<number>, queue: boolean): ReportDto {
+  const duplicate = r.accusation !== null && hidden.has(r.accusation.id);
   return {
     id: r.id,
     member: { id: r.member.id, displayName: r.member.displayName },
@@ -586,6 +733,10 @@ function toReportDto(r: ReportRow, guildId: string): ReportDto {
       r.highlightChannelId !== null && r.highlightMessageId !== null
         ? `https://discord.com/channels/${guildId}/${r.highlightChannelId}/${r.highlightMessageId}`
         : null,
+    // Hàng chờ chỉ kèm báo cáo mod còn phải quyết: `pending` và không bị ẩn vì trùng.
+    accusation: r.accusation && !(queue && (duplicate || r.accusation.status !== 'pending')) ? toAccusationDto(r.accusation) : null,
+    accusationDuplicate: duplicate,
+    penaltyOf: r.penaltyFor ? toAccusationDto(r.penaltyFor) : null,
   };
 }
 
@@ -593,7 +744,8 @@ function toReportDto(r: ReportRow, guildId: string): ReportDto {
 export async function getReportDto(ctx: Ctx, reportId: number): Promise<ReportDto> {
   const row = isId(reportId) ? await ctx.db.statReport.findUnique({ where: { id: reportId }, select: REPORT_SELECT }) : null;
   if (!row) throw appError('NOT_FOUND');
-  return toReportDto(row, ctx.config.discord.guildId);
+  const [one] = await toReportDtos(ctx, [row]);
+  return one!.dto;
 }
 
 /** Lần khai của một người, mới nhất trước; `limit` mặc định 50, tối đa 100 (lớn hơn bị cắt). */
@@ -605,17 +757,20 @@ export async function listMyReports(ctx: Ctx, memberId: number, limit = 50): Pro
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: Math.min(limit, LIST_MAX),
   });
-  return rows.map((r) => toReportDto(r, ctx.config.discord.guildId));
+  return (await toReportDtos(ctx, rows)).map((x) => x.dto);
 }
 
-/** Hàng chờ duyệt của mọi người, cũ nhất trước. */
+/**
+ * Hàng chờ duyệt của mọi người, cũ nhất trước. Chỉ lần khai do người chơi khai (mục trừ điểm luôn
+ * tạo ở trạng thái đã duyệt — lọc thêm cho chắc); báo cáo kèm theo chỉ hiện khi không bị ẩn vì trùng.
+ */
 export async function listPendingReports(ctx: Ctx): Promise<ReportDto[]> {
   const rows = await ctx.db.statReport.findMany({
-    where: { status: 'pending' },
+    where: { status: 'pending', source: 'self' },
     select: REPORT_SELECT,
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
-  return rows.map((r) => toReportDto(r, ctx.config.discord.guildId));
+  return (await toReportDtos(ctx, rows, { queue: true })).map((x) => x.dto);
 }
 
 /**
@@ -637,8 +792,8 @@ export async function listRecentlyApproved(ctx: Ctx): Promise<ReviewedReportDto[
     orderBy: [{ reviewedAt: 'desc' }, { id: 'desc' }],
     take: RECENT_APPROVED_MAX,
   });
-  return rows.map((r) => ({
-    ...toReportDto(r, ctx.config.discord.guildId),
+  return (await toReportDtos(ctx, rows)).map(({ row: r, dto }) => ({
+    ...dto,
     reviewedBy: r.reviewedBy,
     // Lần khai đã duyệt luôn có reviewedAt (reviewReport ghi cùng lúc); phòng hờ dữ liệu lạ.
     reviewedAt: (r.reviewedAt ?? r.createdAt).toISOString(),

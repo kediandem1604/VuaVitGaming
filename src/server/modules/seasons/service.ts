@@ -7,7 +7,8 @@
  * Chốt mùa (`closeSeason`; bộ hẹn giờ gọi qua `runSeasonJobs` lúc 00:05 ngày 4 tháng
  * sau) chạy lại bao nhiêu lần cũng được. Trong MỘT giao dịch: đặt `closedAt` có điều
  * kiện (chỉ lần đổi được từ null mới trao danh hiệu), từ chối mọi lần khai còn chờ duyệt
- * có ngày chơi trong mùa ('Mùa đã chốt', không có người duyệt), rồi lưu top 1 mỗi role có
+ * có ngày chơi trong mùa ('Mùa đã chốt', không có người duyệt) cùng báo cáo người chơi kèm
+ * chúng (spec điểm role §6), rồi lưu top 1 mỗi role có
  * điểm > 0 vào `role_titles` (`skipDuplicates`). Mùa đã chốt mà gọi lại chỉ dọn lần khai
  * chờ duyệt lọt vào sau giờ chốt (kiểm-tra-rồi-ghi ở `reports.ts` có khe nhỏ) — không
  * tính lại danh hiệu đã trao.
@@ -42,6 +43,7 @@ import {
 import { HOT_TX } from '../../lib/tx.js';
 // Vòng import với leaderboard.ts (bên đó dùng `checkSeasonId`, `isSeasonClosed`) là an
 // toàn: hai bên chỉ gọi hàm của nhau lúc chạy, không dùng gì ở cấp module.
+import { rejectPendingAccusations } from '../stats/accusations.js';
 import { computeSeasonLeaders } from '../stats/leaderboard.js';
 
 const SEASON_ID = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -136,6 +138,8 @@ export async function closeSeason(ctx: Ctx, seasonId: string): Promise<{ titles:
     });
     const wasOpen = flipped === 1;
 
+    // Báo cáo người chơi kèm các lần khai này bị bác cùng lý do (trước, vì điều kiện dựa trên lần khai còn chờ).
+    await rejectPendingAccusations(tx, pendingInSeason(seasonId), SEASON_CLOSED_REASON, now);
     const { count: autoRejected } = await tx.statReport.updateMany({ where: pendingInSeason(seasonId), data: autoRejection(now) });
 
     let titles = 0;
@@ -314,7 +318,10 @@ async function nudgeReviewers(ctx: Ctx, seasonId: string, now: Date): Promise<vo
 async function rejectStrayPending(ctx: Ctx, seasonId: string, now: Date): Promise<void> {
   const where = pendingInSeason(seasonId);
   if ((await ctx.db.statReport.count({ where })) === 0) return;
-  const { count } = await ctx.db.statReport.updateMany({ where, data: autoRejection(now) });
+  const count = await ctx.db.$transaction(async (tx) => {
+    await rejectPendingAccusations(tx, where, SEASON_CLOSED_REASON, now);
+    return (await tx.statReport.updateMany({ where, data: autoRejection(now) })).count;
+  });
   if (count > 0) console.warn(`[seasons] Đã từ chối ${count} lần khai lọt vào mùa ${seasonId} sau giờ chốt`);
 }
 

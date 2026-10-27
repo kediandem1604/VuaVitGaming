@@ -269,6 +269,9 @@ test('submit returns the created report; mine lists newest first; own pending re
     rejectReason: null,
     createdAt: '2026-10-22T12:00:00.000Z',
     highlightUrl: null,
+    accusation: null,
+    accusationDuplicate: false,
+    penaltyOf: null,
   });
 
   setNow('2026-10-22T12:30:00Z');
@@ -394,6 +397,9 @@ test('an extra-metric report over HTTP: extraValue in, points and role limits ou
     rejectReason: null,
     createdAt: '2026-10-22T12:00:00.000Z',
     highlightUrl: null,
+    accusation: null,
+    accusationDuplicate: false,
+    penaltyOf: null,
   });
   expect(await reportRow(dto.id)).toMatchObject({ value: 4, extraValue: 2 });
 
@@ -1174,4 +1180,84 @@ test('a client that disconnects mid-upload gives its slot back; one that leaves 
   expect((await putHighlight(r.id, sid, mp4())).json()).toEqual(HIGHLIGHT_BUSY);
   posts.releaseAll();
   for (const res of await Promise.all(again)) expect(res.statusCode).toBe(200);
+});
+
+// ---------------------------------------------------------------------------
+// Báo cáo người chơi
+// ---------------------------------------------------------------------------
+
+test('accusations over HTTP: sent with a report, shape vs rule errors, PATCH null removes, queue hides duplicates', async () => {
+  const vigilante = await roleByKey(testDb, 'vigilante');
+  const { member: an, sid } = await memberWithSid({ displayName: 'An' });
+  const { sid: dungSid } = await memberWithSid({ displayName: 'Dũng' });
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
+  const binh = await createMember(testDb, { displayName: 'Bình' });
+  const cuong = await createMember(testDb, { displayName: 'Cường' });
+  const acc = { accusedId: binh.id, accusedRoleId: vigilante.id, victimId: cuong.id, victimFaction: 'goose' };
+
+  const first = await submit(sid, 2, { accusation: acc });
+  expect(first.accusation).toMatchObject({
+    status: 'pending',
+    accused: { id: binh.id, displayName: 'Bình' },
+    accusedRole: { id: vigilante.id, nameVi: 'Dân phòng', penaltyPoints: 3 },
+    victim: { id: cuong.id, displayName: 'Cường' },
+    victimFaction: 'goose',
+    rejectReason: null,
+  });
+  expect(first).toMatchObject({ accusationDuplicate: false, penaltyOf: null });
+
+  // Không phải object → lỗi dạng chung; object sai luật → lời nhắn của service.
+  const badShape = await post('/api/reports', sid, { roleId: swordsman.id, value: 1, playedOn: '2026-10-22', accusation: 'Bình' });
+  expect(badShape.statusCode).toBe(400);
+  expect(badShape.json()).toEqual(INVALID);
+  const self = await post('/api/reports', sid, { roleId: swordsman.id, value: 1, playedOn: '2026-10-22', accusation: { ...acc, accusedId: an.id } });
+  expect(self.statusCode).toBe(400);
+  expect(self.json()).toEqual(errorBody('VALIDATION', 'Không thể tự báo cáo chính mình'));
+
+  setNow('2026-10-22T12:01:00Z');
+  const dup = await submit(dungSid, 1, { accusation: acc });
+  const queue = (await get('/api/admin/reports?status=pending', modSid)).json<ReportDto[]>();
+  expect(queue.find((r) => r.id === first.id)).toMatchObject({ accusation: { id: first.accusation?.id }, accusationDuplicate: false });
+  expect(queue.find((r) => r.id === dup.id)).toMatchObject({ accusation: null, accusationDuplicate: true });
+
+  // PATCH null = bỏ báo cáo → báo cáo trùng kế tiếp hiện lên.
+  const removed = await patch(`/api/reports/${first.id}`, sid, { accusation: null });
+  expect(removed.statusCode).toBe(200);
+  expect(removed.json<ReportDto>().accusation).toBeNull();
+  const after = (await get('/api/admin/reports?status=pending', modSid)).json<ReportDto[]>();
+  expect(after.find((r) => r.id === dup.id)).toMatchObject({ accusation: { victim: { displayName: 'Cường' } }, accusationDuplicate: false });
+});
+
+test('review with an accusation over HTTP: the decision is required; approve → penalty row; reject with a reason', async () => {
+  const vigilante = await roleByKey(testDb, 'vigilante');
+  const { sid } = await memberWithSid({ displayName: 'An' });
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
+  const binh = await createMember(testDb, { displayName: 'Bình', discordId: 'binh-discord' });
+  const cuong = await createMember(testDb, { displayName: 'Cường' });
+  const acc = { accusedId: binh.id, accusedRoleId: vigilante.id, victimId: cuong.id, victimFaction: 'duck' };
+  const a = await submit(sid, 2, { accusation: acc });
+  const other = await createMember(testDb, { displayName: 'Dũng' });
+  // Khác người bị bắn → vụ khác, cũng được hiện.
+  const b = await submit(sid, 3, { accusation: { ...acc, victimId: other.id } });
+
+  const missing = await review(modSid, a.id, { approve: true });
+  expect(missing.statusCode).toBe(400);
+  expect(missing.json()).toEqual(errorBody('VALIDATION', 'Cần chọn duyệt hay bỏ báo cáo kèm lần khai'));
+  expect((await review(modSid, a.id, { approve: true, accusation: 'maybe' })).json()).toEqual(INVALID);
+
+  expect((await review(modSid, a.id, { approve: true, accusation: 'approve' })).statusCode).toBe(204);
+  expect(await reportRow(a.id)).toMatchObject({ status: 'approved', bonusPoints: 1 });
+  const penalty = await testDb.statReport.findFirstOrThrow({ where: { source: 'accusation' } });
+  expect(penalty).toMatchObject({ memberId: binh.id, roleId: vigilante.id, status: 'approved', penaltyValue: 1, note: 'Bị báo cáo: bắn Cường (phe Vịt)' });
+  expect(notifier.dms).toContainEqual({ discordId: 'binh-discord', text: 'Bạn bị trừ 3 điểm (Dân phòng) ngày 22/10: bị báo cáo bắn Cường (phe Vịt).' });
+
+  const noReason = await review(modSid, b.id, { approve: true, accusation: 'reject' });
+  expect(noReason.json()).toEqual(errorBody('REASON_REQUIRED', 'Cần ghi lý do bỏ báo cáo'));
+  expect((await review(modSid, b.id, { approve: true, accusation: 'reject', reason: 'Không rõ' })).statusCode).toBe(204);
+  expect(await testDb.playerAccusation.findUniqueOrThrow({ where: { reportId: b.id } })).toMatchObject({ status: 'rejected', rejectReason: 'Không rõ' });
+  expect(await reportRow(b.id)).toMatchObject({ status: 'approved', bonusPoints: 0 });
+
+  // Mục trừ điểm có trong "Đã duyệt gần đây" kèm báo cáo đã tạo ra nó.
+  const recent = (await get('/api/admin/reports?status=approved', modSid)).json<ReviewedReportDto[]>();
+  expect(recent.find((r) => r.id === penalty.id)).toMatchObject({ source: 'accusation', penaltyOf: { victimFaction: 'duck' } });
 });
