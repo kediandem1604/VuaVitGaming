@@ -702,6 +702,52 @@ test('faction totals sum the season points of every (member, role) pair of the f
   });
 });
 
+test('faction totals subtract negative cells: a penalty at one role lowers the member total, a member whose sum is ≤ 0 is absent, `me` is the net sum', async () => {
+  const vigilante = await roleByKey(testDb, 'vigilante'); // Ngỗng: +5 mỗi phát trúng, −3 mỗi phát sai
+  const goose = await roleByKey(testDb, 'goose'); // Ngỗng ×1
+  // An: Dân phòng 0 trúng 1 sai = −3 (cùng phe Ngỗng với Ngỗng +10) → Ngỗng 7; Kiếm sĩ +10 (Vịt) → cả 3 phe 17.
+  await approvedRaw(a.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, at: '2026-10-10T02:00:00Z' });
+  await approvedRaw(a.id, { roleId: goose.id, value: 10, at: '2026-10-10T03:00:00Z' });
+  await approvedRaw(a.id, { roleId: swordsman.id, value: 10, at: '2026-10-10T04:00:00Z' });
+  // Bình: Dân phòng −3 (Ngỗng) và Vịt +10 (Vịt) — khác phe: Ngỗng không có (tổng −3), Vịt 10, cả 3 phe 7.
+  await approvedRaw(b.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, at: '2026-10-10T02:00:00Z' });
+  await approvedRaw(b.id, { roleId: duck.id, value: 10, at: '2026-10-10T05:00:00Z' });
+  // Cường: Dân phòng 1 trúng (+5) rồi 2 lần bị trừ (−6) = −1; Ngỗng +1 → tổng Ngỗng 0 → không lên bảng nào.
+  const c = await createMember(testDb, { displayName: 'Cường' });
+  await approvedRaw(c.id, { roleId: vigilante.id, value: 1, at: '2026-10-10T02:00:00Z' });
+  await approvedRaw(c.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, source: 'accusation', at: '2026-10-10T03:00:00Z' });
+  await approvedRaw(c.id, { roleId: vigilante.id, value: 0, penaltyValue: 1, source: 'accusation', at: '2026-10-10T04:00:00Z' });
+  await approvedRaw(c.id, { roleId: goose.id, value: 1, at: '2026-10-10T05:00:00Z' });
+
+  const forAn = await getFactionTotals(ctx, '2026-10', a.id);
+  expect(forAn.boards.all.top.map((r) => [r.memberId, r.points])).toEqual([
+    [a.id, 17],
+    [b.id, 7],
+  ]);
+  expect(forAn.boards.goose.top.map((r) => [r.memberId, r.points])).toEqual([[a.id, 7]]);
+  expect(forAn.boards.duck.top.map((r) => [r.memberId, r.points])).toEqual([
+    [a.id, 10],
+    [b.id, 10],
+  ]);
+  expect(forAn.boards.neutral.top).toEqual([]);
+  // `me` là tổng đã trừ.
+  expect(forAn.boards.all.me).toEqual(totalRow(1, a, 17));
+  expect(forAn.boards.goose.me).toEqual(totalRow(1, a, 7));
+  const forBinh = await getFactionTotals(ctx, '2026-10', b.id);
+  expect(forBinh.boards.all.me).toEqual(totalRow(2, b, 7));
+  expect(forBinh.boards.goose.me).toBeNull(); // tổng Ngỗng −3
+  expect(forBinh.boards.duck.me).toEqual(totalRow(2, b, 10));
+  const forCuong = await getFactionTotals(ctx, '2026-10', c.id);
+  expect(Object.values(forCuong.boards).map((board) => board.me)).toEqual([null, null, null, null]);
+
+  // "Top 3 mỗi phe" vẫn chỉ xếp từng cặp > 0: dòng Dân phòng âm của An/Bình không hiện, Ngỗng +10 của An vẫn hiện.
+  const top = await getFactionTop(ctx, '2026-10');
+  expect(top.factions.goose.map((r) => [r.memberId, r.role.id, r.points])).toEqual([
+    [a.id, goose.id, 10],
+    [c.id, goose.id, 1],
+  ]);
+});
+
 test('faction totals break ties by the latest approval among the summed pairs, then member id; top is 20 rows and `me` may sit outside', async () => {
   // An: Vịt 3 duyệt sớm nhất rồi Kiếm sĩ 2 duyệt MUỘN nhất → tổng 5, mốc phân hoà là mốc muộn.
   await approved(a.id, { value: 3, at: '2026-10-10T01:00:00Z' });
