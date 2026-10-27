@@ -3,15 +3,21 @@
  * /api/admin/roles`, lỗi của server như "Key đã tồn tại" hiện nguyên văn), rồi mọi role
  * kể cả đã tắt (`/api/roles?all=1`, khoá `['roles','all']` — khác `['roles']` của bảng
  * xếp hạng), nhóm theo phe và nhóm "Chế độ đặc biệt" như Đại sảnh. Mỗi role sửa được
- * phe, tên Việt, tên chỉ số, tối đa mỗi trận, biểu tượng, bật/tắt (PATCH chỉ các trường
- * đã đổi); tải ảnh PNG/JPG/WebP ≤ 1 MB (kiểm tra tại chỗ rồi `PUT` body thô) và xoá
- * ảnh. Thêm role, đổi phe hay đổi ảnh thì mọi nơi vẽ nhân vật (Đại sảnh, xếp hạng) được
+ * phe, tên Việt, tên chỉ số, tối đa mỗi trận, điểm mỗi lần, biểu tượng, bật/tắt (PATCH chỉ
+ * các trường đã đổi); tải ảnh PNG/JPG/WebP ≤ 1 MB (kiểm tra tại chỗ rồi `PUT` body thô) và
+ * xoá ảnh. Thêm role, đổi phe hay đổi ảnh thì mọi nơi vẽ nhân vật (Đại sảnh, xếp hạng) được
  * tải lại.
  *
- * Chỉ số phụ (spec chỉ số phụ §5): cả form thêm và form sửa có ô tick "Có chỉ số phụ"; tick
- * thì hiện ba ô "Tên chỉ số phụ", "Tối đa mỗi trận", "Điểm mỗi lần" (kiểm tra tại chỗ như
- * service). Gửi đủ cả ba (tick) hoặc `null` cả ba (bỏ tick); form sửa chỉ gửi khi có gì đổi.
- * Server không cho tắt khi role đã có lần khai dùng chỉ số phụ — lời từ chối hiện nguyên văn.
+ * Thanh "Tìm role…" (spec điểm role §5) trên đầu danh sách lọc theo tên Việt/Anh, không dấu,
+ * không phân biệt hoa thường (`normalizeText` dùng chung với ô chọn role); nhóm không còn role
+ * nào thì ẩn, không nhóm nào còn → "Không có role nào khớp".
+ *
+ * Chỉ số phụ (spec chỉ số phụ §5) và chỉ số phạt (spec điểm role §5) cùng một kiểu: cả form
+ * thêm và form sửa có ô tick ("Có chỉ số phụ" / "Có điểm trừ"); tick thì hiện ba ô (tên, "Tối
+ * đa mỗi trận", điểm — "Điểm mỗi lần" / "Điểm trừ mỗi lần"), kiểm tra tại chỗ như service. Gửi
+ * đủ cả ba (tick) hoặc `null` cả ba (bỏ tick); form sửa chỉ gửi khi có gì đổi. Server không cho
+ * tắt khi role đã có lần khai dùng chỉ số đó — lời từ chối hiện nguyên văn. Ô "Điểm mỗi lần" của
+ * chỉ số chính (`points`, 1–100) luôn gửi khi thêm; khi sửa chỉ gửi nếu đổi.
  *
  * Giao diện Sảnh đêm (spec §6 Quản trị): mỗi role một `panel`; role chưa có ảnh hiện nhân
  * vật vẽ theo bộ đồ (`Character`, không bảng tên) đứng yên — lớp `goose-still` trên danh
@@ -21,6 +27,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type ChangeEvent, type FormEvent } from 'react';
 import type { Faction, ModeDto, RoleDto } from '../../../shared/api-types';
+import { normalizeText } from '../../../shared/text';
 import { apiGet, apiPutBlob, apiSend, errorMessage } from '../../api';
 import { Character } from '../../components/Character';
 import { EmptyState } from '../../components/EmptyState';
@@ -40,11 +47,15 @@ const IMAGE_MAX_BYTES = 1_048_576;
 const INVALID_IMAGE = 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB';
 const MAX_PER_GAME_MIN = 1;
 const MAX_PER_GAME_MAX = 100;
-/** Giới hạn ba trường chỉ số phụ (như service): tên 1–60 ký tự, tối đa và điểm 1–100. */
-const EXTRA_LABEL_MAX = 60;
-const EXTRA_MIN = 1;
-const EXTRA_MAX = 100;
-const EXTRA_TOGGLE_LABEL = 'Có chỉ số phụ';
+/** Điểm mỗi đơn vị chỉ số chính (như service): 1–100. */
+const POINTS_MIN = 1;
+const POINTS_MAX = 100;
+const POINTS_ERROR = `Điểm mỗi lần phải từ ${POINTS_MIN} đến ${POINTS_MAX}`;
+/** Giới hạn ba ô của một bộ chỉ số tuỳ chọn (phụ/phạt, như service): tên 1–60 ký tự, tối đa và điểm 1–100. */
+const METRIC_LABEL_MAX = 60;
+const METRIC_MIN = 1;
+const METRIC_MAX = 100;
+const NO_MATCH_MESSAGE = 'Không có role nào khớp';
 
 const H2_CLASS = 'text-xl leading-tight font-extrabold text-white';
 const LABEL_CLASS = 'text-sm font-bold text-night-200';
@@ -54,6 +65,97 @@ const STATUS_CLASS = 'min-h-5 text-sm font-bold text-ok';
 /** Bề rộng nhân vật trong ô hình (px) — ô `w-18` trừ viền và đệm của `panel-inset`. */
 const FIGURE_SIZE = 60;
 
+// ---------------------------------------------------------------------------
+// Bộ chỉ số tuỳ chọn (chỉ số phụ, chỉ số phạt): ô tick + ba ô
+// ---------------------------------------------------------------------------
+
+/** Ba ô của một bộ chỉ số tuỳ chọn đang gõ (chuỗi) và ô tick. */
+interface MetricValues {
+  enabled: boolean;
+  label: string;
+  max: string;
+  points: string;
+}
+
+/** Ô tick tắt, ba ô về mặc định (như "Tối đa mỗi trận" của chỉ số chính mặc định 1). */
+const METRIC_EMPTY: MetricValues = { enabled: false, label: '', max: '1', points: '1' };
+
+/** Ba giá trị đã kiểm tra của một bộ chỉ số tuỳ chọn; `null` cả ba khi bỏ tick. */
+interface MetricTriple {
+  label: string | null;
+  max: number | null;
+  points: number | null;
+}
+
+/** Chữ hiện của một bộ chỉ số tuỳ chọn: tên ô tick, nhãn ba ô, gợi ý và câu lỗi (khớp service). */
+interface MetricTexts {
+  toggle: string;
+  labelField: string;
+  labelHint: string;
+  pointsField: string;
+  pointsHint: string;
+  labelEmptyError: string;
+  labelLengthError: string;
+  maxError: string;
+  pointsError: string;
+}
+
+const EXTRA_TEXTS: MetricTexts = {
+  toggle: 'Có chỉ số phụ',
+  labelField: 'Tên chỉ số phụ',
+  labelHint: 'Vd “Số lần ám sát trong cuộc họp”.',
+  pointsField: 'Điểm mỗi lần',
+  pointsHint: 'Điểm cộng cho mỗi đơn vị chỉ số phụ.',
+  labelEmptyError: 'Tên chỉ số phụ không được để trống',
+  labelLengthError: `Tên chỉ số phụ phải từ 1 đến ${METRIC_LABEL_MAX} ký tự`,
+  maxError: `Tối đa mỗi trận của chỉ số phụ phải từ ${METRIC_MIN} đến ${METRIC_MAX}`,
+  pointsError: `Điểm mỗi lần của chỉ số phụ phải từ ${METRIC_MIN} đến ${METRIC_MAX}`,
+};
+
+const PENALTY_TEXTS: MetricTexts = {
+  toggle: 'Có điểm trừ',
+  labelField: 'Tên chỉ số phạt',
+  labelHint: 'Vd “Số phát bắn sai”.',
+  pointsField: 'Điểm trừ mỗi lần',
+  pointsHint: 'Số dương; bị trừ khỏi điểm cho mỗi đơn vị chỉ số phạt.',
+  labelEmptyError: 'Tên chỉ số phạt không được để trống',
+  labelLengthError: `Tên chỉ số phạt phải từ 1 đến ${METRIC_LABEL_MAX} ký tự`,
+  maxError: `Tối đa mỗi trận của chỉ số phạt phải từ ${METRIC_MIN} đến ${METRIC_MAX}`,
+  pointsError: `Điểm trừ mỗi lần phải từ ${METRIC_MIN} đến ${METRIC_MAX}`,
+};
+
+/** Trạng thái ba ô theo bộ ba của role đang có (form sửa). */
+function metricValuesOf(triple: MetricTriple): MetricValues {
+  return triple.label === null ? METRIC_EMPTY : { enabled: true, label: triple.label, max: String(triple.max), points: String(triple.points) };
+}
+
+/**
+ * Kiểm tra ba ô như service rồi ra bộ ba: bỏ tick → `null` cả ba; tick → đủ cả ba.
+ * Lỗi đầu tiên gặp được trả về để hiện tại chỗ (không gửi).
+ */
+function parseMetric(values: MetricValues, texts: MetricTexts): { triple: MetricTriple; error: null } | { triple: null; error: string } {
+  if (!values.enabled) return { triple: { label: null, max: null, points: null }, error: null };
+  const label = values.label.trim();
+  if (label === '') return { triple: null, error: texts.labelEmptyError };
+  if (Array.from(label).length > METRIC_LABEL_MAX) return { triple: null, error: texts.labelLengthError };
+  const max = parseBounded(values.max, METRIC_MIN, METRIC_MAX);
+  if (max === null) return { triple: null, error: texts.maxError };
+  const points = parseBounded(values.points, METRIC_MIN, METRIC_MAX);
+  if (points === null) return { triple: null, error: texts.pointsError };
+  return { triple: { label, max, points }, error: null };
+}
+
+/** Số nguyên trong `[min, max]` từ ô đang gõ; rỗng/không nguyên/ngoài khoảng → null. */
+function parseBounded(raw: string, min: number, max: number): number | null {
+  if (raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= min && n <= max ? n : null;
+}
+
+function tripleChanged(a: MetricTriple, b: MetricTriple): boolean {
+  return a.label !== b.label || a.max !== b.max || a.points !== b.points;
+}
+
 /** Ba trường chỉ số phụ như API nhận: cùng có hoặc cùng null. */
 interface ExtraMetricBody {
   extraMetricLabel: string | null;
@@ -61,74 +163,78 @@ interface ExtraMetricBody {
   extraPoints: number | null;
 }
 
-interface RolePatch extends Partial<ExtraMetricBody> {
+/** Ba trường chỉ số phạt như API nhận: cùng có hoặc cùng null. */
+interface PenaltyMetricBody {
+  penaltyMetricLabel: string | null;
+  penaltyMaxPerGame: number | null;
+  penaltyPoints: number | null;
+}
+
+const extraOf = (role: RoleDto): MetricTriple => ({ label: role.extraMetricLabel, max: role.extraMaxPerGame, points: role.extraPoints });
+const penaltyOf = (role: RoleDto): MetricTriple => ({ label: role.penaltyMetricLabel, max: role.penaltyMaxPerGame, points: role.penaltyPoints });
+const toExtraBody = (t: MetricTriple): ExtraMetricBody => ({ extraMetricLabel: t.label, extraMaxPerGame: t.max, extraPoints: t.points });
+const toPenaltyBody = (t: MetricTriple): PenaltyMetricBody => ({ penaltyMetricLabel: t.label, penaltyMaxPerGame: t.max, penaltyPoints: t.points });
+
+interface RolePatch extends Partial<ExtraMetricBody>, Partial<PenaltyMetricBody> {
   faction?: Faction;
   nameVi?: string;
   metricLabel?: string;
   maxPerGame?: number;
+  points?: number;
   icon?: string;
   active?: boolean;
 }
 
-/** Ba ô chỉ số phụ đang gõ (chuỗi) và ô tick. */
-interface ExtraValues {
-  hasExtra: boolean;
-  extraMetricLabel: string;
-  extraMaxPerGame: string;
-  extraPoints: string;
-}
+// ---------------------------------------------------------------------------
+// Danh sách
+// ---------------------------------------------------------------------------
 
-/** Ô tick tắt, ba ô về mặc định (như "Tối đa mỗi trận" của chỉ số chính mặc định 1). */
-const EXTRA_EMPTY: ExtraValues = { hasExtra: false, extraMetricLabel: '', extraMaxPerGame: '1', extraPoints: '1' };
-
-/** Trạng thái ô chỉ số phụ theo role đang có (form sửa). */
-function extraValuesOf(role: RoleDto): ExtraValues {
-  return role.extraMetricLabel === null
-    ? EXTRA_EMPTY
-    : { hasExtra: true, extraMetricLabel: role.extraMetricLabel, extraMaxPerGame: String(role.extraMaxPerGame), extraPoints: String(role.extraPoints) };
-}
-
-/**
- * Kiểm tra ba ô chỉ số phụ như service rồi ra body: bỏ tick → `null` cả ba; tick → đủ cả ba.
- * Lỗi đầu tiên gặp được trả về để hiện tại chỗ (không gửi).
- */
-function parseExtra(values: ExtraValues): { body: ExtraMetricBody; error: null } | { body: null; error: string } {
-  if (!values.hasExtra) return { body: { extraMetricLabel: null, extraMaxPerGame: null, extraPoints: null }, error: null };
-  const label = values.extraMetricLabel.trim();
-  if (label === '') return { body: null, error: 'Tên chỉ số phụ không được để trống' };
-  if (Array.from(label).length > EXTRA_LABEL_MAX) return { body: null, error: `Tên chỉ số phụ phải từ 1 đến ${EXTRA_LABEL_MAX} ký tự` };
-  const max = Number(values.extraMaxPerGame);
-  if (values.extraMaxPerGame.trim() === '' || !Number.isInteger(max) || max < EXTRA_MIN || max > EXTRA_MAX) {
-    return { body: null, error: `Tối đa mỗi trận của chỉ số phụ phải từ ${EXTRA_MIN} đến ${EXTRA_MAX}` };
-  }
-  const points = Number(values.extraPoints);
-  if (values.extraPoints.trim() === '' || !Number.isInteger(points) || points < EXTRA_MIN || points > EXTRA_MAX) {
-    return { body: null, error: `Điểm mỗi lần của chỉ số phụ phải từ ${EXTRA_MIN} đến ${EXTRA_MAX}` };
-  }
-  return { body: { extraMetricLabel: label, extraMaxPerGame: max, extraPoints: points }, error: null };
-}
-
-/** Ba trường chỉ số phụ của body có khác role hiện tại không (form sửa chỉ gửi khi đổi). */
-function extraChanged(body: ExtraMetricBody, role: RoleDto): boolean {
-  return body.extraMetricLabel !== role.extraMetricLabel || body.extraMaxPerGame !== role.extraMaxPerGame || body.extraPoints !== role.extraPoints;
+/** Khớp theo tên Việt hoặc tên Anh, không phân biệt hoa thường và dấu (`query` đã chuẩn hoá). */
+function roleMatches(role: RoleDto, query: string): boolean {
+  return [role.nameVi, role.nameEn].some((text) => normalizeText(text).includes(query));
 }
 
 export function RolesTab() {
+  const id = useId();
   const roles = useQuery({ queryKey: ALL_ROLES_KEY, queryFn: () => apiGet<RoleDto[]>('/api/roles?all=1') });
   const modes = useQuery({ queryKey: MODES_KEY, queryFn: () => apiGet<ModeDto[]>('/api/modes') });
+  const [search, setSearch] = useState('');
+  const query = normalizeText(search);
 
   return (
     <>
       <QueryState query={modes}>{(modeList) => <CreateRole modes={modeList} />}</QueryState>
       <QueryState query={roles}>
         {(list) => {
+          const matching = query === '' ? list : list.filter((r) => roleMatches(r, query));
           const groups = [
-            ...FACTIONS.map((faction) => ({ key: faction, label: FACTION_LABEL[faction], roles: list.filter((r) => !isSpecialRole(r) && r.faction === faction) })),
-            { key: 'special', label: SPECIAL_LABEL, roles: list.filter(isSpecialRole) },
+            ...FACTIONS.map((faction) => ({ key: faction, label: FACTION_LABEL[faction], roles: matching.filter((r) => !isSpecialRole(r) && r.faction === faction) })),
+            { key: 'special', label: SPECIAL_LABEL, roles: matching.filter(isSpecialRole) },
           ];
+          // Đang tìm: chỉ hiện nhóm còn role; không tìm: hiện mọi nhóm, nhóm trống báo "Chưa có role nào".
+          const shown = query === '' ? groups : groups.filter((group) => group.roles.length > 0);
           return (
             <>
-              {groups.map((group) => (
+              <div className="flex min-w-0 flex-col gap-1">
+                <label htmlFor={`${id}-search`} className={LABEL_CLASS}>
+                  Tìm role
+                </label>
+                <input
+                  id={`${id}-search`}
+                  type="search"
+                  className="field"
+                  placeholder="Tìm role…"
+                  autoComplete="off"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              {shown.length === 0 && (
+                <EmptyState>
+                  <p>{NO_MATCH_MESSAGE}</p>
+                </EmptyState>
+              )}
+              {shown.map((group) => (
                 <section key={group.key} className="flex flex-col gap-3">
                   <h2 className={H2_CLASS}>
                     {group.label} ({group.roles.length})
@@ -160,14 +266,15 @@ export function RolesTab() {
 // Thêm role
 // ---------------------------------------------------------------------------
 
-/** Thân `POST /api/admin/roles`; ba trường chỉ số phụ chỉ gửi khi có tick (bỏ = không có). */
-interface CreateRoleBody extends Partial<ExtraMetricBody> {
+/** Thân `POST /api/admin/roles`; ba trường chỉ số phụ/phạt chỉ gửi khi có tick (bỏ = không có). */
+interface CreateRoleBody extends Partial<ExtraMetricBody>, Partial<PenaltyMetricBody> {
   key: string;
   faction: Faction;
   nameVi: string;
   nameEn: string;
   metricLabel: string;
   maxPerGame: number;
+  points: number;
   icon: string;
   description?: string;
   mapNote?: string;
@@ -181,15 +288,17 @@ interface CreateValues {
   nameEn: string;
   metricLabel: string;
   maxPerGame: string;
+  points: string;
   icon: string;
   description: string;
   mapNote: string;
   /** Key chế độ chơi; rỗng = role thường của ba phe. */
   modeKey: string;
-  extra: ExtraValues;
+  extra: MetricValues;
+  penalty: MetricValues;
 }
 
-type CreateTextField = Exclude<keyof CreateValues, 'faction' | 'maxPerGame' | 'modeKey' | 'extra'>;
+type CreateTextField = Exclude<keyof CreateValues, 'faction' | 'maxPerGame' | 'points' | 'modeKey' | 'extra' | 'penalty'>;
 
 const EMPTY_ROLE: CreateValues = {
   key: '',
@@ -198,11 +307,13 @@ const EMPTY_ROLE: CreateValues = {
   nameEn: '',
   metricLabel: '',
   maxPerGame: '1',
+  points: '1',
   icon: '',
   description: '',
   mapNote: '',
   modeKey: '',
-  extra: EXTRA_EMPTY,
+  extra: METRIC_EMPTY,
+  penalty: METRIC_EMPTY,
 };
 
 /** Các ô chữ của form thêm role: nhãn, bắt buộc hay không, độ dài tối đa (như service kiểm tra). */
@@ -242,12 +353,14 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
     for (const { field, label, required } of CREATE_TEXT_FIELDS) {
       if (required && values[field].trim() === '') return setLocalError(`${label} không được để trống`);
     }
-    const max = Number(values.maxPerGame);
-    if (values.maxPerGame.trim() === '' || !Number.isInteger(max) || max < MAX_PER_GAME_MIN || max > MAX_PER_GAME_MAX) {
-      return setLocalError(`Tối đa mỗi trận phải từ ${MAX_PER_GAME_MIN} đến ${MAX_PER_GAME_MAX}`);
-    }
-    const extra = parseExtra(values.extra);
+    const max = parseBounded(values.maxPerGame, MAX_PER_GAME_MIN, MAX_PER_GAME_MAX);
+    if (max === null) return setLocalError(`Tối đa mỗi trận phải từ ${MAX_PER_GAME_MIN} đến ${MAX_PER_GAME_MAX}`);
+    const points = parseBounded(values.points, POINTS_MIN, POINTS_MAX);
+    if (points === null) return setLocalError(POINTS_ERROR);
+    const extra = parseMetric(values.extra, EXTRA_TEXTS);
     if (extra.error !== null) return setLocalError(extra.error);
+    const penalty = parseMetric(values.penalty, PENALTY_TEXTS);
+    if (penalty.error !== null) return setLocalError(penalty.error);
     setLocalError(null);
     const description = values.description.trim();
     const mapNote = values.mapNote.trim();
@@ -258,12 +371,14 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
       nameEn: values.nameEn.trim(),
       metricLabel: values.metricLabel.trim(),
       maxPerGame: max,
+      points,
       icon: values.icon.trim(),
       ...(description !== '' ? { description } : {}),
       ...(mapNote !== '' ? { mapNote } : {}),
       ...(values.modeKey !== '' ? { modeKey: values.modeKey } : {}),
-      // Role mới không tick thì không gửi ba trường (server hiểu là không có chỉ số phụ).
-      ...(values.extra.hasExtra ? extra.body : {}),
+      // Role mới không tick thì không gửi ba trường (server hiểu là không có chỉ số phụ/phạt).
+      ...(values.extra.enabled ? toExtraBody(extra.triple) : {}),
+      ...(values.penalty.enabled ? toPenaltyBody(penalty.triple) : {}),
     });
   };
 
@@ -323,6 +438,7 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
             onChange={(e) => update({ maxPerGame: e.target.value })}
           />
         </div>
+        <PointsField id={`${id}-points`} value={values.points} onChange={(points) => update({ points })} />
         <div className="flex min-w-0 flex-col gap-1 sm:col-span-2">
           <label htmlFor={`${id}-mode`} className={LABEL_CLASS}>
             Chế độ đặc biệt (không bắt buộc)
@@ -345,7 +461,8 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
             Chỉ chọn với role riêng của một chế độ chơi; role đó hiện trong nhóm “{SPECIAL_LABEL}”.
           </p>
         </div>
-        <ExtraMetricFields id={`${id}-extra`} values={values.extra} onChange={(extra) => update({ extra })} />
+        <MetricFields id={`${id}-extra`} texts={EXTRA_TEXTS} values={values.extra} onChange={(extra) => update({ extra })} />
+        <MetricFields id={`${id}-penalty`} texts={PENALTY_TEXTS} values={values.penalty} onChange={(penalty) => update({ penalty })} />
         <div className="flex flex-col gap-1 sm:col-span-2">
           <button type="submit" className="btn-primary self-start" disabled={create.isPending}>
             {create.isPending ? 'Đang thêm…' : 'Thêm role'}
@@ -365,47 +482,75 @@ function CreateRole({ modes }: { modes: ModeDto[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Chỉ số phụ (dùng chung cho form thêm và form sửa)
+// Ô dùng chung cho form thêm và form sửa
 // ---------------------------------------------------------------------------
 
-interface ExtraMetricFieldsProps {
+/** Ô "Điểm mỗi lần" của chỉ số chính (`points`, 1–100), kèm gợi ý. */
+function PointsField({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <label htmlFor={id} className={LABEL_CLASS}>
+        Điểm mỗi lần
+      </label>
+      <input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={POINTS_MIN}
+        max={POINTS_MAX}
+        step={1}
+        className="field"
+        value={value}
+        aria-describedby={`${id}-hint`}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <p id={`${id}-hint`} className={HINT_CLASS}>
+        Điểm cộng cho mỗi đơn vị chỉ số chính.
+      </p>
+    </div>
+  );
+}
+
+interface MetricFieldsProps {
   id: string;
-  values: ExtraValues;
-  onChange: (values: ExtraValues) => void;
+  texts: MetricTexts;
+  values: MetricValues;
+  onChange: (values: MetricValues) => void;
 }
 
 /**
- * Ô tick "Có chỉ số phụ" và, khi tick, ba ô "Tên chỉ số phụ", "Tối đa mỗi trận", "Điểm mỗi lần".
+ * Ô tick ("Có chỉ số phụ" / "Có điểm trừ") và, khi tick, ba ô: tên, "Tối đa mỗi trận", điểm.
  * Là một `fieldset` mà legend chính là ô tick: "Tối đa mỗi trận" ở đây trùng chữ với ô của chỉ số
- * chính, nên nhóm mang tên ô tick để trình đọc màn hình (và test) phân biệt được. `min-w-0` vì
- * `fieldset` mặc định không co dưới `min-content`, dễ tràn ngang ở 320px.
+ * chính (và "Điểm mỗi lần" của chỉ số phụ trùng với ô `points`), nên nhóm mang tên ô tick để trình
+ * đọc màn hình (và test) phân biệt được. `min-w-0` vì `fieldset` mặc định không co dưới
+ * `min-content`, dễ tràn ngang ở 320px.
  */
-function ExtraMetricFields({ id, values, onChange }: ExtraMetricFieldsProps) {
-  const set = (patch: Partial<ExtraValues>) => onChange({ ...values, ...patch });
+function MetricFields({ id, texts, values, onChange }: MetricFieldsProps) {
+  const set = (patch: Partial<MetricValues>) => onChange({ ...values, ...patch });
   return (
     <fieldset className="flex min-w-0 flex-col sm:col-span-2">
       <legend className="flex">
-        <Checkbox id={`${id}-toggle`} checked={values.hasExtra} onChange={(e) => set({ hasExtra: e.target.checked })}>
-          <span className={LABEL_CLASS}>{EXTRA_TOGGLE_LABEL}</span>
+        <Checkbox id={`${id}-toggle`} checked={values.enabled} onChange={(e) => set({ enabled: e.target.checked })}>
+          <span className={LABEL_CLASS}>{texts.toggle}</span>
         </Checkbox>
       </legend>
-      {values.hasExtra && (
+      {values.enabled && (
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="flex min-w-0 flex-col gap-1">
             <label htmlFor={`${id}-label`} className={LABEL_CLASS}>
-              Tên chỉ số phụ
+              {texts.labelField}
             </label>
             <input
               id={`${id}-label`}
               type="text"
-              maxLength={EXTRA_LABEL_MAX}
+              maxLength={METRIC_LABEL_MAX}
               className="field"
-              value={values.extraMetricLabel}
+              value={values.label}
               aria-describedby={`${id}-label-hint`}
-              onChange={(e) => set({ extraMetricLabel: e.target.value })}
+              onChange={(e) => set({ label: e.target.value })}
             />
             <p id={`${id}-label-hint`} className={HINT_CLASS}>
-              Vd “Số lần ám sát trong cuộc họp”.
+              {texts.labelHint}
             </p>
           </div>
           <div className="flex min-w-0 flex-col gap-1">
@@ -416,32 +561,32 @@ function ExtraMetricFields({ id, values, onChange }: ExtraMetricFieldsProps) {
               id={`${id}-max`}
               type="number"
               inputMode="numeric"
-              min={EXTRA_MIN}
-              max={EXTRA_MAX}
+              min={METRIC_MIN}
+              max={METRIC_MAX}
               step={1}
               className="field"
-              value={values.extraMaxPerGame}
-              onChange={(e) => set({ extraMaxPerGame: e.target.value })}
+              value={values.max}
+              onChange={(e) => set({ max: e.target.value })}
             />
           </div>
           <div className="flex min-w-0 flex-col gap-1">
             <label htmlFor={`${id}-points`} className={LABEL_CLASS}>
-              Điểm mỗi lần
+              {texts.pointsField}
             </label>
             <input
               id={`${id}-points`}
               type="number"
               inputMode="numeric"
-              min={EXTRA_MIN}
-              max={EXTRA_MAX}
+              min={METRIC_MIN}
+              max={METRIC_MAX}
               step={1}
               className="field"
-              value={values.extraPoints}
+              value={values.points}
               aria-describedby={`${id}-points-hint`}
-              onChange={(e) => set({ extraPoints: e.target.value })}
+              onChange={(e) => set({ points: e.target.value })}
             />
             <p id={`${id}-points-hint`} className={HINT_CLASS}>
-              Chỉ số chính luôn +1 điểm mỗi đơn vị.
+              {texts.pointsHint}
             </p>
           </div>
         </div>
@@ -461,8 +606,10 @@ function RoleEditor({ role }: { role: RoleDto }) {
   const [nameVi, setNameVi] = useState(role.nameVi);
   const [metricLabel, setMetricLabel] = useState(role.metricLabel);
   const [maxPerGame, setMaxPerGame] = useState(String(role.maxPerGame));
+  const [points, setPoints] = useState(String(role.points));
   const [icon, setIcon] = useState(role.icon);
-  const [extra, setExtra] = useState<ExtraValues>(() => extraValuesOf(role));
+  const [extra, setExtra] = useState<MetricValues>(() => metricValuesOf(extraOf(role)));
+  const [penalty, setPenalty] = useState<MetricValues>(() => metricValuesOf(penaltyOf(role)));
   const [active, setActive] = useState(role.active);
   const [localError, setLocalError] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
@@ -503,15 +650,17 @@ function RoleEditor({ role }: { role: RoleDto }) {
 
   const onSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const max = Number(maxPerGame);
     if (nameVi.trim() === '') return setLocalError('Tên tiếng Việt không được để trống');
     if (metricLabel.trim() === '') return setLocalError('Tên chỉ số không được để trống');
     if (icon.trim() === '') return setLocalError('Biểu tượng không được để trống');
-    if (!Number.isInteger(max) || max < MAX_PER_GAME_MIN || max > MAX_PER_GAME_MAX) {
-      return setLocalError(`Tối đa mỗi trận phải từ ${MAX_PER_GAME_MIN} đến ${MAX_PER_GAME_MAX}`);
-    }
-    const extraBody = parseExtra(extra);
-    if (extraBody.error !== null) return setLocalError(extraBody.error);
+    const max = parseBounded(maxPerGame, MAX_PER_GAME_MIN, MAX_PER_GAME_MAX);
+    if (max === null) return setLocalError(`Tối đa mỗi trận phải từ ${MAX_PER_GAME_MIN} đến ${MAX_PER_GAME_MAX}`);
+    const pointsValue = parseBounded(points, POINTS_MIN, POINTS_MAX);
+    if (pointsValue === null) return setLocalError(POINTS_ERROR);
+    const extraParsed = parseMetric(extra, EXTRA_TEXTS);
+    if (extraParsed.error !== null) return setLocalError(extraParsed.error);
+    const penaltyParsed = parseMetric(penalty, PENALTY_TEXTS);
+    if (penaltyParsed.error !== null) return setLocalError(penaltyParsed.error);
     setLocalError(null);
 
     const patch: RolePatch = {};
@@ -519,9 +668,11 @@ function RoleEditor({ role }: { role: RoleDto }) {
     if (nameVi.trim() !== role.nameVi) patch.nameVi = nameVi.trim();
     if (metricLabel.trim() !== role.metricLabel) patch.metricLabel = metricLabel.trim();
     if (max !== role.maxPerGame) patch.maxPerGame = max;
+    if (pointsValue !== role.points) patch.points = pointsValue;
     if (icon.trim() !== role.icon) patch.icon = icon.trim();
-    // Server cần đủ cả ba trường phụ (hoặc null cả ba): đổi một là gửi cả ba.
-    if (extraChanged(extraBody.body, role)) Object.assign(patch, extraBody.body);
+    // Server cần đủ cả ba trường phụ/phạt (hoặc null cả ba): đổi một là gửi cả ba.
+    if (tripleChanged(extraParsed.triple, extraOf(role))) Object.assign(patch, toExtraBody(extraParsed.triple));
+    if (tripleChanged(penaltyParsed.triple, penaltyOf(role))) Object.assign(patch, toPenaltyBody(penaltyParsed.triple));
     if (active !== role.active) patch.active = active;
     save.mutate(patch);
   };
@@ -642,13 +793,15 @@ function RoleEditor({ role }: { role: RoleDto }) {
             onChange={(e) => (setMaxPerGame(e.target.value), touch())}
           />
         </div>
+        <PointsField id={`${id}-points`} value={points} onChange={(next) => (setPoints(next), touch())} />
         <div className="flex flex-col gap-1">
           <label htmlFor={`${id}-icon`} className={LABEL_CLASS}>
             Biểu tượng
           </label>
           <input id={`${id}-icon`} type="text" className="field" value={icon} onChange={(e) => (setIcon(e.target.value), touch())} />
         </div>
-        <ExtraMetricFields id={`${id}-extra`} values={extra} onChange={(next) => (setExtra(next), touch())} />
+        <MetricFields id={`${id}-extra`} texts={EXTRA_TEXTS} values={extra} onChange={(next) => (setExtra(next), touch())} />
+        <MetricFields id={`${id}-penalty`} texts={PENALTY_TEXTS} values={penalty} onChange={(next) => (setPenalty(next), touch())} />
         <Checkbox id={`${id}-active`} checked={active} onChange={(e) => (setActive(e.target.checked), touch())} className="sm:col-span-2">
           <span className={LABEL_CLASS}>Đang bật</span>
         </Checkbox>

@@ -24,6 +24,21 @@ const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn'
 
 const roles: RoleDto[] = [
   role({ id: 1, key: 'goose', faction: 'goose', nameVi: 'Ngỗng', nameEn: 'Goose', icon: '🪿', metricLabel: 'Số lần vote trúng Vịt' }),
+  // Role có điểm mỗi lần ≠ 1 và chỉ số phạt: bắn trúng ×5 (tối đa 1), bắn sai −3 (tối đa 1).
+  role({
+    id: 20,
+    key: 'vigilante',
+    faction: 'goose',
+    nameVi: 'Dân phòng',
+    nameEn: 'Vigilante',
+    icon: '🔫',
+    metricLabel: 'Số phát bắn trúng kẻ xấu',
+    maxPerGame: 1,
+    points: 5,
+    penaltyMetricLabel: 'Số phát bắn sai',
+    penaltyMaxPerGame: 1,
+    penaltyPoints: 3,
+  }),
   role({ id: 61, key: 'swordsman', faction: 'duck', nameVi: 'Kiếm sĩ', nameEn: 'Swordsman', icon: '⚔️', metricLabel: 'Số mạng chém', maxPerGame: 15, hasImage: true }),
   // Role có chỉ số phụ: giết ×1 (tối đa 15), ám sát trong họp ×3 (tối đa 2).
   role({
@@ -91,7 +106,7 @@ test('roles are grouped by faction with special-mode roles apart; inactive ones 
   await swordsmanCard();
 
   const groups = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
-  expect(groups).toEqual(['Thêm role', 'Phe Ngỗng (1)', 'Phe Vịt (2)', 'Phe thứ 3 (1)', 'Chế độ đặc biệt (1)']);
+  expect(groups).toEqual(['Thêm role', 'Phe Ngỗng (2)', 'Phe Vịt (2)', 'Phe thứ 3 (1)', 'Chế độ đặc biệt (1)']);
   const inquisitor = screen.getByRole('region', { name: 'Thanh tra (Inquisitor)' });
   expect(inquisitor).toHaveTextContent('Đã tắt');
   expect(within(inquisitor).getByRole('checkbox', { name: 'Đang bật' })).not.toBeChecked();
@@ -223,6 +238,7 @@ test('"Thêm role" posts the new role, shows server errors such as a taken key, 
       nameEn: 'Hunter Duck',
       metricLabel: 'Số mạng săn',
       maxPerGame: 7,
+      points: 1,
       icon: '🦆',
       description: 'Săn ngỗng ban đêm',
       modeKey: 'corruption',
@@ -324,6 +340,7 @@ test('"Thêm role": ticking "Có chỉ số phụ" reveals the three fields, whi
       nameEn: 'Sniper',
       metricLabel: 'Số mạng bắn',
       maxPerGame: 7,
+      points: 1,
       icon: '🎯',
       extraMetricLabel: 'Số lần bắn trúng từ xa',
       extraMaxPerGame: 3,
@@ -391,9 +408,10 @@ test('a role without an extra metric starts unticked; ticking it requires the th
 
   const toggle = within(card).getByRole('checkbox', { name: EXTRA_TOGGLE });
   expect(toggle).not.toBeChecked();
-  // Nhóm (fieldset có legend là ô tick) luôn có, nhưng ba ô chỉ hiện khi tick.
+  // Nhóm (fieldset có legend là ô tick) luôn có, nhưng ba ô chỉ hiện khi tick. Hai ô số còn lại
+  // là "Tối đa mỗi trận" và "Điểm mỗi lần" của chỉ số chính.
   expect(within(card).queryByRole('textbox', { name: 'Tên chỉ số phụ' })).toBeNull();
-  expect(within(card).getAllByRole('spinbutton')).toHaveLength(1);
+  expect(within(card).getAllByRole('spinbutton')).toHaveLength(2);
 
   fireEvent.click(toggle);
   const extra = extraFields(card);
@@ -407,4 +425,195 @@ test('a role without an extra metric starts unticked; ticking it requires the th
   fireEvent.click(within(card).getByRole('button', { name: 'Lưu' }));
   await waitFor(() => expect(patched).toEqual({ extraMetricLabel: 'Số lần chém trúng Vịt', extraMaxPerGame: 5, extraPoints: 2 }));
   expect(await within(card).findByText('Đã lưu')).toBeInTheDocument();
+});
+
+// ---------------------------------------------------------------------------
+// Điểm mỗi lần, điểm trừ và thanh tìm role (spec điểm role §5)
+// ---------------------------------------------------------------------------
+
+const PENALTY_TOGGLE = 'Có điểm trừ';
+const PENALTY_IN_USE = 'Role đã có lần khai dùng chỉ số phạt, không tắt được';
+const NO_MATCH = 'Không có role nào khớp';
+
+/** Ba ô của chỉ số phạt, trong nhóm mang tên ô tick "Có điểm trừ". */
+const penaltyFields = (scope: HTMLElement) => {
+  const group = within(scope).getByRole('group', { name: PENALTY_TOGGLE });
+  return {
+    label: within(group).getByRole('textbox', { name: 'Tên chỉ số phạt' }),
+    max: within(group).getByRole('spinbutton', { name: 'Tối đa mỗi trận' }),
+    points: within(group).getByRole('spinbutton', { name: 'Điểm trừ mỗi lần' }),
+  };
+};
+
+/** Tên các thẻ role đang hiện (tiêu đề h3 của mỗi `region`). */
+const cardTitles = () => screen.queryAllByRole('region').map((r) => within(r).getByRole('heading', { level: 3 }).textContent);
+
+test('the search box filters roles by Vietnamese or English name, ignoring accents and case', async () => {
+  stubFetch({ 'GET /api/roles?all=1': () => json(200, roles), 'GET /api/modes': () => json(200, modes) });
+  renderTab();
+  await swordsmanCard();
+  const search = screen.getByRole('searchbox', { name: 'Tìm role' });
+  expect(search).toHaveAttribute('placeholder', 'Tìm role…');
+
+  // "dan phong" (không dấu, không hoa) → chỉ Dân phòng; nhóm không có role nào khớp thì ẩn.
+  fireEvent.change(search, { target: { value: 'dan phong' } });
+  expect(cardTitles()).toEqual(['Dân phòng (Vigilante)']);
+  expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Thêm role', 'Phe Ngỗng (1)']);
+  expect(screen.queryByText(NO_MATCH)).not.toBeInTheDocument();
+
+  // Tên tiếng Anh, viết hoa, cũng khớp; role đã tắt của chế độ đặc biệt vẫn tìm được.
+  fireEvent.change(search, { target: { value: 'SWORD' } });
+  expect(cardTitles()).toEqual(['Kiếm sĩ (Swordsman)']);
+  fireEvent.change(search, { target: { value: 'thanh tra' } });
+  expect(cardTitles()).toEqual(['Thanh tra (Inquisitor)']);
+  expect(screen.getByRole('heading', { level: 2, name: 'Chế độ đặc biệt (1)' })).toBeInTheDocument();
+
+  // Không khớp → một câu báo, không role nào, không nhóm nào.
+  fireEvent.change(search, { target: { value: 'không có role này' } });
+  expect(cardTitles()).toEqual([]);
+  expect(screen.getByText(NO_MATCH)).toBeInTheDocument();
+  expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Thêm role']);
+
+  // Xoá chữ (chỉ còn khoảng trắng) → đủ lại như cũ.
+  fireEvent.change(search, { target: { value: '   ' } });
+  expect(cardTitles()).toHaveLength(roles.length);
+  expect(screen.queryByText(NO_MATCH)).not.toBeInTheDocument();
+});
+
+test('"Thêm role" sends "Điểm mỗi lần" and, when "Có điểm trừ" is ticked, the three penalty fields checked locally', async () => {
+  const posted: unknown[] = [];
+  stubFetch({
+    'GET /api/roles?all=1': () => json(200, roles),
+    'GET /api/modes': () => json(200, modes),
+    'POST /api/admin/roles': (init) => {
+      posted.push(JSON.parse(String(init?.body)));
+      return json(201, role({ id: 99, key: 'sheriff', faction: 'goose', nameVi: 'Cảnh sát trưởng', nameEn: 'Sheriff', icon: '🤠', metricLabel: 'Số phát bắn trúng Vịt' }));
+    },
+  });
+  renderTab();
+  const form = await screen.findByRole('form', { name: 'Thêm role' });
+  const field = (name: string) => within(form).getByRole('textbox', { name });
+
+  // Ô "Điểm mỗi lần" của chỉ số chính mặc định 1, giới hạn 1..100; chưa tick thì không có ô phạt nào.
+  const points = within(form).getByRole('spinbutton', { name: 'Điểm mỗi lần' });
+  expect(points).toHaveValue(1);
+  expect(points).toHaveAttribute('min', '1');
+  expect(points).toHaveAttribute('max', '100');
+  const toggle = within(form).getByRole('checkbox', { name: PENALTY_TOGGLE });
+  expect(toggle).not.toBeChecked();
+  expect(within(form).queryByRole('textbox', { name: 'Tên chỉ số phạt' })).not.toBeInTheDocument();
+
+  fireEvent.change(field('Key'), { target: { value: 'sheriff' } });
+  fireEvent.change(field('Tên tiếng Việt'), { target: { value: 'Cảnh sát trưởng' } });
+  fireEvent.change(field('Tên tiếng Anh'), { target: { value: 'Sheriff' } });
+  fireEvent.change(field('Tên chỉ số'), { target: { value: 'Số phát bắn trúng Vịt' } });
+  fireEvent.change(within(form).getByRole('spinbutton', { name: 'Tối đa mỗi trận' }), { target: { value: '3' } });
+  fireEvent.change(field('Biểu tượng'), { target: { value: '🤠' } });
+
+  // Điểm mỗi lần ngoài khoảng: báo tại chỗ, không gửi.
+  fireEvent.change(points, { target: { value: '101' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm role' }));
+  expect(await within(form).findByRole('alert')).toHaveTextContent('Điểm mỗi lần phải từ 1 đến 100');
+  expect(posted).toHaveLength(0);
+  fireEvent.change(points, { target: { value: '3' } });
+
+  fireEvent.click(toggle);
+  expect(toggle).toBeChecked();
+  const penalty = penaltyFields(form);
+  expect(penalty.label).toHaveValue('');
+  expect(penalty.label).toHaveAttribute('maxlength', '60');
+  expect(penalty.max).toHaveAttribute('min', '1');
+  expect(penalty.max).toHaveAttribute('max', '100');
+  expect(penalty.points).toHaveAttribute('min', '1');
+  expect(penalty.points).toHaveAttribute('max', '100');
+
+  // Thiếu tên chỉ số phạt / tối đa / điểm trừ ngoài khoảng: báo tại chỗ, không gửi.
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm role' }));
+  expect(await within(form).findByRole('alert')).toHaveTextContent('Tên chỉ số phạt không được để trống');
+  expect(posted).toHaveLength(0);
+
+  fireEvent.change(penalty.label, { target: { value: ' Số phát bắn sai ' } });
+  fireEvent.change(penalty.max, { target: { value: '0' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm role' }));
+  expect(await within(form).findByRole('alert')).toHaveTextContent('Tối đa mỗi trận của chỉ số phạt phải từ 1 đến 100');
+  expect(posted).toHaveLength(0);
+
+  fireEvent.change(penalty.max, { target: { value: '3' } });
+  fireEvent.change(penalty.points, { target: { value: '101' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm role' }));
+  expect(await within(form).findByRole('alert')).toHaveTextContent('Điểm trừ mỗi lần phải từ 1 đến 100');
+  expect(posted).toHaveLength(0);
+
+  fireEvent.change(penalty.points, { target: { value: '1' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Thêm role' }));
+  expect(await screen.findByText('Đã thêm “Cảnh sát trưởng”')).toBeInTheDocument();
+  expect(posted).toEqual([
+    {
+      key: 'sheriff',
+      faction: 'goose',
+      nameVi: 'Cảnh sát trưởng',
+      nameEn: 'Sheriff',
+      metricLabel: 'Số phát bắn trúng Vịt',
+      maxPerGame: 3,
+      points: 3,
+      icon: '🤠',
+      penaltyMetricLabel: 'Số phát bắn sai',
+      penaltyMaxPerGame: 3,
+      penaltyPoints: 1,
+    },
+  ]);
+  // Form trống trở lại: điểm về 1, ô tick tắt.
+  await waitFor(() => expect(within(screen.getByRole('form', { name: 'Thêm role' })).getByRole('checkbox', { name: PENALTY_TOGGLE })).not.toBeChecked());
+  expect(within(screen.getByRole('form', { name: 'Thêm role' })).getByRole('spinbutton', { name: 'Điểm mỗi lần' })).toHaveValue(1);
+});
+
+test('the editor shows the points and penalty metric of Dân phòng, patches them, and shows the refusal when disabling', async () => {
+  const patches: unknown[] = [];
+  const vigilante = roles.find((r) => r.key === 'vigilante') as RoleDto;
+  let reply = (): Response => json(200, { ...vigilante, points: 6, penaltyPoints: 4 });
+  stubFetch({
+    'GET /api/roles?all=1': () => json(200, roles),
+    'GET /api/modes': () => json(200, modes),
+    'PATCH /api/admin/roles/20': (init) => {
+      patches.push(JSON.parse(String(init?.body)));
+      return reply();
+    },
+  });
+  renderTab();
+  const card = await screen.findByRole('region', { name: 'Dân phòng (Vigilante)' });
+
+  const points = within(card).getByRole('spinbutton', { name: 'Điểm mỗi lần' });
+  expect(points).toHaveValue(5);
+  const toggle = within(card).getByRole('checkbox', { name: PENALTY_TOGGLE });
+  expect(toggle).toBeChecked();
+  const penalty = penaltyFields(card);
+  expect(penalty.label).toHaveValue('Số phát bắn sai');
+  expect(penalty.max).toHaveValue(1);
+  expect(penalty.points).toHaveValue(3);
+  // Chỉ số chính vẫn có ô "Tối đa mỗi trận" riêng, ngoài nhóm chỉ số phạt.
+  const maxes = within(card).getAllByRole('spinbutton', { name: 'Tối đa mỗi trận' });
+  expect(maxes).toHaveLength(2);
+  expect(maxes.find((input) => input !== penalty.max)).toHaveValue(1);
+
+  // Điểm mỗi lần ngoài khoảng: báo tại chỗ, không gửi.
+  fireEvent.change(points, { target: { value: '0' } });
+  fireEvent.click(within(card).getByRole('button', { name: 'Lưu' }));
+  expect(await within(card).findByRole('alert')).toHaveTextContent('Điểm mỗi lần phải từ 1 đến 100');
+  expect(patches).toHaveLength(0);
+
+  // Đổi điểm mỗi lần và điểm trừ: gửi `points` và đủ cả ba trường phạt, không gửi trường chính khác.
+  fireEvent.change(points, { target: { value: '6' } });
+  fireEvent.change(penalty.points, { target: { value: '4' } });
+  fireEvent.click(within(card).getByRole('button', { name: 'Lưu' }));
+  await waitFor(() => expect(patches).toEqual([{ points: 6, penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 1, penaltyPoints: 4 }]));
+  expect(await within(card).findByText('Đã lưu')).toBeInTheDocument();
+
+  // Bỏ tick: gửi `null` cả ba; server từ chối vì đã có lần khai dùng chỉ số phạt → hiện nguyên văn.
+  reply = () => json(400, { error: { code: 'VALIDATION', message: PENALTY_IN_USE } });
+  fireEvent.click(toggle);
+  expect(toggle).not.toBeChecked();
+  expect(within(card).queryByRole('textbox', { name: 'Tên chỉ số phạt' })).not.toBeInTheDocument();
+  fireEvent.click(within(card).getByRole('button', { name: 'Lưu' }));
+  expect(await within(card).findByRole('alert')).toHaveTextContent(PENALTY_IN_USE);
+  expect(patches[1]).toEqual({ penaltyMetricLabel: null, penaltyMaxPerGame: null, penaltyPoints: null });
 });

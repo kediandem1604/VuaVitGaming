@@ -379,6 +379,62 @@ test('admin manages the secondary metric over HTTP', async () => {
   expect((await patch(`/api/admin/roles/${assassin!.id}`, adminSid, { extraPoints: 5 })).json<RoleDto>()).toMatchObject({ ...extra, extraPoints: 5 });
 });
 
+test('admin manages points and the penalty metric over HTTP', async () => {
+  const { sid } = await memberWithSid();
+  const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
+  const penalty = { penaltyMetricLabel: 'Số phát bắn sai', penaltyMaxPerGame: 1, penaltyPoints: 3 };
+  const noPenalty = { penaltyMetricLabel: null, penaltyMaxPerGame: null, penaltyPoints: null };
+  const incomplete = errorBody('VALIDATION', 'Chỉ số phạt cần đủ cả ba: tên, tối đa mỗi trận và điểm trừ mỗi lần');
+
+  // Thành viên thấy điểm và chỉ số phạt của Dân phòng trong danh mục.
+  const vigilante = (await get('/api/roles', sid)).json<RoleDto[]>().find((r) => r.key === 'vigilante');
+  expect(vigilante).toMatchObject({ points: 5, ...penalty });
+
+  // Tạo với điểm và đủ ba trường phạt / thiếu một trường / ngoài khoảng.
+  const created = await post('/api/admin/roles', adminSid, { ...newRole, points: 7, ...penalty });
+  expect(created.statusCode).toBe(201);
+  expect(created.json<RoleDto>()).toMatchObject({ key: 'test_role', points: 7, ...penalty });
+  const partial = await post('/api/admin/roles', adminSid, { ...newRole, key: 'other_role', penaltyMetricLabel: 'Số lần thử sai', penaltyPoints: 2 });
+  expect(partial.statusCode).toBe(400);
+  expect(partial.json()).toEqual(incomplete);
+  expect((await post('/api/admin/roles', adminSid, { ...newRole, key: 'other_role', points: 101 })).json()).toEqual(errorBody('VALIDATION', 'Điểm mỗi lần phải từ 1 đến 100'));
+  expect((await post('/api/admin/roles', adminSid, { ...newRole, key: 'other_role', ...penalty, penaltyMaxPerGame: 0 })).json()).toEqual(
+    errorBody('VALIDATION', 'Tối đa mỗi trận của chỉ số phạt phải từ 1 đến 100'),
+  );
+  // Sai kiểu → 400 chung.
+  for (const body of [{ ...newRole, key: 'other_role', points: '5' }, { ...newRole, key: 'other_role', ...penalty, penaltyPoints: '3' }, { ...newRole, key: 'other_role', ...penalty, penaltyMetricLabel: 7 }]) {
+    const bad = await post('/api/admin/roles', adminSid, body);
+    expect(bad.statusCode, JSON.stringify(body)).toBe(400);
+    expect(bad.json(), JSON.stringify(body)).toEqual(INVALID);
+  }
+
+  // Sửa điểm, bật/sửa/tắt chỉ số phạt trên role có sẵn.
+  const swordsman = await roleByKey(testDb, 'swordsman');
+  const edited = await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { points: 2, penaltyMetricLabel: 'Số lần chém nhầm', penaltyMaxPerGame: 5, penaltyPoints: 2 });
+  expect(edited.statusCode).toBe(200);
+  expect(edited.json<RoleDto>()).toMatchObject({ key: 'swordsman', points: 2, penaltyMetricLabel: 'Số lần chém nhầm', penaltyMaxPerGame: 5, penaltyPoints: 2 });
+  expect((await get('/api/roles', sid)).json<RoleDto[]>().find((r) => r.key === 'swordsman')).toEqual(edited.json());
+  expect((await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { penaltyPoints: 4 })).json<RoleDto>()).toMatchObject({ penaltyMetricLabel: 'Số lần chém nhầm', penaltyPoints: 4 });
+  const halfOff = await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { penaltyPoints: null });
+  expect(halfOff.statusCode).toBe(400);
+  expect(halfOff.json()).toEqual(incomplete);
+  expect((await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { points: 0 })).json()).toEqual(errorBody('VALIDATION', 'Điểm mỗi lần phải từ 1 đến 100'));
+  expect((await patch(`/api/admin/roles/${swordsman.id}`, adminSid, { ...noPenalty })).json<RoleDto>()).toMatchObject({ points: 2, ...noPenalty });
+  for (const body of [{ points: '3' }, { penaltyPoints: '3' }, { penaltyMetricLabel: 7 }, { penaltyMaxPerGame: 2.5 }]) {
+    const bad = await patch(`/api/admin/roles/${swordsman.id}`, adminSid, body);
+    expect(bad.statusCode, JSON.stringify(body)).toBe(400);
+    expect(bad.json(), JSON.stringify(body)).toEqual(INVALID);
+  }
+
+  // Dân phòng đã có lần khai dùng chỉ số phạt → không tắt được; đổi điểm trừ vẫn được.
+  const { member } = await memberWithSid();
+  await testDb.statReport.create({ data: { memberId: member.id, roleId: vigilante!.id, playedOn: dateOnlyToDb('2026-10-10'), value: 0, penaltyValue: 1 } });
+  const blocked = await patch(`/api/admin/roles/${vigilante!.id}`, adminSid, { ...noPenalty });
+  expect(blocked.statusCode).toBe(400);
+  expect(blocked.json()).toEqual(errorBody('VALIDATION', 'Role đã có lần khai dùng chỉ số phạt, không tắt được'));
+  expect((await patch(`/api/admin/roles/${vigilante!.id}`, adminSid, { penaltyPoints: 5 })).json<RoleDto>()).toMatchObject({ ...penalty, penaltyPoints: 5 });
+});
+
 test('admin creates a role', async () => {
   const { sid } = await memberWithSid();
   const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
