@@ -38,10 +38,9 @@ import { QueryState } from '../components/QueryState';
 import { cx } from '../lib/cx';
 import { FACTION_LABEL } from '../lib/factions';
 import { addDaysIso, formatDateLabel, formatTime, vnTodayIso } from '../lib/format';
+import { MY_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
 import { HighlightButton, HighlightField, checkHighlight, uploadHighlight, type HighlightUpload } from './ReportHighlight';
-import { PENDING_REPORTS_KEY } from './admin/ReviewsTab';
 
-export const MY_REPORTS_KEY = ['reports', 'mine'] as const;
 const ROLES_KEY = ['roles'] as const;
 const HIGHLIGHT_CONFIG_KEY = ['reports', 'highlight-config'] as const;
 

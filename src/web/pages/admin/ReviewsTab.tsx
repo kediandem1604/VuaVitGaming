@@ -30,14 +30,12 @@ import { HighlightLink } from '../../components/HighlightLink';
 import { QueryState } from '../../components/QueryState';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatTime } from '../../lib/format';
-import { TITLES_QUERY_KEY } from '../ProfilePage';
-import { MY_REPORTS_KEY } from '../ReportPage';
+import { APPROVED_REPORTS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY, TITLES_QUERY_KEY } from '../../lib/queryKeys';
 
-export const PENDING_REPORTS_KEY = ['admin', 'reports', 'pending'] as const;
-export const APPROVED_REPORTS_KEY = ['admin', 'reports', 'approved'] as const;
 /**
  * Cache đọc điểm đã duyệt — làm mới sau khi huỷ duyệt (khớp tiền tố: mọi role, mùa, thành viên),
- * kèm danh hiệu ở Hồ sơ và danh sách lần khai của chính mình (mod tự huỷ lần khai của mình).
+ * kèm danh hiệu ở Hồ sơ và danh sách lần khai của chính mình (admin huỷ lần khai của chính mình —
+ * mod không tự huỷ được, `SELF_REVIEW`).
  */
 const SCORE_QUERY_KEYS = [['leaderboard'], ['leaderboard-factions'], ['hall'], ['member'], TITLES_QUERY_KEY, MY_REPORTS_KEY] as const;
 /** Mã 409 cho biết danh sách "Đã duyệt gần đây" đang xem đã cũ (người khác vừa huỷ, hoặc mùa vừa chốt). */

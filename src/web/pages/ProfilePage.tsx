@@ -20,9 +20,7 @@ import { QueryState } from '../components/QueryState';
 import { RoleCard } from '../components/RoleCard';
 import { ME_QUERY_KEY, useCurrentMember } from '../hooks/useMe';
 import { memberPath } from '../lib/links';
-
-/** Cache các role đang hoá thân mùa này — tab Duyệt điểm làm mới sau khi huỷ duyệt. */
-export const TITLES_QUERY_KEY = ['me', 'titles'] as const;
+import { TITLES_QUERY_KEY } from '../lib/queryKeys';
 
 interface ProfilePatch {
   email?: string | null;

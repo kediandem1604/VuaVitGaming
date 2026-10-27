@@ -4,8 +4,8 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { HighlightConfigDto, ReportDto, RoleDto, SessionDto } from '../../src/shared/api-types';
 import { vnTodayIso } from '../../src/web/lib/format';
+import { PENDING_REPORTS_KEY } from '../../src/web/lib/queryKeys';
 import { ReportPage } from '../../src/web/pages/ReportPage';
-import { PENDING_REPORTS_KEY } from '../../src/web/pages/admin/ReviewsTab';
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn' | 'icon' | 'metricLabel' | 'maxPerGame'> & Partial<RoleDto>): RoleDto => ({
   description: '',
