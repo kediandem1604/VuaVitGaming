@@ -14,3 +14,5 @@ export const MY_REPORTS_KEY = ['reports', 'mine'] as const;
 export const TITLES_QUERY_KEY = ['me', 'titles'] as const;
 /** Tiền tố khoá trang thành viên công khai (`['member', id]`) — tab Thành viên làm mới sau khi admin sửa số buổi. */
 export const MEMBER_QUERY_KEY = ['member'] as const;
+/** Tiền tố khoá bảng "Tổng điểm theo phe" (`['leaderboard-totals', mùa]`) — tab Duyệt điểm làm mới sau khi huỷ duyệt. */
+export const LEADERBOARD_TOTALS_KEY = ['leaderboard-totals'] as const;

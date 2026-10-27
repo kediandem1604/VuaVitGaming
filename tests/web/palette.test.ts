@@ -102,6 +102,8 @@ test('a disabled field looks disabled yet keeps readable text and a visible boun
   expect(disabled).toMatch(/\bcursor-not-allowed\b/);
   // Viền `night-600` của ô (không bị đè khi tắt) vẫn ≥ 3:1 trên nền tắt và trên panel.
   expect(disabled).not.toMatch(/\bborder-/);
+  // `<select>` gốc: luật mũi tên (`:is(select…)`) đặc hiệu hơn `&:disabled` nên con trỏ phải nhắc lại cho ô tắt.
+  expect(/&:is\(select:not\(\[multiple\]\):not\(\[size\]\):disabled\)\s*\{([^}]*)\}/.exec(field)?.[1]).toMatch(/\bcursor-not-allowed\b/);
   expect(contrastRatio(PALETTE['night-300'], PALETTE['night-800'])).toBeGreaterThanOrEqual(4.5);
   expect(contrastRatio(PALETTE['night-600'], PALETTE['night-800'])).toBeGreaterThanOrEqual(3);
 });

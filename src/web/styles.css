@@ -214,6 +214,12 @@
   &:disabled {
     @apply cursor-not-allowed bg-night-800 text-night-300;
   }
+
+  /* `<select>` bị tắt: luật mũi tên ở trên đặc hiệu hơn `&:disabled` nên phải nhắc lại con trỏ. */
+  &:is(select:not([multiple]):not([size]):disabled) {
+    @apply cursor-not-allowed;
+  }
+
 }
 
 /*

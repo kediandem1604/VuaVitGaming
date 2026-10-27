@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
-import { APPROVED_REPORTS_KEY, MY_REPORTS_KEY, TITLES_QUERY_KEY } from '../../src/web/lib/queryKeys';
+import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, TITLES_QUERY_KEY } from '../../src/web/lib/queryKeys';
 import { ReviewsTab } from '../../src/web/pages/admin/ReviewsTab';
 
 /** Phần role của một lần khai; `extra` = ba trường chỉ số phụ (mặc định không có). */
@@ -290,6 +290,8 @@ test('revoking posts the trimmed reason, removes the row and refreshes leaderboa
   // Danh hiệu ở Hồ sơ và danh sách lần khai của người khai cũng không còn tính lần này.
   expect(invalidate).toHaveBeenCalledWith({ queryKey: TITLES_QUERY_KEY });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_REPORTS_KEY });
+  // Bảng "Tổng điểm theo phe" cũng tính lần khai này.
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: LEADERBOARD_TOTALS_KEY });
 });
 
 test('NOT_APPROVED shows the server message and refetches the list', async () => {

@@ -14,21 +14,20 @@ import { Link } from 'react-router';
 import type { FactionTotalRowDto, FactionTotalsDto, TotalsScope } from '../../shared/api-types';
 import { apiGet } from '../api';
 import { cx } from '../lib/cx';
-import { FACTION_BAND, FACTIONS } from '../lib/factions';
+import { FACTION_BAND, FACTION_SHORT_LABEL, FACTIONS } from '../lib/factions';
 import { memberPath } from '../lib/links';
+import { LEADERBOARD_TOTALS_KEY } from '../lib/queryKeys';
 import { Avatar } from './Avatar';
 import { QueryState } from './QueryState';
 import { RankMedal } from './RankMedal';
 
 const SCOPES: readonly TotalsScope[] = ['all', ...FACTIONS];
 
-/** Nhãn tab — ngắn hơn `FACTION_LABEL` vì bốn tab phải nằm gọn trên một dòng ở 320px. */
-const TAB_LABEL: Record<TotalsScope, string> = {
-  all: 'Cả 3 phe',
-  goose: 'Ngỗng',
-  duck: 'Vịt',
-  neutral: 'Phe thứ 3',
-};
+/** Nhãn tab — tên phe ngắn dùng chung, vì bốn tab phải nằm gọn trên một dòng ở 320px. */
+const TAB_LABEL: Record<TotalsScope, string> = { all: 'Cả 3 phe', ...FACTION_SHORT_LABEL };
+
+/** Một panel duy nhất đổi nội dung theo tab; mọi tab `aria-controls` trỏ về nó. */
+const PANEL_ID = 'totals-panel';
 
 /** Tab đang chọn: "Cả 3 phe" vàng như tab Quản trị, tab phe mang màu phe (bản `-strong`, chữ trắng). */
 const SELECTED_TAB: Record<TotalsScope, string> = {
@@ -42,7 +41,7 @@ export function FactionTotals({ seasonId }: { seasonId: string }) {
   const [scope, setScope] = useState<TotalsScope>('all');
   const tabRefs = useRef<Partial<Record<TotalsScope, HTMLButtonElement | null>>>({});
   const totals = useQuery({
-    queryKey: ['leaderboard-totals', seasonId],
+    queryKey: [...LEADERBOARD_TOTALS_KEY, seasonId],
     queryFn: () => apiGet<FactionTotalsDto>(`/api/leaderboard/totals?season=${seasonId}`),
   });
 
@@ -84,7 +83,7 @@ export function FactionTotals({ seasonId }: { seasonId: string }) {
               role="tab"
               id={`totals-tab-${s}`}
               aria-selected={selected}
-              aria-controls={`totals-panel-${s}`}
+              aria-controls={PANEL_ID}
               tabIndex={selected ? undefined : -1}
               className={cx('chip shrink-0 px-4 py-1.5 text-base hover:brightness-110', selected && SELECTED_TAB[s])}
               onClick={() => setScope(s)}
@@ -95,7 +94,7 @@ export function FactionTotals({ seasonId }: { seasonId: string }) {
           );
         })}
       </div>
-      <div role="tabpanel" id={`totals-panel-${scope}`} aria-labelledby={`totals-tab-${scope}`}>
+      <div role="tabpanel" id={PANEL_ID} aria-labelledby={`totals-tab-${scope}`}>
         <QueryState query={totals}>{(data) => <TotalsBoard scope={scope} board={data.boards[scope]} />}</QueryState>
       </div>
     </section>

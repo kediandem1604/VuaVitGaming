@@ -222,3 +222,89 @@ test('the trigger reflects a value changed from outside', () => {
   rerender(<Select label="Mùa" value="2026-10" onChange={onChange} groups={SEASONS} />);
   expect(combobox('Mùa')).toHaveTextContent('Tháng 10/2026');
 });
+
+test('Space on a closed trigger opens the list (keydown, not the native click) — with and without a search box', () => {
+  renderSeasons();
+  const season = combobox('Mùa');
+  season.focus();
+  const spaceDown = fireEvent.keyDown(season, { key: ' ' });
+  // Đã xử lý ở keydown → chặn mặc định; `keyup` sau đó không bị chặn nên không ảnh hưởng gì khác.
+  expect(spaceDown).toBe(false);
+  expect(listbox()).toBeInTheDocument();
+  expect(season).toHaveAttribute('aria-expanded', 'true');
+  expect(fireEvent.keyUp(season, { key: ' ' })).toBe(true);
+  expect(listbox()).toBeInTheDocument();
+  cleanup();
+
+  renderRoles();
+  const role = combobox('Role');
+  role.focus();
+  expect(fireEvent.keyDown(role, { key: ' ' })).toBe(false);
+  expect(listbox()).toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'Tìm role' })).toHaveFocus();
+});
+
+test('Space picks the active option, and the click the browser fires on key release does not reopen the list', () => {
+  const onChange = renderSeasons();
+  const trigger = combobox('Mùa');
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.keyDown(trigger, { key: ' ' });
+  expect(onChange).toHaveBeenCalledWith('2026-08');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  // Thả Space: trình duyệt sẽ phát `click` trên nút — phải bị chặn để khung không mở lại.
+  expect(fireEvent.keyUp(trigger, { key: ' ' })).toBe(false);
+  expect(screen.queryByRole('listbox')).toBeNull();
+  // Lần thả Space tiếp theo (không chọn gì) không còn bị chặn.
+  expect(fireEvent.keyUp(trigger, { key: ' ' })).toBe(true);
+});
+
+test('pointer down on non-focusable popup chrome is default-prevented so focus (and the list) stay; the search input is not', () => {
+  renderRoles();
+  fireEvent.click(combobox('Role'));
+  const search = screen.getByRole('textbox', { name: 'Tìm role' });
+  const heading = screen.getByText('Vịt');
+  expect(fireEvent.pointerDown(heading)).toBe(false);
+  expect(fireEvent.pointerDown(search.parentElement as HTMLElement)).toBe(false);
+  expect(fireEvent.pointerDown(search)).toBe(true);
+  fireEvent.change(search, { target: { value: 'xyz' } });
+  expect(fireEvent.pointerDown(screen.getByText('Không có role nào khớp'))).toBe(false);
+  expect(listbox()).toBeInTheDocument();
+});
+
+test('the selected option keeps its gold tint even while it is the active (hovered) row', () => {
+  renderRoles();
+  fireEvent.click(combobox('Role'));
+  const selected = screen.getByRole('option', { name: '🪿 Ngỗng' });
+  // Mở ra thì dòng đang chọn cũng là dòng đang trỏ.
+  expect(selected.className).toContain('bg-gold/25');
+  expect(selected.className).not.toContain('bg-night-700');
+  fireEvent.pointerMove(screen.getByRole('option', { name: '⚔️ Kiếm sĩ' }));
+  expect(selected.className).toContain('bg-gold/15');
+  expect(screen.getByRole('option', { name: '⚔️ Kiếm sĩ' }).className).toContain('bg-night-700');
+});
+
+test('the popup gets an inline max-height sized to the space available in its direction (capped at 60vh)', () => {
+  renderSeasons();
+  const trigger = combobox('Mùa');
+  const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 200, width: 200, height: 40, x: 0, y: top, toJSON: () => ({}) });
+  Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true });
+
+  // Nút sát đáy màn hình 800px → bật lên trên; phía trên rộng → chạm trần 60vh = 480px.
+  const spy = vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(rect(700, 740));
+  fireEvent.click(trigger);
+  let popup = listbox().parentElement as HTMLElement;
+  expect(popup.className).toContain('bottom-full');
+  expect(popup.style.maxHeight).toBe('480px');
+  fireEvent.keyDown(trigger, { key: 'Escape' });
+
+  // Nút ở giữa, phía dưới còn 300px → mở xuống, cao tối đa dưới 300px (trừ lề).
+  spy.mockReturnValue(rect(460, 500));
+  fireEvent.click(trigger);
+  popup = listbox().parentElement as HTMLElement;
+  expect(popup.className).toContain('top-full');
+  const px = parseFloat(popup.style.maxHeight);
+  expect(px).toBeGreaterThan(240);
+  expect(px).toBeLessThan(300);
+});

@@ -579,6 +579,8 @@ test('Tổng điểm theo phe: four tabs switch boards, arrow keys move between 
   const tabs = within(screen.getByRole('tablist', { name: 'Phe' })).getAllByRole('tab');
   expect(tabs.map((tab) => tab.textContent)).toEqual(['Cả 3 phe', 'Ngỗng', 'Vịt', 'Phe thứ 3']);
   expect(totalsTab('Cả 3 phe')).toHaveAttribute('aria-selected', 'true');
+  // Mọi tab trỏ `aria-controls` tới đúng một panel đang có trong DOM.
+  for (const tab of tabs) expect(document.getElementById(tab.getAttribute('aria-controls') ?? '')).toBe(screen.getByRole('tabpanel'));
 
   // Mặc định "Cả 3 phe": ba dòng theo hạng với huy chương, tên là link tới trang thành viên, "{điểm} điểm".
   const all = await within(screen.getByRole('tabpanel')).findAllByRole('listitem');

@@ -3,11 +3,13 @@
  * menu gốc `<select>` không bo góc/đổi màu được nên Bảng xếp hạng và ô chọn mùa dùng cái này.
  *
  * Nút kích hoạt kiểu `field` (bo góc, mũi tên ▾) mang `role="combobox"`; bấm/Enter/Space/↓
- * mở khung `popover` bo góc có bóng đổ, cao tối đa 60vh và cuộn trong. Dòng đang chọn nền
- * vàng nhạt + dấu ✓, dòng đang trỏ (rê chuột/phím) sáng lên. Phím: ↑/↓/Home/End di chuyển,
- * Enter (và Space khi không gõ tìm) chọn, Esc đóng và trả focus về nút; bấm ra ngoài hay Tab
- * ra khỏi ô thì đóng. Mở gần mép dưới màn hình thì khung bật lên trên. Trên điện thoại khung
- * rộng bằng nút và dòng cao ≥ 44px.
+ * mở khung `popover` bo góc có bóng đổ, cuộn trong. Dòng đang chọn nền vàng nhạt + dấu ✓,
+ * dòng đang trỏ (rê chuột/phím) sáng lên. Phím: ↑/↓/Home/End di chuyển, Enter (và Space khi
+ * không gõ tìm) chọn, Esc đóng và trả focus về nút; bấm ra ngoài hay Tab ra khỏi ô thì đóng.
+ * Space/↑/↓ mở ngay ở keydown (Enter để nút tự phát `click`). Khung cao tối đa 60vh nhưng không
+ * quá chỗ trống còn lại theo hướng mở (trừ lề) để không tràn màn hình hay chui dưới thanh đầu
+ * trang dính; gần mép dưới mà phía trên rộng hơn thì bật lên trên. Trên điện thoại khung rộng
+ * bằng nút và dòng cao ≥ 44px.
  *
  * Nhóm (`SelectGroup.label`) có tiêu đề dính khi cuộn. Không có ô tìm thì gõ chữ nhảy tới dòng
  * đầu tiên bắt đầu bằng chuỗi gõ (không phân biệt dấu/hoa thường, bộ đệm xoá sau 600ms). Có ô
@@ -19,7 +21,7 @@
  * đọc màn hình đọc dòng đang trỏ mà focus DOM không rời đi; danh sách lấy tên từ nhãn.
  */
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { normalizeText } from '../../shared/text';
 import { cx } from '../lib/cx';
 
@@ -65,6 +67,20 @@ interface SelectProps<T extends string | number> {
 const TYPEAHEAD_RESET_MS = 600;
 /** Khung mở xuống dưới cần ít nhất chừng này; thiếu mà phía trên rộng hơn thì bật lên trên. */
 const MIN_SPACE_BELOW_PX = 240;
+/** Khoảng chừa giữa khung và mép màn hình (thanh đầu trang dính cao ~3.5rem khi mở lên trên). */
+const POPUP_MARGIN_PX = 16;
+const STICKY_HEADER_PX = 56;
+/** Khung không cao quá chừng này phần màn hình. */
+const MAX_HEIGHT_VH = 0.6;
+
+/**
+ * Chiều cao tối đa của khung theo hướng mở: min(60vh, chỗ trống còn lại − lề). Mở lên trên còn
+ * trừ thanh đầu trang dính để khung không chui dưới nó.
+ */
+export function popupMaxHeight(trigger: DOMRect, viewportHeight: number, flipUp: boolean): number {
+  const room = flipUp ? trigger.top - STICKY_HEADER_PX : viewportHeight - trigger.bottom;
+  return Math.max(0, Math.floor(Math.min(viewportHeight * MAX_HEIGHT_VH, room - POPUP_MARGIN_PX)));
+}
 
 /** Dòng phẳng kèm vị trí nhóm, để đi phím theo thứ tự hiển thị. */
 interface FlatOption<T extends string | number> {
@@ -87,12 +103,15 @@ export function Select<T extends string | number>({ label, value, onChange, grou
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const typeahead = useRef({ buffer: '', timer: 0 });
+  // Space vừa chọn một dòng ở keydown: thả phím trình duyệt sẽ phát `click` trên nút → chặn ở keyup.
+  const spacePicked = useRef(false);
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const [flipUp, setFlipUp] = useState(false);
   const [alignRight, setAlignRight] = useState(false);
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
 
   const allOptions = groups.flatMap((group) => group.options);
   const selected = allOptions.find((option) => option.value === value);
@@ -122,7 +141,10 @@ export function Select<T extends string | number>({ label, value, onChange, grou
     if (trigger) {
       const rect = trigger.getBoundingClientRect();
       const below = window.innerHeight - rect.bottom;
-      setFlipUp(below < MIN_SPACE_BELOW_PX && rect.top > below);
+      const up = below < MIN_SPACE_BELOW_PX && rect.top > below;
+      setFlipUp(up);
+      // Không có bố cục thật (jsdom trả rect 0×0) thì không giới hạn chiều cao.
+      setMaxHeight(rect.width === 0 && rect.height === 0 ? undefined : popupMaxHeight(rect, window.innerHeight, up));
       // Nút ở nửa phải màn hình (vd ô chọn mùa ở góc phải đầu trang): khung bám mép phải để không tràn ra ngoài.
       setAlignRight(rect.left + rect.width / 2 > window.innerWidth / 2);
     }
@@ -181,11 +203,12 @@ export function Select<T extends string | number>({ label, value, onChange, grou
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     const { key } = event;
     if (!open) {
-      if (key === 'ArrowDown' || key === 'ArrowUp') {
+      // Space mở ngay ở keydown: không dựa vào `click` nút phát khi thả phím (keyup bị chặn khi
+      // Space vừa chọn xong thì `click` cũng mất). Enter để nút tự phát `click` → mở ở `onClick`.
+      if (key === 'ArrowDown' || key === 'ArrowUp' || key === ' ') {
         event.preventDefault();
         openList();
       }
-      // Enter/Space: nút tự phát `click` → mở ở `onClick`.
       return;
     }
 
@@ -224,7 +247,10 @@ export function Select<T extends string | number>({ label, value, onChange, grou
         event.preventDefault();
         // Đang gõ-để-nhảy thì dấu cách là một phần chuỗi ("thang 8"); không thì chọn.
         if (typeahead.current.buffer !== '') typeToJump(' ');
-        else if (activeOption) choose(activeOption);
+        else if (activeOption) {
+          spacePicked.current = true;
+          choose(activeOption);
+        }
         return;
       default:
         if (!search && key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -234,9 +260,18 @@ export function Select<T extends string | number>({ label, value, onChange, grou
     }
   };
 
-  // Chặn `click` sinh ra khi thả Space trên nút (nút đã xử lý ở keydown), khỏi mở lại.
+  // Chỉ khi Space vừa chọn một dòng: chặn `click` nút phát lúc thả phím, khỏi mở lại khung.
   const onTriggerKeyUp = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === ' ' && !search) event.preventDefault();
+    if (event.key === ' ' && spacePicked.current) {
+      spacePicked.current = false;
+      event.preventDefault();
+    }
+  };
+
+  // Bấm vào phần không nhận focus trong khung (viền ô tìm, tiêu đề nhóm, chữ "không khớp"):
+  // chặn mặc định để focus không rời nút/ô tìm → `onBlur` không đóng khung. Ô tìm thì để nguyên.
+  const onPopupPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.target !== searchRef.current) event.preventDefault();
   };
 
   // Tab/shift+Tab rời khỏi cả ô (nút lẫn khung) thì đóng.
@@ -277,10 +312,13 @@ export function Select<T extends string | number>({ label, value, onChange, grou
             className={cx(
               // Điện thoại: rộng bằng nút; từ `sm` rộng theo nội dung nhưng không hẹp hơn nút và không quá
               // 20rem, bám mép trái hoặc phải của nút tuỳ nút ở nửa nào màn hình.
-              'popover absolute left-0 right-0 z-20 flex max-h-[60vh] flex-col overflow-hidden sm:w-max sm:max-w-80 sm:min-w-full',
+              'popover absolute left-0 right-0 z-20 flex flex-col overflow-hidden sm:w-max sm:max-w-80 sm:min-w-full',
               alignRight ? 'sm:left-auto' : 'sm:right-auto',
               flipUp ? 'bottom-full mb-1' : 'top-full mt-1',
             )}
+            // Tính lúc mở (xem `popupMaxHeight`).
+            style={maxHeight !== undefined ? { maxHeight } : undefined}
+            onPointerDown={onPopupPointerDown}
           >
             {search && (
               <div className="shrink-0 border-b-2 border-night-700 p-2">
@@ -354,9 +392,9 @@ interface OptionRowProps {
 }
 
 /**
- * Một dòng: cao ≥ 44px trên điện thoại (từ `sm` 36px), dòng đang chọn nền vàng nhạt + ✓,
- * dòng đang trỏ nền `night-700`. `onPointerDown` chặn mặc định để focus không rời ô tìm/nút
- * trước khi `click` tới.
+ * Một dòng: cao ≥ 44px trên điện thoại (từ `sm` 36px), dòng đang chọn nền vàng nhạt + ✓ (đậm
+ * hơn khi cũng đang trỏ, để màu chọn luôn thấy), dòng đang trỏ khác nền `night-700`.
+ * `onPointerDown` chặn mặc định để focus không rời ô tìm/nút trước khi `click` tới.
  */
 function OptionRow({ id, label, selected, active, onHover, onPick }: OptionRowProps) {
   return (
@@ -366,8 +404,7 @@ function OptionRow({ id, label, selected, active, onHover, onPick }: OptionRowPr
       aria-selected={selected}
       className={cx(
         'flex min-h-11 cursor-pointer items-center gap-2 px-3 py-1.5 text-base text-white sm:min-h-9',
-        active && 'bg-night-700',
-        selected && 'bg-gold/15 font-bold',
+        selected ? cx('font-bold', active ? 'bg-gold/25' : 'bg-gold/15') : active && 'bg-night-700',
       )}
       onPointerMove={onHover}
       onPointerDown={(event) => event.preventDefault()}

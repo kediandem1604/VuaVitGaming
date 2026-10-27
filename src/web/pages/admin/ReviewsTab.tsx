@@ -30,14 +30,14 @@ import { HighlightLink } from '../../components/HighlightLink';
 import { QueryState } from '../../components/QueryState';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatTime } from '../../lib/format';
-import { APPROVED_REPORTS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY, TITLES_QUERY_KEY } from '../../lib/queryKeys';
+import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY, TITLES_QUERY_KEY } from '../../lib/queryKeys';
 
 /**
  * Cache đọc điểm đã duyệt — làm mới sau khi huỷ duyệt (khớp tiền tố: mọi role, mùa, thành viên),
  * kèm danh hiệu ở Hồ sơ và danh sách lần khai của chính mình (admin huỷ lần khai của chính mình —
  * mod không tự huỷ được, `SELF_REVIEW`).
  */
-const SCORE_QUERY_KEYS = [['leaderboard'], ['leaderboard-factions'], ['hall'], ['member'], TITLES_QUERY_KEY, MY_REPORTS_KEY] as const;
+const SCORE_QUERY_KEYS = [['leaderboard'], ['leaderboard-factions'], LEADERBOARD_TOTALS_KEY, ['hall'], ['member'], TITLES_QUERY_KEY, MY_REPORTS_KEY] as const;
 /** Mã 409 cho biết danh sách "Đã duyệt gần đây" đang xem đã cũ (người khác vừa huỷ, hoặc mùa vừa chốt). */
 const STALE_APPROVED_CODES = new Set(['NOT_APPROVED', 'SEASON_CLOSED']);
 const REASON_MAX = 200;
@@ -201,7 +201,7 @@ function ApprovedReport({ report }: { report: ReviewedReportDto }) {
     mutationFn: (trimmed: string) => apiSend<undefined>('POST', `/api/admin/reports/${report.id}/revoke`, { reason: trimmed }),
     onSuccess: () => {
       queryClient.setQueryData<ReviewedReportDto[]>(APPROVED_REPORTS_KEY, (current) => current?.filter((item) => item.id !== report.id));
-      // Điểm mùa, Top 3 mỗi phe, Đại sảnh, trang thành viên, danh hiệu và lần khai của mình không còn tính lần khai này.
+      // Điểm mùa, Top 3 mỗi phe, Tổng điểm theo phe, Đại sảnh, trang thành viên, danh hiệu và lần khai của mình không còn tính lần khai này.
       for (const queryKey of SCORE_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey });
     },
     onError: (error) => {
