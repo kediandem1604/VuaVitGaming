@@ -64,6 +64,7 @@ async function withWebBuild(fn: (dir: string) => Promise<void>): Promise<void> {
     writeFileSync(path.join(dir, 'index.html'), '<!doctype html><title>GGD Hub</title>');
     mkdirSync(path.join(dir, 'assets'));
     writeFileSync(path.join(dir, 'assets', 'app.js'), 'console.log(1)');
+    writeFileSync(path.join(dir, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
     await fn(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -848,4 +849,32 @@ test('serves the web build and falls back to index.html for app routes', async (
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('cache headers: hashed assets live a year, index.html never, other static files an hour', async () => {
+  await withWebBuild(async (dir) => {
+    const web = await buildApp(ctx, { oauth, webDistDir: dir });
+    try {
+      const cacheControl = async (url: string): Promise<string | undefined> => {
+        const res = await web.inject({ url });
+        expect(res.statusCode, url).toBe(200);
+        const value = res.headers['cache-control'];
+        return Array.isArray(value) ? value.join(', ') : value;
+      };
+
+      // Tên file trong /assets có hash: đổi nội dung là đổi tên → cache mãi, kể cả font .woff2.
+      expect(await cacheControl('/assets/app.js')).toBe('public, max-age=31536000, immutable');
+
+      // index.html trỏ tới chunk hiện tại: trình duyệt phải hỏi lại mỗi lần (ETag vẫn cho 304),
+      // dù vào bằng `/`, `/index.html` hay một route của SPA.
+      for (const url of ['/', '/index.html', '/leaderboard', '/sessions/12?tab=votes', '/h%C3%B4m-nay']) {
+        expect(await cacheControl(url), url).toBe('no-cache');
+      }
+
+      // File tĩnh khác không có hash trong tên → cache ngắn.
+      expect(await cacheControl('/favicon.svg')).toBe('public, max-age=3600');
+    } finally {
+      await web.close();
+    }
+  });
 });

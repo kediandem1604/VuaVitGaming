@@ -13,12 +13,38 @@ const here = (relative: string): string => fileURLToPath(new URL(relative, impor
 
 const API_ORIGIN = 'http://localhost:3000';
 
+/**
+ * Gói npm vào chunk `vendor`: react, react-dom (kèm `scheduler` — phụ thuộc riêng của nó, để chunk
+ * vendor không phải import chéo sang chunk app), react-router, và mọi gói trong scope `@tanstack`.
+ */
+const VENDOR_PACKAGES = new Set(['react', 'react-dom', 'scheduler', 'react-router', '@tanstack']);
+
+/**
+ * `id` là đường dẫn module đã giải, Vite dùng `/` kể cả trên Windows (`.../node_modules/react-dom/client.js`).
+ * Chỉ xét gói trong `node_modules`, so khớp đúng đoạn ngay sau `node_modules/` (tên gói hoặc scope),
+ * nên `lucide-react` hay `react-hook-form` không bị gộp nhầm.
+ */
+function isVendorModule(id: string): boolean {
+  const marker = id.lastIndexOf('/node_modules/');
+  if (marker === -1) return false;
+  const pkgOrScope = id.slice(marker + '/node_modules/'.length).split('/')[0] ?? '';
+  return VENDOR_PACKAGES.has(pkgOrScope);
+}
+
 export default defineConfig({
   root: here('.'),
   plugins: [react(), tailwindcss()],
   build: {
     outDir: here('../../dist/web'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Thư viện nền (React, Router, TanStack Query) đổi hiếm hơn mã app nhiều: tách thành chunk
+        // `vendor` riêng để qua các lần deploy tên file (hash) giữ nguyên, trình duyệt dùng lại
+        // bản đã cache (`/assets/*` được cache một năm, xem `src/server/web/app.ts`).
+        manualChunks: (id) => (isVendorModule(id) ? 'vendor' : undefined),
+      },
+    },
   },
   server: {
     port: 5173,

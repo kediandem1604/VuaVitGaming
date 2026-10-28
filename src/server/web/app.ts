@@ -7,6 +7,7 @@
  * `buildApp` trả app CHƯA `ready()` và chưa lắng nghe, để test còn gắn thêm route.
  */
 
+import { relative as relativePath } from 'node:path';
 import fastifyCookie from '@fastify/cookie';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -86,11 +87,42 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(statsRoutes);
   await app.register(badgeRoutes);
 
-  if (deps.webDistDir !== undefined) {
-    await app.register(fastifyStatic, { root: deps.webDistDir });
+  const webDistDir = deps.webDistDir;
+  if (webDistDir !== undefined) {
+    await app.register(fastifyStatic, {
+      root: webDistDir,
+      // Tự đặt Cache-Control theo loại file (`cacheControlFor`), không dùng `public, max-age=0`
+      // mặc định của `send` — nó được ghi trước `setHeaders` nên sẽ đè mọi header đặt từ handler.
+      cacheControl: false,
+      setHeaders: (reply, filePath) =>
+        reply.header('cache-control', cacheControlFor(relativePath(webDistDir, filePath))),
+    });
   }
 
   return app;
+}
+
+// ---------------------------------------------------------------------------
+// Cache file tĩnh
+// ---------------------------------------------------------------------------
+
+const ONE_YEAR_SECONDS = 31536000;
+const ONE_HOUR_SECONDS = 3600;
+
+/**
+ * Cache-Control cho một file trong thư mục build, theo đường dẫn TƯƠNG ĐỐI so với thư mục đó
+ * (`assets/index-abc123.js`, `index.html`, `favicon.svg`; dấu `\` trên Windows cũng được):
+ * - `assets/` (Vite đặt hash nội dung vào tên: JS, CSS, font .woff2) → cache một năm, `immutable`.
+ *   Đổi nội dung là đổi tên nên không bao giờ phục vụ bản cũ.
+ * - `index.html` → `no-cache`: luôn hỏi lại máy chủ (ETag vẫn cho 304) để sau mỗi lần deploy
+ *   trang trỏ tới chunk mới. Áp cho cả `/`, `/index.html` và SPA fallback (`sendNotFound`).
+ * - Còn lại (favicon…) không có hash → một giờ.
+ */
+export function cacheControlFor(relativePath: string): string {
+  const segments = relativePath.split(/[\\/]/);
+  if (segments.at(-1) === 'index.html') return 'no-cache';
+  if (segments[0] === 'assets') return `public, max-age=${ONE_YEAR_SECONDS}, immutable`;
+  return `public, max-age=${ONE_HOUR_SECONDS}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,8 +215,8 @@ function statusCodeOf(err: unknown): number | null {
 function sendNotFound(request: FastifyRequest, reply: FastifyReply, serveWeb: boolean): FastifyReply {
   const path = routePath(request);
   if (serveWeb && (request.method === 'GET' || request.method === 'HEAD') && !isApiOrAuth(path)) {
-    // Đường dẫn của SPA (React Router): trả index.html, trình duyệt không được cache.
-    return reply.header('cache-control', 'no-cache').sendFile('index.html');
+    // Đường dẫn của SPA (React Router): trả index.html; `cacheControlFor` đặt `no-cache` khi gửi file.
+    return reply.sendFile('index.html');
   }
   return reply.code(404).send(errorBody('NOT_FOUND', 'Không tìm thấy'));
 }
