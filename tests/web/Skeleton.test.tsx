@@ -113,3 +113,16 @@ test('two busy blocks in one container: it stays busy until both have fresh data
   rerender(view(false, false));
   expect(screen.getByTestId('panel')).not.toHaveAttribute('aria-busy');
 });
+
+test('QueryState never marks <main> busy itself (Layout owns main[aria-busy]): it falls back to the parent', () => {
+  const { container } = render(
+    <main data-testid="main">
+      <div data-testid="cha">
+        <QueryState query={{ ...pending, data: ['cũ'], isPlaceholderData: true }}>{(r) => <p>{r.join()}</p>}</QueryState>
+      </div>
+    </main>,
+  );
+  expect(container.querySelector('.query-block')).toHaveAttribute('data-busy', 'true');
+  expect(screen.getByTestId('main')).not.toHaveAttribute('aria-busy');
+  expect(screen.getByTestId('cha')).toHaveAttribute('aria-busy', 'true');
+});

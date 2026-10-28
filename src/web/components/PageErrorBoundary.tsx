@@ -5,7 +5,7 @@
  * được; đặt `key` theo trang ở chỗ dùng để sang trang khác là thử lại từ đầu.
  */
 
-import { Component, type ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 interface Props {
   children: ReactNode;
@@ -22,12 +22,18 @@ export class PageErrorBoundary extends Component<Props, State> {
     return { failed: true };
   }
 
+  /** Ghi lỗi ra console (chunk hỏng hay lỗi render thật) để còn lần ra nguyên nhân khi người dùng báo. */
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error('[PageErrorBoundary] Trang lỗi khi render:', error, info.componentStack);
+  }
+
   render() {
     if (!this.state.failed) return this.props.children;
+    // Lời nhắn hợp cả hai trường hợp: chunk không tải được (vừa cập nhật/mạng) lẫn lỗi trong trang.
     return (
       <div className="panel flex flex-col items-start gap-3 border-duck-soft">
         <p role="alert" className="font-bold text-duck-soft">
-          Không tải được trang này. Có thể app vừa được cập nhật hoặc mạng đang chập chờn.
+          Không tải được trang này. Có thể app vừa được cập nhật hoặc mạng chập chờn. Nếu lỗi lặp lại, hãy báo admin.
         </p>
         <button type="button" className="btn-secondary" onClick={() => location.reload()}>
           Tải lại trang

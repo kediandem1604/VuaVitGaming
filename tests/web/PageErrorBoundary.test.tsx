@@ -44,3 +44,20 @@ test('children render normally when nothing throws', () => {
   );
   expect(screen.getByText('ổn')).toBeInTheDocument();
 });
+
+test('a caught error is logged and the panel tells the user what to do if it repeats', () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const Boom = () => {
+    throw new Error('nổ');
+  };
+  render(
+    <PageErrorBoundary>
+      <Boom />
+    </PageErrorBoundary>,
+  );
+  const alert = screen.getByRole('alert');
+  expect(alert).toHaveTextContent('Không tải được trang này. Có thể app vừa được cập nhật hoặc mạng chập chờn.');
+  expect(alert).toHaveTextContent('Nếu lỗi lặp lại, hãy báo admin.');
+  // `componentDidCatch` ghi lỗi kèm thông điệp riêng (ngoài log mặc định của React).
+  expect(error.mock.calls.some((args) => args.some((a) => a instanceof Error && a.message === 'nổ') && String(args[0]).includes('PageErrorBoundary'))).toBe(true);
+});

@@ -2,8 +2,12 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { errorMessage } from '../api';
 import { LoadingFallback, SkeletonRows } from './Skeleton';
 
-/** Khung thật nhận `aria-busy` thay cho `.query-block` (`display: contents`, có thể bị bỏ khỏi cây truy cập). */
-const BUSY_HOST = 'section, [role="tabpanel"], [role="region"], article, main';
+/**
+ * Khung thật nhận `aria-busy` thay cho `.query-block` (`display: contents`, có thể bị bỏ khỏi cây truy cập).
+ * Không có `main`: `aria-busy` của `main` do `Layout` giữ (prop React, lúc chuyển trang) — đặt tay ở đây
+ * sẽ giành nhau với nó. Không gặp khung nào thì dùng cha trực tiếp.
+ */
+const BUSY_HOST = 'section, [role="tabpanel"], [role="region"], article';
 
 /** Số khối đang bận trong mỗi khung: hai `QueryState` chung một khung thì khung còn bận tới khi cả hai xong. */
 const busyCounts = new WeakMap<Element, number>();
@@ -55,7 +59,10 @@ export function QueryState<T>({ query, children, skeleton }: QueryStateProps<T>)
   useLayoutEffect(() => {
     const parent = block.current?.parentElement;
     if (!busy || !parent) return;
-    return markBusy(parent.closest(BUSY_HOST) ?? parent);
+    const host = parent.closest(BUSY_HOST) ?? parent;
+    // Cha trực tiếp là chính `main` (của `Layout`): không đụng, khối vẫn mờ nhờ `data-busy`.
+    if (host.tagName === 'MAIN') return;
+    return markBusy(host);
   }, [busy]);
 
   if (query.data !== undefined) {

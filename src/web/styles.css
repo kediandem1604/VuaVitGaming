@@ -323,7 +323,7 @@
   height: 3px;
   overflow: hidden;
   pointer-events: none;
-  animation: fade-in var(--dur-base) var(--ease-out) both;
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
 }
 
 .nav-progress::before {
@@ -459,6 +459,9 @@
  * ---------------------------------------------------------------------------------------------
  * Bộ chuyển động thống nhất (spec §5) — chỉ animate `transform`/`opacity`, mọi thời gian/nhịp
  * lấy từ biến ở `:root`. Khối giảm chuyển động ở cuối file rút mọi hiệu ứng về mờ `--dur-fast`.
+ * Hoạt ảnh "vào" dùng fill `backwards` (không `both`/`forwards`): giữ khung đầu trong lúc chờ
+ * `animation-delay`, chạy xong trả về kiểu gốc. Giữ `transform` sau khi xong sẽ biến phần tử thành
+ * containing block cho con `position: fixed` (nền Modal bị gói trong trang, nằm dưới header dính).
  * ---------------------------------------------------------------------------------------------
  */
 
@@ -557,7 +560,7 @@
 }
 
 .page-enter {
-  animation: rise-in var(--dur-base) var(--ease-out) both;
+  animation: rise-in var(--dur-base) var(--ease-out) backwards;
 }
 
 /*
@@ -580,11 +583,11 @@
 }
 
 .layer-pop[data-state='open'] {
-  animation: pop-in var(--dur-base) var(--ease-out) both;
+  animation: pop-in var(--dur-base) var(--ease-out) backwards;
 }
 
 .backdrop-fade[data-state='open'] {
-  animation: fade-in var(--dur-base) var(--ease-out) both;
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
 }
 
 .layer-pop[data-state='closed'],
@@ -604,7 +607,7 @@
 }
 
 .tab-enter {
-  animation: fade-in var(--dur-base) var(--ease-out) both;
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
 }
 
 /*
@@ -613,7 +616,7 @@
  * dữ liệu của `QueryState`.
  */
 .stagger-in > :nth-child(-n + 8) {
-  animation: row-in var(--dur-base) var(--ease-out) both;
+  animation: row-in var(--dur-base) var(--ease-out) backwards;
 }
 
 .stagger-in > :nth-child(2) {
@@ -646,7 +649,7 @@
 
 /* §5.7 Thông báo/lỗi trong form: trượt xuống 4px + mờ vào khi xuất hiện. */
 [role='alert'] {
-  animation: drop-in var(--dur-base) var(--ease-out) both;
+  animation: drop-in var(--dur-base) var(--ease-out) backwards;
 }
 
 /*

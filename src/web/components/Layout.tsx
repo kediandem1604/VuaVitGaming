@@ -31,7 +31,7 @@ import { NavLink, useLocation } from 'react-router';
 import type { MeDto } from '../../shared/api-types';
 import { apiSend } from '../api';
 import { cx } from '../lib/cx';
-import { endNavigation, usePendingNavigation } from '../lib/navPending';
+import { arriveNavigation, usePendingNavigation } from '../lib/navPending';
 import { Avatar } from './Avatar';
 import { DuckMark } from './DuckMark';
 import { PrefetchNavLink } from './PrefetchLink';
@@ -72,9 +72,10 @@ export function Layout({ me, children }: LayoutProps) {
   const items = NAV_ITEMS.filter((item) => !item.staffOnly || me.accessLevel !== 'member');
   const [logoutState, setLogoutState] = useState<'idle' | 'busy' | 'error'>('idle');
   const pending = usePendingNavigation();
-  // Vị trí hiển thị (App đưa vào `<Routes location>`): đổi `pathname` = trang mới đã lên, hết chờ.
+  // Vị trí hiển thị (App đưa vào `<Routes location>`): trang đích đã lên thì hết chờ. Trang khác lên
+  // (bấm A rồi B nhanh, A về trước) thì giữ chờ cho B; lượt bị đè do `useEndStaleNavigation` lo.
   const { pathname } = useLocation();
-  useLayoutEffect(() => endNavigation(), [pathname]);
+  useLayoutEffect(() => arriveNavigation(pathname), [pathname]);
   /** Đang chờ thì tô mục đích thay cho mục hiện tại; không chờ thì theo `NavLink`. */
   const highlighted = (item: NavItem, isActive: boolean) => (pending === null ? isActive : matchesPending(item, pending));
 

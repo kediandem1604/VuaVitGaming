@@ -21,6 +21,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation, type Location } from 'react-router';
 import { prefersReducedMotion } from './motion';
+import { endNavigationUnless } from './navPending';
 import { routeChunkReady } from './prefetch';
 
 /** Chờ chunk trang đích tối đa chừng này rồi chuyển cảnh dù chưa về. */
@@ -94,6 +95,9 @@ export function useDisplayedLocation(): Location {
     if (sameLocation(displayed, location)) return;
     const pathChanged = displayed.pathname !== location.pathname;
     if (!pathChanged || !supportsViewTransitions() || prefersReducedMotion()) {
+      // Cùng `pathname` (về lại trang đang hiện, lượt đang chờ chunk bị đè): `Layout` không thấy đổi
+      // trang nên tự hết chờ ở đây nếu đích khác.
+      if (!pathChanged) endNavigationUnless(location.pathname);
       setDisplayed(location);
       return;
     }

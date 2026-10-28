@@ -16,6 +16,7 @@ import { PageErrorBoundary } from './components/PageErrorBoundary';
 import { LoadingFallback, PageSkeleton } from './components/Skeleton';
 import { useCurrentMember, useMe } from './hooks/useMe';
 import { prefersReducedMotion } from './lib/motion';
+import { useEndStaleNavigation } from './lib/navPending';
 import { supportsViewTransitions, useDisplayedLocation } from './lib/viewTransition';
 import { LoginPage } from './pages/LoginPage';
 import { ForbiddenPage, NotFoundPage } from './pages/PlaceholderPage';
@@ -37,6 +38,8 @@ export function App() {
  * `useLocation`/`useSearchParams`/`useParams` bên trong đều đọc vị trí hiển thị này.
  */
 function RoutedApp() {
+  // Ở đây (ngoài `<Routes>`) thấy vị trí router: lượt chuyển trang bị đè thì tắt "đang chuyển trang".
+  useEndStaleNavigation();
   const displayed = useDisplayedLocation();
   return (
     <Routes location={displayed}>

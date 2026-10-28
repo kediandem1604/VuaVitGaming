@@ -354,3 +354,26 @@ test('styles.css: the tab indicator transitions only once ready', () => {
   expect(CSS).toMatch(/\.tab-indicator\[data-ready\]\s*\{[^}]*transition:\s*transform var\(--dur-base\)/);
   expect(CSS).not.toMatch(/\.tab-indicator\s*\{[^}]*transition:\s*transform/);
 });
+
+// Hoạt ảnh "vào" giữ `transform` sau khi xong (fill `both`/`forwards`) biến khung thành containing
+// block cho con `position: fixed` (nền Modal bị gói trong trang, nằm dưới header dính). Chỉ được
+// `backwards`: trước khi chạy giữ khung đầu (không nháy), chạy xong trả về kiểu gốc.
+test('styles.css: entering animations never keep their end state (no both/forwards fill)', () => {
+  const entering = /\b(fade-in|pop-in|rise-in|row-in|drop-in)\b/;
+  const rules = [...CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const offenders = rules
+    .filter(([, selector]) => !selector!.includes('::view-transition'))
+    .flatMap(([, selector, body]) =>
+      [...body!.matchAll(/animation(?:-fill-mode)?\s*:([^;]+);/g)]
+        .map((m) => m[1]!)
+        .filter((value) => entering.test(value) || /^\s*(both|forwards)\s*$/.test(value))
+        .filter((value) => /\b(both|forwards)\b/.test(value))
+        .map((value) => `${selector!.trim()} → ${value.trim()}`),
+    );
+  expect(offenders).toEqual([]);
+  // Các lớp chính vẫn chạy hoạt ảnh vào, với `backwards`.
+  for (const selector of ['.page-enter', '.stagger-in > :nth-child(-n + 8)', "[role='alert']"]) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expect(CSS).toMatch(new RegExp(`${escaped}\\s*\\{[^}]*animation:[^;]*\\bbackwards\\b`));
+  }
+});
