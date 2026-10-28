@@ -683,3 +683,32 @@ test('Tổng điểm theo phe: an empty board shows its own empty copy, and the 
   expect(totalsItems()[0]).toHaveTextContent('Tôi');
   expect(totalsItems()[0]).toHaveAttribute('aria-current', 'true');
 });
+
+test('switching season keeps the old board dimmed with aria-busy until the new one arrives; the season label changes at once', async () => {
+  // Bảng mùa 2026-09 của Ngỗng treo cho tới khi test cho phép.
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const base = stubFetch();
+  const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url === '/api/leaderboard?roleId=1&season=2026-09&limit=50') await gate;
+    return base(input);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  renderAt('/bang-xep-hang');
+  await findBoard();
+  expect(boardItems()).toHaveLength(2);
+
+  pickSeason('Tháng 9/2026 (đã chốt)');
+  // Tiêu đề mùa đổi ngay, bảng cũ vẫn đứng (không nháy trống) nhưng khối đó báo bận.
+  expect(screen.getByText('Tháng 9/2026')).toBeInTheDocument();
+  const busyBlock = screen.getByRole('list', { name: 'Mọi hạng' }).closest('.query-block');
+  expect(busyBlock).toHaveAttribute('aria-busy', 'true');
+  expect(screen.queryByText('Chưa có ai khai điểm mùa này')).not.toBeInTheDocument();
+
+  release();
+  // Mùa 9 của Ngỗng không có ai: bảng cũ nhường chỗ cho câu trống, hết bận.
+  expect(await screen.findByText('Chưa có ai khai điểm mùa này')).toBeInTheDocument();
+  expect(screen.queryByRole('list', { name: 'Mọi hạng' })).not.toBeInTheDocument();
+  expect(document.querySelector('.query-block[aria-busy="true"]')).toBeNull();
+});

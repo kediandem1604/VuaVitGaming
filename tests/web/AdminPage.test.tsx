@@ -81,7 +81,8 @@ test('an admin additionally sees Hạng mục MVP, Role and Cài đặt', async 
   expect(selectedTab()).toBe('Buổi chơi');
 
   fireEvent.click(screen.getByRole('tab', { name: 'Cài đặt' }));
-  expect(selectedTab()).toBe('Cài đặt');
+  // Tab là chunk riêng và điều hướng chạy trong transition: React giữ tab cũ tới khi chunk về.
+  expect(await screen.findByRole('tab', { name: 'Cài đặt', selected: true })).toBeInTheDocument();
   expect(screen.getByTestId('location')).toHaveTextContent('/quan-tri?tab=cai-dat');
   expect(await screen.findByLabelText('Thời gian mở vote (giờ)')).toHaveValue(12);
 });

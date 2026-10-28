@@ -12,13 +12,14 @@
  * được; giá trị lạ thì về mặc định (mùa mới nhất, Phe Ngỗng) và không gửi lên API.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import type { HallDto, HallRoleDto } from '../../shared/api-types';
 import { apiGet } from '../api';
 import type { CharacterVariant } from '../components/Character';
 import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
+import { SkeletonCards } from '../components/Skeleton';
 import { RoleCard } from '../components/RoleCard';
 import { SeasonSelect } from '../components/SeasonSelect';
 import { resolveSeason, SEASON_PARAM, useSeasons } from '../hooks/useSeasons';
@@ -49,6 +50,8 @@ export function HallPage() {
     queryKey: ['hall', seasonId],
     queryFn: () => apiGet<HallDto>(`/api/hall?season=${seasonId}`),
     enabled: seasonId !== null,
+    // Đổi mùa: giữ lưới thẻ cũ mờ tới khi mùa mới về (spec §4.4).
+    placeholderData: keepPreviousData,
   });
 
   const setParam = (key: string, value: string) => {
@@ -82,7 +85,7 @@ export function HallPage() {
               <p>Chưa có mùa nào</p>
             </EmptyState>
           ) : (
-            <QueryState query={hall}>
+            <QueryState query={hall} skeleton={<SkeletonCards count={8} className="lg:grid-cols-4 xl:grid-cols-5" />}>
               {(data) => (
                 <HallGrid data={data} requestedTab={params.get(TAB_PARAM)} onTab={(tab) => setParam(TAB_PARAM, tab)} />
               )}

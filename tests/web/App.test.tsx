@@ -85,7 +85,8 @@ test('/huy-hieu opens the Huy hiệu page inside the layout', async () => {
     </QueryClientProvider>,
   );
 
-  expect(screen.getByRole('heading', { level: 1, name: 'Huy hiệu' })).toBeInTheDocument();
+  // Trang Huy hiệu là chunk riêng: tiêu đề tới sau khi chunk về.
+  expect(await screen.findByRole('heading', { level: 1, name: 'Huy hiệu' })).toBeInTheDocument();
   expect(await screen.findByText('Chưa có danh hiệu nào — đầu tháng sau sẽ có SMVP đầu tiên!')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Đăng xuất' })).toBeInTheDocument();
 });
@@ -120,4 +121,49 @@ test('without any me data a failed load shows the full-screen error', async () =
   expect(await screen.findByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
   expect(screen.getByRole('alert')).toHaveTextContent('Có lỗi xảy ra, thử lại sau');
   expect(screen.queryByRole('button', { name: 'Đăng xuất' })).not.toBeInTheDocument();
+});
+
+test('a lazy route shows the layout at once and the page when its chunk arrives', async () => {
+  window.history.replaceState({}, '', '/bang-xep-hang');
+  const queryClient = makeClient();
+  queryClient.setQueryData(['me'], me);
+  stubRoutes({ '/api/seasons': [], '/api/roles': [] });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>,
+  );
+  // Khung trang có ngay; trang Bảng xếp hạng là chunk riêng nên tới sau.
+  expect(screen.getByRole('button', { name: 'Đăng xuất' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { level: 1, name: 'Bảng xếp hạng' })).not.toBeInTheDocument();
+  expect(await screen.findByRole('heading', { level: 1, name: 'Bảng xếp hạng' })).toBeInTheDocument();
+  expect(document.querySelector('[data-skeleton="page"]')).toBeNull();
+});
+
+test('while a lazy chunk is pending the page skeleton appears after 150ms, never a blank main', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  window.history.replaceState({}, '', '/tri-an');
+  const queryClient = makeClient();
+  queryClient.setQueryData(['me'], me);
+  stubRoutes({ '/api/mvp/dates': [] });
+  try {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    );
+    // Ngay lúc đầu chưa có khung xương (tránh nháy khi chunk về nhanh)…
+    expect(document.querySelector('[data-skeleton="page"]')).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+    // …sau 150ms thì có khung xương hoặc trang đã tới — không bao giờ là màn trống.
+    const skeleton = document.querySelector('[data-skeleton="page"]');
+    const heading = screen.queryByRole('heading', { level: 1, name: 'Tri ân' });
+    expect(skeleton !== null || heading !== null).toBe(true);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tri ân' })).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });

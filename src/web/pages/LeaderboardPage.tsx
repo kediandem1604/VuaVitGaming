@@ -22,7 +22,7 @@
  * tới đây với cả hai); giá trị lạ về mặc định (role đầu danh mục, mùa mới nhất), không gửi lên API.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import type { Faction, FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleDto } from '../../shared/api-types';
 import { formatSeasonScore, hasExtraMetric } from '../../shared/metric';
@@ -40,6 +40,7 @@ import { cx } from '../lib/cx';
 import { FACTION_BAND, FACTION_LABEL, FACTION_SHORT_LABEL, FACTION_TEXT, FACTIONS, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
 import { formatSeasonLabel } from '../lib/format';
 import { memberPath } from '../lib/links';
+import { rolesQuery } from '../lib/queries';
 
 const ROLE_PARAM = 'role';
 const LIMIT = 50;
@@ -47,7 +48,7 @@ const ROLE_ID = /^\d+$/;
 
 export function LeaderboardPage() {
   const [params, setParams] = useSearchParams();
-  const roles = useQuery({ queryKey: ['roles'], queryFn: () => apiGet<RoleDto[]>('/api/roles') });
+  const roles = useQuery(rolesQuery);
   const seasons = useSeasons();
 
   const role = resolveRole(params.get(ROLE_PARAM), roles.data);
@@ -59,6 +60,8 @@ export function LeaderboardPage() {
     queryKey: ['leaderboard', roleId, seasonId],
     queryFn: () => apiGet<LeaderboardRowDto[]>(`/api/leaderboard?roleId=${roleId}&season=${seasonId}&limit=${LIMIT}`),
     enabled: roleId !== null && seasonId !== null,
+    // Đổi role/mùa: giữ bảng cũ (mờ, `aria-busy` qua `QueryState`) tới khi bảng mới về — không nháy trống (spec §4.4).
+    placeholderData: keepPreviousData,
   });
 
   const setParam = (key: string, value: string) => {
@@ -155,6 +158,7 @@ function FactionTop({ seasonId }: { seasonId: string }) {
   const top = useQuery({
     queryKey: ['leaderboard-factions', seasonId],
     queryFn: () => apiGet<FactionTopDto>(`/api/leaderboard/factions?season=${seasonId}`),
+    placeholderData: keepPreviousData,
   });
 
   return (

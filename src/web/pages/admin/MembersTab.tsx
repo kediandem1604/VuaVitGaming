@@ -9,7 +9,7 @@
  * khai của người đó.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
 import type { AccessLevel, AdminMemberDto, MemberStatus } from '../../../shared/api-types';
 import { GAMES_INVALID_MESSAGE, GAMES_MAX, GAMES_MIN, isValidGamesTotal } from '../../../shared/games';
@@ -57,7 +57,8 @@ export function MembersTab() {
 
   const url = membersUrl(debouncedQ, status);
   const queryKey = [...ADMIN_MEMBERS_KEY, debouncedQ, status];
-  const members = useQuery({ queryKey, queryFn: () => apiGet<AdminMemberDto[]>(url) });
+  // Gõ tìm/đổi trạng thái: giữ danh sách cũ mờ tới khi kết quả mới về (spec §4.4).
+  const members = useQuery({ queryKey, queryFn: () => apiGet<AdminMemberDto[]>(url), placeholderData: keepPreviousData });
 
   return (
     <section className="flex flex-col gap-3">

@@ -20,7 +20,7 @@ import { QueryState } from '../components/QueryState';
 import { RoleCard } from '../components/RoleCard';
 import { ME_QUERY_KEY, useCurrentMember } from '../hooks/useMe';
 import { memberPath } from '../lib/links';
-import { TITLES_QUERY_KEY } from '../lib/queryKeys';
+import { titlesQuery } from '../lib/queries';
 
 interface ProfilePatch {
   email?: string | null;
@@ -77,7 +77,7 @@ function Passport({ me }: { me: MeDto }) {
 
 /** Các role tôi đang dẫn đầu mùa này, mỗi role một thẻ role mang tên tôi (không phải link: hồ sơ không dẫn đi đâu). */
 function HeldRolesSection({ me }: { me: MeDto }) {
-  const titles = useQuery({ queryKey: TITLES_QUERY_KEY, queryFn: () => apiGet<HeldRoleDto[]>('/api/me/titles') });
+  const titles = useQuery(titlesQuery);
 
   return (
     <section className="flex flex-col gap-3">

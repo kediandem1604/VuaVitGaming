@@ -16,6 +16,7 @@ import { apiGet, errorMessage } from '../api';
 import { BadgeCard } from '../components/BadgeCard';
 import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
+import { SkeletonCards } from '../components/Skeleton';
 import { vnMonthOf } from '../lib/format';
 
 /** Cỡ trang cố định ở client: cũng là mốc để biết trang vừa tải là trang cuối (ít dòng hơn). */
@@ -42,7 +43,7 @@ export function BadgesPage() {
         <p className="text-night-300">Danh hiệu trao một lần, giữ mãi. Mới nhất ở trên.</p>
       </header>
 
-      <QueryState query={wall}>
+      <QueryState query={wall} skeleton={<SkeletonCards count={6} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" />}>
         {(data) => {
           const badges = data.pages.flat();
           if (badges.length === 0) {

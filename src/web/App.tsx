@@ -2,24 +2,22 @@
  * Định tuyến: `/login` đứng một mình; mọi trang khác nằm trong `<Layout>` và chỉ
  * render khi đã tải được hồ sơ (`useMe`). Gặp 401 thì api client đã tự đưa về
  * `/login`, ở đây chỉ hiện dòng chờ.
+ *
+ * Trang chủ (`TodayPage`) và hai trang thông báo nằm trong chunk chính; các trang khác là
+ * chunk riêng (`routes.tsx`, spec §4.2). `Suspense` bọc `Outlet` nên header/dock của `Layout`
+ * đứng yên trong lúc chunk về; fallback là khung xương trang, chỉ hiện sau 150ms.
  */
 
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { BrowserRouter, Outlet, Route, Routes } from 'react-router';
 import { ApiError, errorMessage } from './api';
 import { Layout } from './components/Layout';
+import { Delayed, PageSkeleton } from './components/Skeleton';
 import { useCurrentMember, useMe } from './hooks/useMe';
-import { HallPage } from './pages/HallPage';
-import { LeaderboardPage } from './pages/LeaderboardPage';
 import { LoginPage } from './pages/LoginPage';
-import { MvpPage } from './pages/MvpPage';
-import { AdminPage } from './pages/admin/AdminPage';
-import { BadgesPage } from './pages/BadgesPage';
-import { MemberPage } from './pages/MemberPage';
 import { ForbiddenPage, NotFoundPage } from './pages/PlaceholderPage';
-import { ProfilePage } from './pages/ProfilePage';
-import { ReportPage } from './pages/ReportPage';
 import { TodayPage } from './pages/TodayPage';
+import { AdminPage, BadgesPage, HallPage, LeaderboardPage, MemberPage, MvpPage, ProfilePage, ReportPage } from './routes';
 
 export function App() {
   return (
@@ -58,7 +56,15 @@ function Shell() {
   if (me.data) {
     return (
       <Layout me={me.data}>
-        <Outlet context={me.data} />
+        <Suspense
+          fallback={
+            <Delayed>
+              <PageSkeleton />
+            </Delayed>
+          }
+        >
+          <Outlet context={me.data} />
+        </Suspense>
       </Layout>
     );
   }

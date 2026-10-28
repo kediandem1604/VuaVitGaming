@@ -7,19 +7,25 @@
  *
  * Giao diện Sảnh đêm (spec §6 Quản trị): thanh tab là dải chip cuộn ngang, tab đang chọn
  * nền `gold`; nội dung các tab ưu tiên dễ đọc hơn trang trí.
+ *
+ * Mỗi tab là một chunk riêng (`lazyPage`, spec §4.2): trang này vốn đã là chunk riêng, tab nào
+ * mở mới tải tab đó. Trong lúc chunk về, tabpanel hiện khung xương dòng (sau 150ms).
  */
 
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
+import { Delayed, SkeletonRows } from '../../components/Skeleton';
 import { useCurrentMember } from '../../hooks/useMe';
 import { cx } from '../../lib/cx';
-import { CategoriesTab } from './CategoriesTab';
-import { FailuresTab } from './FailuresTab';
-import { MembersTab } from './MembersTab';
-import { ReviewsTab } from './ReviewsTab';
-import { RolesTab } from './RolesTab';
-import { SessionsTab } from './SessionsTab';
-import { SettingsTab } from './SettingsTab';
+import { lazyPage } from '../../lib/lazyPage';
+
+const SessionsTab = lazyPage(() => import('./SessionsTab').then((m) => ({ default: m.SessionsTab })));
+const ReviewsTab = lazyPage(() => import('./ReviewsTab').then((m) => ({ default: m.ReviewsTab })));
+const MembersTab = lazyPage(() => import('./MembersTab').then((m) => ({ default: m.MembersTab })));
+const FailuresTab = lazyPage(() => import('./FailuresTab').then((m) => ({ default: m.FailuresTab })));
+const CategoriesTab = lazyPage(() => import('./CategoriesTab').then((m) => ({ default: m.CategoriesTab })));
+const RolesTab = lazyPage(() => import('./RolesTab').then((m) => ({ default: m.RolesTab })));
+const SettingsTab = lazyPage(() => import('./SettingsTab').then((m) => ({ default: m.SettingsTab })));
 
 const TAB_PARAM = 'tab';
 
@@ -86,7 +92,15 @@ export function AdminPage() {
       </div>
 
       <section role="tabpanel" id={`panel-${active.key}`} aria-labelledby={`tab-${active.key}`} className="flex flex-col gap-4">
-        {active.render()}
+        <Suspense
+          fallback={
+            <Delayed>
+              <SkeletonRows />
+            </Delayed>
+          }
+        >
+          {active.render()}
+        </Suspense>
       </section>
     </div>
   );

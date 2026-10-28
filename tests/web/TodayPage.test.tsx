@@ -262,3 +262,83 @@ test('with no results anywhere, the today hall keeps its empty copy', async () =
   expect(await screen.findByText('Chưa có kết quả vote hôm nay')).toBeInTheDocument();
   expect(screen.getByRole('heading', { level: 2, name: 'Sảnh tri ân hôm nay' })).toBeInTheDocument();
 });
+
+test('joining is optimistic: the seat and button change before the server answers', async () => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const joined: SessionDto = { ...base, id: 1, startsAt: '2026-10-22T12:00:00.000Z', attendees: [a, b, me], myStatus: 'going' };
+  stubFetch({
+    'GET /api/sessions': () => json(200, sessions),
+    'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
+    'POST /api/sessions/1/attendance': async () => {
+      await gate;
+      return json(200, joined);
+    },
+  });
+  renderPage();
+
+  const joinButtons = await screen.findAllByRole('button', { name: 'Tham gia' });
+  const firstCard = joinButtons[0]?.closest('article') as HTMLElement;
+  fireEvent.click(joinButtons[0] as HTMLElement);
+
+  // Chưa có hồi âm: ghế đã có "Tôi", nút đã thành Huỷ (đang xử lý), tổng người đã +1.
+  expect(await within(firstCard).findByText('3/16 ghế đã có người')).toBeInTheDocument();
+  expect(within(within(firstCard).getByRole('list', { name: 'Hàng ghế' })).getByRole('img', { name: 'Tôi' })).toBeInTheDocument();
+  expect(within(firstCard).getByRole('button', { name: 'Đang xử lý…' })).toBeDisabled();
+  expect(screen.getByText('4 người tham gia hôm nay')).toBeInTheDocument();
+
+  release();
+  expect(await within(firstCard).findByRole('button', { name: 'Huỷ tham gia' })).toBeEnabled();
+  expect(within(firstCard).getByText('3/16 ghế đã có người')).toBeInTheDocument();
+});
+
+test('a rejected join rolls the card back, shows the error and refetches', async () => {
+  let listCalls = 0;
+  stubFetch({
+    'GET /api/sessions': () => {
+      listCalls += 1;
+      return json(200, sessions);
+    },
+    'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
+    'POST /api/sessions/1/attendance': () => json(409, { error: { code: 'SESSION_CLOSED', message: 'Buổi đã đóng' } }),
+  });
+  renderPage();
+
+  const joinButtons = await screen.findAllByRole('button', { name: 'Tham gia' });
+  const firstCard = joinButtons[0]?.closest('article') as HTMLElement;
+  fireEvent.click(joinButtons[0] as HTMLElement);
+
+  const alert = await within(firstCard).findByRole('alert');
+  expect(alert).toHaveTextContent('Buổi đã đóng');
+  // Trả lại như cũ: 2 ghế, nút Tham gia, tổng 3 người.
+  expect(within(firstCard).getByText('2/16 ghế đã có người')).toBeInTheDocument();
+  expect(within(firstCard).getByRole('button', { name: 'Tham gia' })).toBeEnabled();
+  expect(screen.getByText('3 người tham gia hôm nay')).toBeInTheDocument();
+  await waitFor(() => expect(listCalls).toBe(2));
+});
+
+test('leaving is optimistic too: my seat frees up at once', async () => {
+  const mine: SessionDto = { ...base, id: 1, startsAt: '2026-10-22T12:00:00.000Z', attendees: [a, me], myStatus: 'going' };
+  const left: SessionDto = { ...mine, attendees: [a], myStatus: null };
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  stubFetch({
+    'GET /api/sessions': () => json(200, [mine]),
+    'GET /api/mvp/day': () => json(200, emptyHall),
+    'GET /api/mvp/dates': () => json(200, []),
+    'POST /api/sessions/1/attendance': async (init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ going: false });
+      await gate;
+      return json(200, left);
+    },
+  });
+  renderPage();
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Huỷ tham gia' }));
+  expect(await screen.findByText('1/16 ghế đã có người')).toBeInTheDocument();
+  expect(screen.queryByRole('img', { name: 'Tôi' })).not.toBeInTheDocument();
+  release();
+  expect(await screen.findByRole('button', { name: 'Tham gia' })).toBeEnabled();
+});

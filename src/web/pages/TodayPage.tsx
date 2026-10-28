@@ -6,27 +6,28 @@
  *
  * Dòng nhắc giờ trên mỗi thẻ lấy kênh nhắc từ hồ sơ người đang đăng nhập (`useCurrentMember`).
  *
- * Điểm danh: không cập nhật lạc quan — sức chứa do server quyết — mà thay đúng
- * buổi đó trong cache bằng DTO trả về; lỗi thì hiện thông báo ngay dưới thẻ và tải
- * lại danh sách để thẻ phản ánh trạng thái thật (đã đủ người, đã huỷ…).
+ * Điểm danh: cập nhật lạc quan (ghế đổi ngay khi bấm, xem `TodaySession`), rồi thay đúng
+ * buổi đó trong cache bằng DTO trả về; lỗi thì trả lại như cũ, hiện thông báo ngay dưới thẻ
+ * và tải lại danh sách để thẻ phản ánh trạng thái thật (đã đủ người, đã huỷ…).
  */
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Users } from 'lucide-react';
-import type { HallOfDayDto, SessionDto } from '../../shared/api-types';
+import type { HallOfDayDto, MeDto, SessionDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { DailyHall } from '../components/DailyHall';
 import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
 import { SessionCard } from '../components/SessionCard';
+import { SkeletonCards } from '../components/Skeleton';
 import { useCurrentMember } from '../hooks/useMe';
 import { formatDayLabel, formatDayMonth } from '../lib/format';
+import { mvpDatesQuery } from '../lib/queries';
 import { reminderChannels, type ReminderChannels } from '../lib/reminders';
 
 export const SESSIONS_TODAY_KEY = ['sessions', 'today'] as const;
 export const HALL_TODAY_KEY = ['mvp', 'day', 'today'] as const;
 /** Cùng khoá với trang Tri ân: dùng chung cache. */
-const MVP_DATES_KEY = ['mvp', 'dates'] as const;
 
 export function TodayPage() {
   const sessions = useQuery({ queryKey: SESSIONS_TODAY_KEY, queryFn: () => apiGet<SessionDto[]>('/api/sessions') });
@@ -52,7 +53,7 @@ export function TodayPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl leading-tight font-extrabold text-white">Buổi chơi hôm nay</h2>
-        <QueryState query={sessions}>
+        <QueryState query={sessions} skeleton={<SkeletonCards count={2} className="grid-cols-1 sm:grid-cols-1 lg:grid-cols-2" />}>
           {(list) =>
             list.length === 0 ? (
               <EmptyState>
@@ -83,7 +84,7 @@ export function TodayPage() {
  */
 function HallSection({ hall }: { hall: UseQueryResult<HallOfDayDto> }) {
   const todayEmpty = hall.data !== undefined && hall.data.sessions.length === 0;
-  const dates = useQuery({ queryKey: MVP_DATES_KEY, queryFn: () => apiGet<string[]>('/api/mvp/dates'), enabled: todayEmpty });
+  const dates = useQuery({ ...mvpDatesQuery, enabled: todayEmpty });
   const latest = todayEmpty ? (dates.data?.find((date) => date !== hall.data?.date) ?? null) : null;
   const recent = useQuery({
     queryKey: ['mvp', 'day', latest],
@@ -113,17 +114,46 @@ function HallSection({ hall }: { hall: UseQueryResult<HallOfDayDto> }) {
   );
 }
 
-/** Một thẻ buổi chơi kèm mutation điểm danh riêng, nên `pending`/lỗi là của đúng thẻ đó. */
+/**
+ * Ghế của mình trong một buổi, theo ý vừa bấm: Tham gia → thêm mình vào cuối hàng ghế (nếu chưa
+ * có) và `myStatus = 'going'`; Huỷ → bỏ mình ra, `myStatus = null`. Chỉ dùng cho cache lạc quan.
+ */
+export function toggleMySeat(session: SessionDto, me: MeDto, going: boolean): SessionDto {
+  const others = session.attendees.filter((attendee) => attendee.memberId !== me.id);
+  const attendees = going ? [...others, { memberId: me.id, displayName: me.displayName, avatarUrl: me.avatarUrl }] : others;
+  return { ...session, attendees, myStatus: going ? 'going' : null };
+}
+
+/**
+ * Một thẻ buổi chơi kèm mutation điểm danh riêng, nên `pending`/lỗi là của đúng thẻ đó.
+ *
+ * Cập nhật lạc quan (spec §4.6): bấm là ghế đổi ngay trong cache (`onMutate`, sau khi huỷ các
+ * lần tải danh sách đang chạy để chúng không đè lên); server trả về thì thay bằng DTO thật (sức
+ * chứa, thứ tự ghế do server quyết); lỗi (đã đủ người, đã đóng…) thì trả lại bản chụp trước đó,
+ * hiện lỗi dưới thẻ như cũ và tải lại danh sách để thẻ phản ánh trạng thái thật.
+ */
 function TodaySession({ session, reminders }: { session: SessionDto; reminders: ReminderChannels }) {
   const queryClient = useQueryClient();
+  const me = useCurrentMember();
   const attendance = useMutation({
     mutationFn: (going: boolean) => apiSend<SessionDto>('POST', `/api/sessions/${session.id}/attendance`, { going }),
+    onMutate: async (going) => {
+      await queryClient.cancelQueries({ queryKey: SESSIONS_TODAY_KEY });
+      const previous = queryClient.getQueryData<SessionDto[]>(SESSIONS_TODAY_KEY);
+      queryClient.setQueryData<SessionDto[]>(SESSIONS_TODAY_KEY, (current) =>
+        current?.map((item) => (item.id === session.id ? toggleMySeat(item, me, going) : item)),
+      );
+      return { previous };
+    },
     onSuccess: (updated) => {
       queryClient.setQueryData<SessionDto[]>(SESSIONS_TODAY_KEY, (current) =>
         current?.map((item) => (item.id === updated.id ? updated : item)),
       );
     },
-    onError: () => void queryClient.invalidateQueries({ queryKey: SESSIONS_TODAY_KEY }),
+    onError: (_error, _going, context) => {
+      if (context?.previous) queryClient.setQueryData(SESSIONS_TODAY_KEY, context.previous);
+      void queryClient.invalidateQueries({ queryKey: SESSIONS_TODAY_KEY });
+    },
   });
 
   return (

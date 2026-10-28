@@ -29,6 +29,7 @@ import { apiSend } from '../api';
 import { cx } from '../lib/cx';
 import { Avatar } from './Avatar';
 import { DuckMark } from './DuckMark';
+import { PrefetchNavLink } from './PrefetchLink';
 
 interface NavItem {
   to: string;
@@ -95,7 +96,8 @@ export function Layout({ me, children }: LayoutProps) {
                 const Icon = item.icon;
                 return (
                   // Nhãn ngắn như thanh dock ("Xếp hạng"); tên đầy đủ nằm ở `title` cho rê chuột (như chip người dùng).
-                  <NavLink
+                  // Rê chuột dừng/focus/chạm vào link → tải trước chunk + dữ liệu trang đó (spec §4.3).
+                  <PrefetchNavLink
                     key={item.to}
                     to={item.to}
                     end={item.to === '/'}
@@ -109,7 +111,7 @@ export function Layout({ me, children }: LayoutProps) {
                   >
                     <Icon aria-hidden="true" className="size-4 shrink-0" />
                     {item.short ?? item.label}
-                  </NavLink>
+                  </PrefetchNavLink>
                 );
               })}
             </nav>
@@ -163,7 +165,7 @@ export function Layout({ me, children }: LayoutProps) {
           {items.map((item) => {
             const Icon = item.icon;
             return (
-              <NavLink
+              <PrefetchNavLink
                 key={item.to}
                 to={item.to}
                 end={item.to === '/'}
@@ -188,7 +190,7 @@ export function Layout({ me, children }: LayoutProps) {
                     <span className="max-w-full truncate tracking-tight">{item.short ?? item.label}</span>
                   </>
                 )}
-              </NavLink>
+              </PrefetchNavLink>
             );
           })}
         </div>

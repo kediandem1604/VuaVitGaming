@@ -247,6 +247,46 @@
 }
 
 /*
+ * Khung xương (spec §4.5): khối bo góc `night-700`, một vệt sáng chạy ngang 1.2s lặp mãi; tắt
+ * khi giảm chuyển động (chỉ còn khối tĩnh). `background-size` 200% để vệt sáng chạy hết khối.
+ */
+@utility skeleton {
+  @apply rounded-lg bg-night-700;
+
+  @media (prefers-reduced-motion: no-preference) {
+    background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.08) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: skeleton-shine 1.2s linear infinite;
+  }
+}
+
+@keyframes skeleton-shine {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/*
+ * Khối bọc dữ liệu của `QueryState`: `display: contents` để không chen vào bố cục (gap/grid) của
+ * cha. Khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc (`aria-busy="true"`), các con mờ
+ * còn 60% trong 120ms (spec §4.4) — bố cục đứng yên, không nháy trống.
+ */
+.query-block {
+  display: contents;
+}
+
+.query-block > * {
+  transition: opacity 120ms ease-out;
+}
+
+.query-block[aria-busy='true'] > * {
+  opacity: 0.6;
+}
+
+/*
  * Chữ "nổi" kiểu game (spec §3.2) cho tiêu đề lớn và tên app: viền `night-950` quanh nét
  * chữ, vẽ dưới phần tô (`paint-order`) nên không ăn vào chữ, cộng một lớp đổ khối xuống
  * dưới. Tính theo `em` để dùng được ở mọi cỡ, nhưng chỉ dùng cho chữ từ 18px trở lên.

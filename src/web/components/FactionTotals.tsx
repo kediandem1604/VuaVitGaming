@@ -8,7 +8,7 @@
  * đổi tab và dời focus theo. Tải riêng với các phần khác của trang để lỗi/chờ không che nhau.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router';
 import type { FactionTotalRowDto, FactionTotalsDto, TotalsScope } from '../../shared/api-types';
@@ -43,6 +43,8 @@ export function FactionTotals({ seasonId }: { seasonId: string }) {
   const totals = useQuery({
     queryKey: [...LEADERBOARD_TOTALS_KEY, seasonId],
     queryFn: () => apiGet<FactionTotalsDto>(`/api/leaderboard/totals?season=${seasonId}`),
+    // Đổi mùa: giữ bảng cũ mờ tới khi bảng mới về (spec §4.4); đổi tab không gọi API (bốn bảng về cùng lúc).
+    placeholderData: keepPreviousData,
   });
 
   /** Chọn tab và dời focus tới nó (phím mũi tên theo mẫu "automatic activation"). */

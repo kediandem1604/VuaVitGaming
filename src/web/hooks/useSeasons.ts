@@ -6,15 +6,15 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { SeasonDto } from '../../shared/api-types';
-import { apiGet } from '../api';
+import { seasonsQuery } from '../lib/queries';
 
-export const SEASONS_QUERY_KEY = ['seasons'] as const;
+export const SEASONS_QUERY_KEY = seasonsQuery.queryKey;
 
 /** Tên tham số URL của mùa, dùng chung cho Đại sảnh và Bảng xếp hạng. */
 export const SEASON_PARAM = 'mua';
 
 export function useSeasons(): UseQueryResult<SeasonDto[]> {
-  return useQuery({ queryKey: SEASONS_QUERY_KEY, queryFn: () => apiGet<SeasonDto[]>('/api/seasons') });
+  return useQuery(seasonsQuery);
 }
 
 /** Mùa đang chọn, hoặc `null` khi danh sách chưa tải (hay rỗng). */

@@ -7,7 +7,7 @@
  * (`2026-13-45`) thì coi như chưa chọn — lấy ngày mới nhất, không gọi API với ngày sai.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useId } from 'react';
 import { useSearchParams } from 'react-router';
 import type { HallOfDayDto } from '../../shared/api-types';
@@ -16,12 +16,13 @@ import { DailyHall } from '../components/DailyHall';
 import { EmptyState } from '../components/EmptyState';
 import { cx } from '../lib/cx';
 import { formatDateLabel, formatDayLabel, isIsoDate, vnTodayIso } from '../lib/format';
+import { mvpDatesQuery } from '../lib/queries';
 
 const DATE_PARAM = 'ngay';
 
 export function MvpPage() {
   const [params, setParams] = useSearchParams();
-  const dates = useQuery({ queryKey: ['mvp', 'dates'], queryFn: () => apiGet<string[]>('/api/mvp/dates') });
+  const dates = useQuery(mvpDatesQuery);
 
   const requested = params.get(DATE_PARAM);
   const selected = requested !== null && isIsoDate(requested) ? requested : (dates.data?.[0] ?? null);
@@ -32,6 +33,8 @@ export function MvpPage() {
     queryKey: ['mvp', 'day', selected],
     queryFn: () => apiGet<HallOfDayDto>(`/api/mvp/day?date=${selected}`),
     enabled: selected !== null,
+    // Đổi ngày: giữ sảnh cũ mờ (`aria-busy`) tới khi ngày mới về (spec §4.4).
+    placeholderData: keepPreviousData,
   });
 
   const select = (date: string) => setParams({ [DATE_PARAM]: date });
@@ -96,7 +99,9 @@ export function MvpPage() {
         <section className="flex flex-col gap-3">
           <h2 className="text-xl leading-tight font-extrabold text-white">{formatDayLabel(selected)}</h2>
           {hall.data ? (
-            <DailyHall data={hall.data} emptyMessage="Ngày này chưa có kết quả vote" />
+            <div className="query-block" aria-busy={hall.isPlaceholderData}>
+              <DailyHall data={hall.data} emptyMessage="Ngày này chưa có kết quả vote" />
+            </div>
           ) : hall.isError ? (
             <LoadError message={errorMessage(hall.error)} onRetry={() => void hall.refetch()} />
           ) : (

@@ -51,10 +51,10 @@ import { DUPLICATE_NOTE, PENALISED_CHIP, accusationStatusText, formatAccusationL
 import { cx } from '../lib/cx';
 import { FACTION_LABEL } from '../lib/factions';
 import { addDaysIso, formatDateLabel, formatTime, vnTodayIso } from '../lib/format';
+import { rolesQuery } from '../lib/queries';
 import { MY_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
 import { HighlightButton, HighlightField, checkHighlight, uploadHighlight, type HighlightUpload } from './ReportHighlight';
 
-const ROLES_KEY = ['roles'] as const;
 const HIGHLIGHT_CONFIG_KEY = ['reports', 'highlight-config'] as const;
 
 const NOTE_MAX = 300;
@@ -187,7 +187,7 @@ function refreshReviewQueue(queryClient: QueryClient) {
 }
 
 export function ReportPage() {
-  const roles = useQuery({ queryKey: ROLES_KEY, queryFn: () => apiGet<RoleDto[]>('/api/roles') });
+  const roles = useQuery(rolesQuery);
   const mine = useQuery({ queryKey: MY_REPORTS_KEY, queryFn: () => apiGet<ReportDto[]>('/api/reports/mine?limit=50') });
   const config = useQuery({ queryKey: HIGHLIGHT_CONFIG_KEY, queryFn: () => apiGet<HighlightConfigDto>('/api/reports/highlight-config') });
   /**
