@@ -1,8 +1,9 @@
 /**
  * Khung xương (spec §4.5): khối bo góc `night-700` có ánh sáng chạy ngang 1.2s (lớp `skeleton`
  * trong `styles.css`, tắt khi giảm chuyển động) và vài mẫu ghép sẵn: dòng danh sách, thẻ,
- * trang. Mọi khung đều `aria-hidden`: trình đọc màn hình không cần "nghe" chỗ giữ; trạng thái
- * tải được báo bằng `aria-busy` ở khối bọc (`QueryState`).
+ * trang. Mọi khung đều `aria-hidden`: trình đọc màn hình không cần "nghe" chỗ giữ; `LoadingFallback`
+ * kèm một dòng `role="status"` ẩn "Đang tải…", và dữ liệu cũ đang tải lại được báo bằng
+ * `aria-busy` ở khung thật gần nhất (`QueryState`).
  *
  * `Delayed` chỉ hiện con sau 150ms: dữ liệu/chunk về nhanh hơn thì không nháy khung xương.
  */
@@ -74,4 +75,19 @@ export function Delayed({ children, delay = SKELETON_DELAY_MS }: { children: Rea
     return () => clearTimeout(timer);
   }, [delay]);
   return show ? <>{children}</> : null;
+}
+
+/**
+ * Fallback tải dùng chung (`Suspense` của trang/tab, `QueryState`): sau 150ms hiện khung xương
+ * (`aria-hidden`) cùng dòng `role="status"` ẩn "Đang tải…" cho trình đọc màn hình.
+ */
+export function LoadingFallback({ children }: { children: ReactNode }) {
+  return (
+    <Delayed>
+      <span role="status" className="sr-only">
+        Đang tải…
+      </span>
+      {children}
+    </Delayed>
+  );
 }

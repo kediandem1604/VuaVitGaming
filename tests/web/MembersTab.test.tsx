@@ -5,6 +5,7 @@ import { MemoryRouter, Outlet, Route, Routes } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { AdminMemberDto, MeDto, NotificationFailureDto } from '../../src/shared/api-types';
 import { FailuresTab } from '../../src/web/pages/admin/FailuresTab';
+import { STAGGER_TOTAL_MS } from '../../src/web/lib/motion';
 import { MembersTab } from '../../src/web/pages/admin/MembersTab';
 
 const members: AdminMemberDto[] = [
@@ -281,4 +282,16 @@ test('failures list the session, member, kind, channel, time and error; empty co
   stubFetch(() => json(200, []));
   renderWithClient(<FailuresTab />);
   expect(await screen.findByText('Chưa có lần gửi nhắc nào lỗi')).toBeInTheDocument();
+});
+
+test('a members list that arrives slower than the stagger still staggers in, then the class goes away', async () => {
+  // Danh sách về sau cả lượt so le (~510ms): đồng hồ so le chỉ được chạy từ lúc có dòng.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise<Response>((resolve) => setTimeout(() => resolve(json(200, members)), STAGGER_TOTAL_MS + 100))),
+  );
+  renderMembers();
+  const list = await screen.findByRole('list', {}, { timeout: STAGGER_TOTAL_MS * 3 });
+  expect(list).toHaveClass('stagger-in');
+  await waitFor(() => expect(screen.getByRole('list')).not.toHaveClass('stagger-in'), { timeout: STAGGER_TOTAL_MS * 3 });
 });

@@ -10,7 +10,6 @@
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useRef, useState, type KeyboardEvent } from 'react';
-import { Link } from 'react-router';
 import type { FactionTotalRowDto, FactionTotalsDto, TotalsScope } from '../../shared/api-types';
 import { apiGet } from '../api';
 import { cx } from '../lib/cx';
@@ -23,6 +22,7 @@ import { CountUp } from './CountUp';
 import { QueryState } from './QueryState';
 import { RankMedal } from './RankMedal';
 import { TabIndicator } from './TabIndicator';
+import { PrefetchLink } from './PrefetchLink';
 
 const SCOPES: readonly TotalsScope[] = ['all', ...FACTIONS];
 
@@ -161,9 +161,9 @@ function TotalsRow({ row, isMe }: { row: FactionTotalRowDto; isMe: boolean }) {
       {/* Avatar chỉ trang trí: tên viết ngay bên cạnh. */}
       <Avatar name={row.displayName} url={row.avatarUrl} className="size-8 text-sm" />
       <span className="min-w-0 flex-1 leading-tight">
-        <Link to={memberPath(row.memberId)} className="font-bold break-words text-white hover:underline">
+        <PrefetchLink to={memberPath(row.memberId)} className="font-bold break-words text-white hover:underline">
           {row.displayName}
-        </Link>
+        </PrefetchLink>
         {isMe && <span className="sr-only">(bạn)</span>}
       </span>
       {/* Điểm đổi lúc đang xem (làm mới) thì đếm tới số mới (spec §5.6). */}

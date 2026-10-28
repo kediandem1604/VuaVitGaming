@@ -6,12 +6,12 @@
  * viên và mục "Danh hiệu của tôi" ở Hồ sơ.
  */
 
-import { Link } from 'react-router';
 import type { BadgeDto } from '../../shared/api-types';
 import { cx } from '../lib/cx';
 import { formatDateLabel } from '../lib/format';
 import { memberPath } from '../lib/links';
 import { Avatar } from './Avatar';
+import { PrefetchLink } from './PrefetchLink';
 
 interface BadgeCardProps {
   badge: BadgeDto;
@@ -35,10 +35,10 @@ export function BadgeCard({ badge, showMember = false, showDate = false, classNa
         <p className="text-sm leading-tight break-words text-night-300">{badge.detail}</p>
         {showMember && (
           // Link bọc cả avatar: avatar không nhãn nên tên link vẫn chỉ là tên người.
-          <Link to={memberPath(badge.member.id)} className="mt-1 flex max-w-full items-center gap-2 self-start rounded-full">
+          <PrefetchLink to={memberPath(badge.member.id)} className="mt-1 flex max-w-full items-center gap-2 self-start rounded-full">
             <Avatar name={badge.member.displayName} url={badge.member.avatarUrl} className="size-7 text-xs" />
             <span className="min-w-0 truncate font-bold text-gold hover:underline">{badge.member.displayName}</span>
-          </Link>
+          </PrefetchLink>
         )}
         {showDate && (
           <p className="text-xs text-night-300">

@@ -5,8 +5,9 @@
  * chính; mọi trang khác là `lazyPage` → chunk riêng, chỉ tải khi vào (hoặc tải trước khi người
  * dùng tỏ ý định). Trang Quản trị tải lười từng tab trong `AdminPage`.
  *
- * `registerPrefetchRoute(path, load, data)`: `load` là cùng lời hứa import với component (không
- * import hai lần), `data` nạp sẵn truy vấn chính của trang bằng tuỳ chọn dùng chung ở
+ * `registerPrefetchRoute(path, load, data)`: `load` là `preload` — import THÔ, cùng lời hứa với lần
+ * render (không import hai lần) nhưng lỗi thì chỉ từ chối, không bao giờ tải lại trang (chỉ lần
+ * render thật mới được tải lại, `lib/lazyPage.ts`). `data` nạp sẵn truy vấn chính của trang bằng tuỳ chọn dùng chung ở
  * `lib/queries.ts` — chỉ những truy vấn không phụ thuộc tham số (mùa, role… chưa biết trước).
  */
 
@@ -38,3 +39,5 @@ registerPrefetchRoute('/huy-hieu', BadgesPage.preload);
 registerPrefetchRoute('/khai-diem', ReportPage.preload, roles);
 registerPrefetchRoute('/ho-so', ProfilePage.preload, (qc) => void qc.prefetchQuery(titlesQuery));
 registerPrefetchRoute('/quan-tri', AdminPage.preload);
+// Trang thành viên: một chunk cho mọi id (dữ liệu theo id thì để trang tự tải).
+registerPrefetchRoute('/thanh-vien/:id', MemberPage.preload);

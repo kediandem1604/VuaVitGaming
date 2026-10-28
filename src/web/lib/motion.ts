@@ -19,6 +19,9 @@ import { useEffect, useRef, useState } from 'react';
  */
 export const EXIT_FALLBACK_MS = 120;
 
+/** Dư thêm sau thời gian mờ ra trước khi gỡ, để khung cuối của hoạt ảnh không bị cắt. */
+export const EXIT_BUFFER_MS = 25;
+
 /** Số dòng đầu của danh sách được so le; các dòng sau hiện ngay. Khớp `.stagger-in > :nth-child(-n + 8)`. */
 export const STAGGER_ROWS = 8;
 /** Bước so le giữa hai dòng (ms) — khớp `--stagger-step`. */
@@ -73,7 +76,7 @@ export function usePresence(open: boolean): Presence {
     if (!wasOpen) return;
     // Vừa đóng: giữ lại đúng thời gian mờ ra rồi gỡ; mở lại trong lúc đó thì cleanup dọn hẹn giờ.
     setLingering(true);
-    const timer = window.setTimeout(() => setLingering(false), exitDurationMs());
+    const timer = window.setTimeout(() => setLingering(false), exitDurationMs() + EXIT_BUFFER_MS);
     return () => window.clearTimeout(timer);
   }, [open]);
 
@@ -81,12 +84,20 @@ export function usePresence(open: boolean): Presence {
   return { mounted: open || lingering || justClosed, state: open ? 'open' : 'closed' };
 }
 
-/** Lớp `stagger-in` cho phần tử danh sách ở lần hiện đầu; `undefined` khi lượt so le đã chạy xong. */
-export function useStaggerOnce(): string | undefined {
+/**
+ * Lớp `stagger-in` cho phần tử danh sách ở lần hiện đầu; `undefined` khi lượt so le đã chạy xong.
+ *
+ * `ready`: danh sách đã có dòng. Đồng hồ chỉ bắt đầu từ lần đầu `ready` đúng — gọi hook ở component
+ * bọc cả lúc đang tải thì lượt so le vẫn trọn vẹn dù dữ liệu về chậm (không bị cắt giữa chừng hay
+ * mất hẳn). Đã chạy rồi thì danh sách rỗng rồi có lại cũng không chạy nữa.
+ */
+export function useStaggerOnce(ready = true): string | undefined {
   const [first, setFirst] = useState(true);
   useEffect(() => {
+    if (!ready || !first) return;
     const timer = window.setTimeout(() => setFirst(false), STAGGER_TOTAL_MS);
     return () => window.clearTimeout(timer);
-  }, []);
+    // Chạy lại khi `ready` đổi; khi đã xong (`first` false) thì thôi.
+  }, [ready, first]);
   return first ? 'stagger-in' : undefined;
 }

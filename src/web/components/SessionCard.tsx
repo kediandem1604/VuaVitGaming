@@ -17,13 +17,13 @@
  */
 
 import { Bell, BellOff, KeyRound, Play, Timer } from 'lucide-react';
-import { Link } from 'react-router';
 import type { SessionDto } from '../../shared/api-types';
 import { useNow } from '../hooks/useNow';
 import { cx } from '../lib/cx';
 import { formatCountdown, formatTime } from '../lib/format';
 import { reminderText, type ReminderChannels } from '../lib/reminders';
 import { Avatar } from './Avatar';
+import { PrefetchLink } from './PrefetchLink';
 
 interface SessionCardProps {
   session: SessionDto;
@@ -128,9 +128,9 @@ function ReminderLine({ channels }: { channels: ReminderChannels }) {
           <BellOff aria-hidden="true" className="size-4 shrink-0" />
           <span>
             Bạn đã tắt nhắc giờ — đổi ở{' '}
-            <Link to="/ho-so" className="font-bold text-gold underline underline-offset-2">
+            <PrefetchLink to="/ho-so" className="font-bold text-gold underline underline-offset-2">
               Hồ sơ
-            </Link>
+            </PrefetchLink>
           </span>
         </>
       )}

@@ -88,7 +88,8 @@ function PendingQueue() {
   const headingId = useId();
   const queue = useQuery({ queryKey: PENDING_REPORTS_KEY, queryFn: () => apiGet<ReportDto[]>('/api/admin/reports?status=pending') });
   // Lần hiện đầu: 8 dòng đầu mờ + trượt so le (spec §5.4); duyệt/huỷ làm mới sau đó không chạy lại.
-  const stagger = useStaggerOnce();
+  // Đồng hồ chỉ chạy khi hàng chờ đã có dòng — tải chậm thì lượt so le vẫn trọn vẹn.
+  const stagger = useStaggerOnce((queue.data?.length ?? 0) > 0);
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">

@@ -96,10 +96,11 @@ export function MvpPage() {
       </div>
 
       {selected !== null && (
-        <section className="flex flex-col gap-3">
+        // `aria-busy` ở `section` (khung thật); `.query-block` là `display: contents`, chỉ mang dấu để mờ.
+        <section aria-busy={hall.data !== undefined && hall.isPlaceholderData ? true : undefined} className="flex flex-col gap-3">
           <h2 className="text-xl leading-tight font-extrabold text-white">{formatDayLabel(selected)}</h2>
           {hall.data ? (
-            <div className="query-block" aria-busy={hall.isPlaceholderData}>
+            <div className="query-block" data-busy={hall.isPlaceholderData}>
               <DailyHall data={hall.data} emptyMessage="Ngày này chưa có kết quả vote" />
             </div>
           ) : hall.isError ? (

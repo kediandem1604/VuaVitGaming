@@ -443,7 +443,7 @@ function OptionRow({ id, label, selected, active, onHover, onPick }: OptionRowPr
 /** Mũi tên ▾ bên phải nút; lật lên khi khung đang mở. */
 function Chevron({ open }: { open: boolean }) {
   return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" className={cx('size-4 shrink-0 text-night-300 transition-transform duration-(--dur-base) ease-(--ease-out)', open && 'rotate-180')} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" viewBox="0 0 20 20" className={cx('size-4 shrink-0 text-night-300 motion-safe:transition-transform duration-(--dur-base) ease-(--ease-out)', open && 'rotate-180')} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="m5 8 5 5 5-5" />
     </svg>
   );

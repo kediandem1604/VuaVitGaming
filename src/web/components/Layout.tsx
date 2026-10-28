@@ -19,17 +19,23 @@
  * link có `overflow-x-auto` làm lưới an toàn: phông chữ rộng hơn dự tính thì hàng này cuộn
  * trong nó, không đè lên cụm người dùng, không cuộn trang.
  * Ở 768–1023 thanh dock vẫn thừa chỗ (≥ 96px mỗi mục với 8 mục).
+ *
+ * Đang chuyển sang trang lười (`lib/navPending.ts`): mục đích được tô ngay lúc bấm (React Router giữ
+ * trang cũ trong transition tới khi chunk về), `main` mang `aria-busy`, và sau 150ms hiện vạch tiến
+ * trình vàng mảnh trên cùng (`.nav-progress`) cùng dòng `role="status"` "Đang tải…" cho trình đọc màn hình.
  */
 
 import { Award, ChartColumn, Crown, House, PenLine, Trophy, User, Wrench, type LucideIcon } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
-import { NavLink } from 'react-router';
+import { useLayoutEffect, useState, type ReactNode } from 'react';
+import { NavLink, useLocation } from 'react-router';
 import type { MeDto } from '../../shared/api-types';
 import { apiSend } from '../api';
 import { cx } from '../lib/cx';
+import { endNavigation, usePendingNavigation } from '../lib/navPending';
 import { Avatar } from './Avatar';
 import { DuckMark } from './DuckMark';
 import { PrefetchNavLink } from './PrefetchLink';
+import { Delayed } from './Skeleton';
 
 interface NavItem {
   to: string;
@@ -52,6 +58,11 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/quan-tri', icon: Wrench, label: 'Quản trị', staffOnly: true },
 ];
 
+/** Mục `item` có phải trang đang chờ `pending` không (`/` chỉ khớp đúng gốc). */
+function matchesPending(item: NavItem, pending: string): boolean {
+  return item.to === '/' ? pending === '/' : pending === item.to || pending.startsWith(`${item.to}/`);
+}
+
 interface LayoutProps {
   me: MeDto;
   children: ReactNode;
@@ -60,6 +71,12 @@ interface LayoutProps {
 export function Layout({ me, children }: LayoutProps) {
   const items = NAV_ITEMS.filter((item) => !item.staffOnly || me.accessLevel !== 'member');
   const [logoutState, setLogoutState] = useState<'idle' | 'busy' | 'error'>('idle');
+  const pending = usePendingNavigation();
+  // Vị trí hiển thị (App đưa vào `<Routes location>`): đổi `pathname` = trang mới đã lên, hết chờ.
+  const { pathname } = useLocation();
+  useLayoutEffect(() => endNavigation(), [pathname]);
+  /** Đang chờ thì tô mục đích thay cho mục hiện tại; không chờ thì theo `NavLink`. */
+  const highlighted = (item: NavItem, isActive: boolean) => (pending === null ? isActive : matchesPending(item, pending));
 
   const logout = async () => {
     setLogoutState('busy');
@@ -73,6 +90,15 @@ export function Layout({ me, children }: LayoutProps) {
 
   return (
     <div className="flex min-h-dvh flex-col">
+      {/* Chuyển trang chưa xong quá 150ms: vạch tiến trình (mờ vào) + báo cho trình đọc màn hình. */}
+      {pending !== null && (
+        <Delayed>
+          <div aria-hidden="true" className="nav-progress" />
+          <span role="status" className="sr-only">
+            Đang tải…
+          </span>
+        </Delayed>
+      )}
       {/* `vt-header`/`vt-dock`/`vt-page`: tên View Transitions — header và dock đứng yên, chỉ `main` chuyển cảnh (spec §5.1). */}
       <header className="vt-header sticky top-0 z-10 border-b-2 border-night-800 bg-night-950/90 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-2">
@@ -106,7 +132,7 @@ export function Layout({ me, children }: LayoutProps) {
                     className={({ isActive }) =>
                       cx(
                         'flex items-center gap-1 rounded-full px-1.5 py-1 text-sm font-bold whitespace-nowrap',
-                        isActive ? 'bg-gold text-gold-ink' : 'text-night-200 hover:bg-night-700',
+                        highlighted(item, isActive) ? 'bg-gold text-gold-ink' : 'text-night-200 hover:bg-night-700',
                       )
                     }
                   >
@@ -155,7 +181,7 @@ export function Layout({ me, children }: LayoutProps) {
       </header>
 
       {/* Chừa chỗ cho thanh dock khi nó còn hiện (< lg). */}
-      <main className="vt-page mx-auto w-full max-w-5xl flex-1 px-4 py-4 pb-24 lg:pb-8">{children}</main>
+      <main aria-busy={pending !== null ? true : undefined} className="vt-page mx-auto w-full max-w-5xl flex-1 px-4 py-4 pb-24 lg:pb-8">{children}</main>
 
       {/* Thanh dock: khay tối bo hai góc trên 20px (spec §5.2). */}
       <nav
@@ -173,14 +199,14 @@ export function Layout({ me, children }: LayoutProps) {
                 className={({ isActive }) =>
                   cx(
                     'flex min-w-0 flex-1 flex-col items-center gap-0.5 px-0.5 pt-1 pb-1.5 text-[11px] leading-tight font-bold',
-                    isActive ? 'text-gold' : 'text-night-300',
+                    highlighted(item, isActive) ? 'text-gold' : 'text-night-300',
                   )
                 }
               >
                 {({ isActive }) => (
                   <>
                     {/* Chấm vàng trên icon của mục đang mở; mục khác giữ chỗ bằng chấm trong suốt để icon không nhảy. */}
-                    <span aria-hidden="true" className={cx('size-1.5 rounded-full', isActive ? 'bg-gold' : 'bg-transparent')} />
+                    <span aria-hidden="true" className={cx('size-1.5 rounded-full', highlighted(item, isActive) ? 'bg-gold' : 'bg-transparent')} />
                     <Icon aria-hidden="true" className="size-[22px] shrink-0" strokeWidth={2.25} />
                     {/*
                       320px / 7 mục ≈ 46px (mod/admin 8 mục ≈ 40px), trừ lề còn 42px (36px) cho nhãn:

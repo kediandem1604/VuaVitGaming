@@ -14,6 +14,9 @@
  */
 
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+
+/** Phần tử đang có tiêu điểm (để trả lại khi đóng), hoặc `null`. */
+const focusedElement = () => (document.activeElement instanceof HTMLElement ? document.activeElement : null);
 import { usePresenceState } from './Presence';
 
 interface ModalProps {
@@ -36,23 +39,41 @@ export function Modal({ titleId, onClose, children }: ModalProps) {
   const state = usePresenceState();
   const closing = state === 'closed';
 
-  // Mở: nhớ phần tử đang có tiêu điểm, đưa tiêu điểm vào hộp. Gỡ: trả lại (nếu chưa trả lúc đóng).
-  useEffect(() => {
-    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const wasClosing = useRef(closing);
+
+  function focusInside() {
     const dialog = dialogRef.current;
     if (dialog) (focusableIn(dialog)[0] ?? dialog).focus();
+  }
+
+  /**
+   * Trả tiêu điểm về phần tử đã mở hộp — đúng một lần: sau đó quên nó, để lúc hộp gỡ khỏi DOM
+   * (hết nhịp mờ ra) không giành lại tiêu điểm nếu người dùng đã sang chỗ khác.
+   */
+  function restoreFocus() {
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener && opener.isConnected) opener.focus();
+  }
+
+  // Mở: nhớ phần tử đang có tiêu điểm, đưa tiêu điểm vào hộp. Gỡ: trả lại (nếu chưa trả lúc đóng).
+  useEffect(() => {
+    openerRef.current = focusedElement();
+    focusInside();
     return restoreFocus;
   }, []);
 
-  // Bắt đầu mờ ra: trả tiêu điểm ngay, không bắt người dùng chờ hoạt ảnh.
   useEffect(() => {
+    const before = wasClosing.current;
+    wasClosing.current = closing;
+    // Bắt đầu mờ ra: trả tiêu điểm ngay, không bắt người dùng chờ hoạt ảnh.
     if (closing) restoreFocus();
+    // Mở lại giữa lúc mờ ra (cùng phần tử): nhớ lại người mở và đưa tiêu điểm vào hộp lần nữa.
+    else if (before) {
+      openerRef.current = focusedElement();
+      focusInside();
+    }
   }, [closing]);
-
-  function restoreFocus() {
-    const opener = openerRef.current;
-    if (opener && opener.isConnected) opener.focus();
-  }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {

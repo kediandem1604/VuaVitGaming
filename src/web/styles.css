@@ -78,7 +78,8 @@
      * Bộ chuyển động thống nhất (spec §5): mọi `transition`/`animation` trong app lấy thời gian và
      * nhịp từ đây, không ghi số cứng (test `motion.test.tsx` quét). `--ease-spring` chỉ cho nút
      * lún/nảy nhẹ. `--stagger-step` là bước so le giữa hai dòng danh sách (`.stagger-in`).
-     * Hoạt ảnh nhân vật và vệt sáng khung xương có nhịp riêng (`--dur-goose-*`, `--dur-skeleton`).
+     * Hoạt ảnh nhân vật, vệt sáng khung xương và vạch chuyển trang có nhịp riêng (`--dur-goose-*`,
+     * `--dur-skeleton`, `--dur-nav-progress`).
      */
     --dur-fast: 120ms;
     --dur-base: 200ms;
@@ -91,6 +92,7 @@
     --dur-goose-idle: 3s;
     --dur-goose-blink: 5.2s;
     --dur-skeleton: 1.2s;
+    --dur-nav-progress: 1.1s;
   }
 
   /*
@@ -309,8 +311,49 @@
 }
 
 /*
+ * Vạch tiến trình chuyển trang (`Layout`, khi chunk trang đích chưa về quá 150ms): dải vàng 3px
+ * dính mép trên, mờ vào `--dur-base`; một vệt chạy ngang lặp mãi — chỉ khi không giảm chuyển
+ * động (giảm thì vạch đứng yên, phủ hết chiều ngang). Không nhận sự kiện trỏ.
+ */
+.nav-progress {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  z-index: 50;
+  height: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  animation: fade-in var(--dur-base) var(--ease-out) both;
+}
+
+.nav-progress::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--color-gold);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nav-progress::before {
+    right: auto;
+    width: 40%;
+    border-radius: 9999px;
+    animation: nav-progress-run var(--dur-nav-progress) var(--ease-in) infinite;
+  }
+}
+
+@keyframes nav-progress-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/*
  * Khối bọc dữ liệu của `QueryState`: `display: contents` để không chen vào bố cục (gap/grid) của
- * cha. Khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc (`aria-busy="true"`), các con mờ
+ * cha. Khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc (`data-busy="true"`; `aria-busy` nằm ở khung thật), các con mờ
  * còn 60% trong `--dur-fast` (spec §4.4) — bố cục đứng yên, không nháy trống. Hoạt ảnh danh sách
  * (`.stagger-in`) đặt ở từng dòng, không ở con trực tiếp này, nên hai thứ không giẫm nhau.
  */
@@ -322,7 +365,7 @@
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.query-block[aria-busy='true'] > * {
+.query-block[data-busy='true'] > * {
   opacity: 0.6;
 }
 
@@ -553,6 +596,10 @@
 /* §5.3 Tab: vạch chỉ báo trượt (`TabIndicator`, chỉ `transform`); nội dung tab mới mờ vào. */
 .tab-indicator {
   transform-origin: left center;
+}
+
+/* Chỉ trượt sau lần đo đầu (`data-ready` do `TabIndicator` đặt): lúc tải trang vạch đứng ngay chỗ, không mọc ra từ mép trái. */
+.tab-indicator[data-ready] {
   transition: transform var(--dur-base) var(--ease-out);
 }
 
@@ -619,7 +666,8 @@
     animation-duration: var(--dur-fast);
   }
 
-  .tab-indicator {
+  .tab-indicator,
+  .tab-indicator[data-ready] {
     transition: none;
   }
 }

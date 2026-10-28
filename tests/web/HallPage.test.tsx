@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { HallDto, HallRoleDto, RoleDto, SeasonDto } from '../../src/shared/api-types';
+import { registerPrefetchRoute, resetPrefetchRegistry } from '../../src/web/lib/prefetch';
 import { HallPage } from '../../src/web/pages/HallPage';
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'icon' | 'metricLabel'> & Partial<RoleDto>): RoleDto => ({
@@ -350,4 +351,23 @@ test('a failed hall load shows the message and Thử lại recovers', async () =
   fail = false;
   fireEvent.click(screen.getByRole('button', { name: 'Thử lại' }));
   expect(await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
+});
+
+test('focusing a hall card or a holder name prefetches the leaderboard / member page chunk', async () => {
+  stubFetch();
+  const leaderboard = vi.fn(() => Promise.resolve({ default: () => null }));
+  const member = vi.fn(() => Promise.resolve({ default: () => null }));
+  registerPrefetchRoute('/bang-xep-hang', leaderboard);
+  registerPrefetchRoute('/thanh-vien/:id', member);
+  try {
+    renderAt('/dai-sanh');
+    await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+
+    fireEvent.focus(screen.getByRole('link', { name: /Ngỗng: Ngỗng Một/ }));
+    expect(leaderboard).toHaveBeenCalledTimes(1);
+    fireEvent.focus(screen.getByRole('link', { name: 'Ngỗng Một' }));
+    expect(member).toHaveBeenCalledTimes(1);
+  } finally {
+    resetPrefetchRegistry();
+  }
 });

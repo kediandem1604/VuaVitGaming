@@ -61,8 +61,9 @@ export function MembersTab() {
   const queryKey = [...ADMIN_MEMBERS_KEY, debouncedQ, status];
   // Gõ tìm/đổi trạng thái: giữ danh sách cũ mờ tới khi kết quả mới về (spec §4.4).
   const members = useQuery({ queryKey, queryFn: () => apiGet<AdminMemberDto[]>(url), placeholderData: keepPreviousData });
-  // Lần hiện đầu: 8 dòng đầu mờ + trượt so le (spec §5.4); gõ tìm sau đó không chạy lại.
-  const stagger = useStaggerOnce();
+  // Lần hiện đầu: 8 dòng đầu mờ + trượt so le (spec §5.4); gõ tìm sau đó không chạy lại. Đồng hồ
+  // chỉ chạy khi đã có dòng — tải chậm thì lượt so le vẫn trọn vẹn.
+  const stagger = useStaggerOnce((members.data?.length ?? 0) > 0);
 
   return (
     <section className="flex flex-col gap-3">

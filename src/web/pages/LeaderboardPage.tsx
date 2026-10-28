@@ -23,7 +23,7 @@
  */
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 import type { Faction, FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleDto } from '../../shared/api-types';
 import { formatSeasonScore, hasExtraMetric } from '../../shared/metric';
 import { apiGet } from '../api';
@@ -43,6 +43,7 @@ import { formatSeasonLabel } from '../lib/format';
 import { memberPath } from '../lib/links';
 import { useStaggerOnce } from '../lib/motion';
 import { rolesQuery } from '../lib/queries';
+import { PrefetchLink } from '../components/PrefetchLink';
 
 const ROLE_PARAM = 'role';
 const LIMIT = 50;
@@ -225,17 +226,17 @@ function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string
       <Avatar name={row.displayName} url={row.avatarUrl} className="size-8 text-sm" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
         <div className="flex items-baseline justify-between gap-2">
-          <Link to={memberPath(row.memberId)} className="min-w-0 truncate font-bold text-white hover:underline">
+          <PrefetchLink to={memberPath(row.memberId)} className="min-w-0 truncate font-bold text-white hover:underline">
             {row.displayName}
-          </Link>
+          </PrefetchLink>
           <span className="shrink-0 font-bold text-gold tabular-nums">
             <CountUp value={row.points} /> điểm
           </span>
         </div>
         <p className="text-sm break-words text-night-300">
-          <Link to={`/bang-xep-hang?${ROLE_PARAM}=${row.role.id}&${SEASON_PARAM}=${seasonId}`} className="font-bold text-night-200 hover:underline">
+          <PrefetchLink to={`/bang-xep-hang?${ROLE_PARAM}=${row.role.id}&${SEASON_PARAM}=${seasonId}`} className="font-bold text-night-200 hover:underline">
             <span aria-hidden="true">{row.role.icon}</span> {row.role.nameVi}
-          </Link>
+          </PrefetchLink>
           {' · '}
           <span className="tabular-nums">{formatSeasonScore(row.value, row.role)}</span>
         </p>
@@ -309,9 +310,9 @@ function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
               {row.rank === 1 ? '👑' : row.rank}
             </span>
             <Avatar name={row.displayName} url={row.avatarUrl} className="size-9 text-sm" />
-            <Link to={memberPath(row.memberId)} className="min-w-0 flex-1 truncate font-bold text-white hover:underline">
+            <PrefetchLink to={memberPath(row.memberId)} className="min-w-0 flex-1 truncate font-bold text-white hover:underline">
               {row.displayName}
-            </Link>
+            </PrefetchLink>
             {/*
              * Chỉ số đã ghi một lần trên đầu ("Chỉ số: …") và trên bục; dòng chỉ ghi số (title = tên chỉ
              * số) để không tràn ở 320px với nhãn dài. Role có chỉ số phụ không có đơn vị dài: ghi "N điểm".

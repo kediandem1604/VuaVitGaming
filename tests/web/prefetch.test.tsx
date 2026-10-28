@@ -1,6 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { PrefetchLink, PrefetchNavLink } from '../../src/web/components/PrefetchLink';
+import { endNavigation, pendingNavigation } from '../../src/web/lib/navPending';
 import { prefetchRoute, registerPrefetchRoute, resetPrefetchRegistry, usePrefetchOnIntent } from '../../src/web/lib/prefetch';
 
 const HOVER_MS = 80;
@@ -8,6 +11,7 @@ const HOVER_MS = 80;
 beforeEach(() => {
   vi.useFakeTimers();
   resetPrefetchRegistry();
+  endNavigation();
 });
 
 afterEach(() => {
@@ -105,4 +109,83 @@ test('a failed chunk prefetch is swallowed so the next intent can try again', as
   prefetchRoute('/dai-sanh', queryClient);
   await vi.runAllTimersAsync();
   expect(load).toHaveBeenCalledTimes(2);
+});
+
+test('a route with a :param matches any value of that segment', () => {
+  const load = vi.fn(() => Promise.resolve({ default: () => null }));
+  registerPrefetchRoute('/thanh-vien/:id', load);
+
+  prefetchRoute('/thanh-vien/42?tab=x');
+  prefetchRoute('/thanh-vien/7');
+  prefetchRoute('/thanh-vien');
+  prefetchRoute('/thanh-vien/7/khac');
+  // Một mẫu = một chunk: hai id khác nhau vẫn chỉ import một lần; số đoạn khác thì không khớp.
+  expect(load).toHaveBeenCalledTimes(1);
+});
+
+// ---------------------------------------------------------------------------
+// PrefetchLink / PrefetchNavLink
+// ---------------------------------------------------------------------------
+
+const renderLinks = (initial = '/') =>
+  render(
+    <MemoryRouter initialEntries={[initial]}>
+      <PrefetchLink to="/dai-sanh?mua=2026-09" onFocus={callerFocus} onPointerEnter={callerEnter} onClick={callerClick}>
+        Đại sảnh
+      </PrefetchLink>
+      <PrefetchNavLink to="/huy-hieu" onTouchStart={callerTouch}>
+        Huy hiệu
+      </PrefetchNavLink>
+    </MemoryRouter>,
+  );
+const callerFocus = vi.fn();
+const callerEnter = vi.fn();
+const callerTouch = vi.fn();
+const callerClick = vi.fn();
+
+test("the caller's own focus/pointer/touch handlers still run alongside the prefetch", () => {
+  const hall = vi.fn(() => Promise.resolve({ default: () => null }));
+  const badges = vi.fn(() => Promise.resolve({ default: () => null }));
+  registerPrefetchRoute('/dai-sanh', hall);
+  registerPrefetchRoute('/huy-hieu', badges);
+  renderLinks();
+
+  fireEvent.focus(screen.getByRole('link', { name: 'Đại sảnh' }));
+  expect(callerFocus).toHaveBeenCalledTimes(1);
+  expect(hall).toHaveBeenCalledTimes(1);
+
+  fireEvent.pointerEnter(screen.getByRole('link', { name: 'Đại sảnh' }));
+  expect(callerEnter).toHaveBeenCalledTimes(1);
+
+  fireEvent.touchStart(screen.getByRole('link', { name: 'Huy hiệu' }));
+  expect(callerTouch).toHaveBeenCalledTimes(1);
+  expect(badges).toHaveBeenCalledTimes(1);
+});
+
+test('clicking a link starts loading the target chunk (even with Save-Data) and marks the navigation pending', () => {
+  vi.stubGlobal('navigator', { ...navigator, connection: { saveData: true } });
+  const badges = vi.fn(() => new Promise(() => undefined));
+  registerPrefetchRoute('/huy-hieu', badges);
+  renderLinks();
+
+  fireEvent.click(screen.getByRole('link', { name: 'Huy hiệu' }));
+  expect(badges).toHaveBeenCalledTimes(1);
+  expect(pendingNavigation()).toBe('/huy-hieu');
+});
+
+test("a modified click, a click the caller prevented, or a click on the current page is not a pending navigation", () => {
+  callerClick.mockImplementationOnce((event: { preventDefault: () => void }) => event.preventDefault());
+  renderLinks('/dai-sanh');
+
+  fireEvent.click(screen.getByRole('link', { name: 'Huy hiệu' }), { ctrlKey: true });
+  expect(pendingNavigation()).toBeNull();
+  // Người gọi tự chặn điều hướng.
+  fireEvent.click(screen.getByRole('link', { name: 'Đại sảnh' }));
+  expect(callerClick).toHaveBeenCalledTimes(1);
+  expect(pendingNavigation()).toBeNull();
+  // Đã ở `/dai-sanh`: chỉ đổi query string, không chờ chunk nào.
+  act(() => {
+    fireEvent.click(screen.getByRole('link', { name: 'Đại sảnh' }));
+  });
+  expect(pendingNavigation()).toBeNull();
 });

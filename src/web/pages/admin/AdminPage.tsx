@@ -8,17 +8,22 @@
  * Giao diện Sảnh đêm (spec §6 Quản trị): thanh tab là dải chip cuộn ngang, tab đang chọn
  * nền `gold`; nội dung các tab ưu tiên dễ đọc hơn trang trí.
  *
- * Mỗi tab là một chunk riêng (`lazyPage`, spec §4.2): trang này vốn đã là chunk riêng, tab nào
- * mở mới tải tab đó. Trong lúc chunk về, tabpanel hiện khung xương dòng (sau 150ms).
+ * Mỗi tab là một chunk riêng (`lazyPage`, spec §4.2): trang này vốn đã là chunk riêng. Khi trang
+ * mở, mọi tab người này được xem tải trước (trừ khi "tiết kiệm dữ liệu" — khi đó rê chuột/focus
+ * vào chip mới tải), để đổi tab không phải chờ. Tabpanel có `key` theo tab nên mỗi tab là một
+ * `Suspense` mới: chunk chưa về thì chip đích vẫn sáng ngay và tabpanel hiện khung xương dòng
+ * (sau 150ms, kèm `role="status"` "Đang tải…") thay vì giữ tab cũ.
  */
 
-import { Suspense, type ReactNode } from 'react';
+import { Suspense, useEffect, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
-import { Delayed, SkeletonRows } from '../../components/Skeleton';
+import { PageErrorBoundary } from '../../components/PageErrorBoundary';
+import { LoadingFallback, SkeletonRows } from '../../components/Skeleton';
 import { TabIndicator } from '../../components/TabIndicator';
 import { useCurrentMember } from '../../hooks/useMe';
 import { cx } from '../../lib/cx';
 import { lazyPage } from '../../lib/lazyPage';
+import { saveDataOn } from '../../lib/prefetch';
 
 const SessionsTab = lazyPage(() => import('./SessionsTab').then((m) => ({ default: m.SessionsTab })));
 const ReviewsTab = lazyPage(() => import('./ReviewsTab').then((m) => ({ default: m.ReviewsTab })));
@@ -35,19 +40,24 @@ interface TabDef {
   label: string;
   adminOnly: boolean;
   render: () => ReactNode;
+  /** Import thô chunk của tab (lỗi chỉ từ chối, không tải lại trang). */
+  preload: () => Promise<unknown>;
 }
 
-const SESSIONS_TAB: TabDef = { key: 'buoi-choi', label: 'Buổi chơi', adminOnly: false, render: () => <SessionsTab /> };
+const SESSIONS_TAB: TabDef = { key: 'buoi-choi', label: 'Buổi chơi', adminOnly: false, render: () => <SessionsTab />, preload: SessionsTab.preload };
 
 const TABS: readonly TabDef[] = [
   SESSIONS_TAB,
-  { key: 'duyet-diem', label: 'Duyệt điểm', adminOnly: false, render: () => <ReviewsTab /> },
-  { key: 'thanh-vien', label: 'Thành viên', adminOnly: false, render: () => <MembersTab /> },
-  { key: 'gui-loi', label: 'Gửi lỗi', adminOnly: false, render: () => <FailuresTab /> },
-  { key: 'hang-muc', label: 'Hạng mục MVP', adminOnly: true, render: () => <CategoriesTab /> },
-  { key: 'role', label: 'Role', adminOnly: true, render: () => <RolesTab /> },
-  { key: 'cai-dat', label: 'Cài đặt', adminOnly: true, render: () => <SettingsTab /> },
+  { key: 'duyet-diem', label: 'Duyệt điểm', adminOnly: false, render: () => <ReviewsTab />, preload: ReviewsTab.preload },
+  { key: 'thanh-vien', label: 'Thành viên', adminOnly: false, render: () => <MembersTab />, preload: MembersTab.preload },
+  { key: 'gui-loi', label: 'Gửi lỗi', adminOnly: false, render: () => <FailuresTab />, preload: FailuresTab.preload },
+  { key: 'hang-muc', label: 'Hạng mục MVP', adminOnly: true, render: () => <CategoriesTab />, preload: CategoriesTab.preload },
+  { key: 'role', label: 'Role', adminOnly: true, render: () => <RolesTab />, preload: RolesTab.preload },
+  { key: 'cai-dat', label: 'Cài đặt', adminOnly: true, render: () => <SettingsTab />, preload: SettingsTab.preload },
 ];
+
+/** Tải trước một tab; lỗi nuốt — lần render thật sẽ tự tải (và `lazyPage` lo chunk hỏng). */
+const warm = (tab: TabDef) => void tab.preload().catch(() => undefined);
 
 export function AdminPage() {
   const me = useCurrentMember();
@@ -56,11 +66,21 @@ export function AdminPage() {
   const tabs = TABS.filter((tab) => !tab.adminOnly || me.accessLevel === 'admin');
   const requested = params.get(TAB_PARAM);
   const active = tabs.find((tab) => tab.key === requested) ?? SESSIONS_TAB;
+  
+  const canSeeAdmin = me.accessLevel === 'admin';
+  useEffect(() => {
+    if (saveDataOn()) return;
+    for (const tab of TABS) if (!tab.adminOnly || canSeeAdmin) warm(tab);
+  }, [canSeeAdmin]);
 
-  const select = (key: string) => {
+  const select = (tab: TabDef) => {
+    warm(tab);
     const next = new URLSearchParams(params);
-    next.set(TAB_PARAM, key);
+    next.set(TAB_PARAM, tab.key);
     setParams(next, { replace: true });
+  };
+  const intent = (tab: TabDef) => () => {
+    if (!saveDataOn()) warm(tab);
   };
 
   return (
@@ -86,7 +106,9 @@ export function AdminPage() {
               aria-selected={selected}
               aria-controls={`panel-${tab.key}`}
               className={cx('chip shrink-0 px-4 py-1.5 text-base hover:brightness-110', selected && 'bg-gold text-gold-ink')}
-              onClick={() => select(tab.key)}
+              onClick={() => select(tab)}
+              onPointerEnter={intent(tab)}
+              onFocus={intent(tab)}
             >
               {tab.label}
             </button>
@@ -95,16 +117,24 @@ export function AdminPage() {
       </div>
 
       {/* `key` theo tab để nội dung tab mới mờ vào (`tab-enter`, spec §5.3). */}
-      <section key={active.key} role="tabpanel" id={`panel-${active.key}`} aria-labelledby={`tab-${active.key}`} className="tab-enter flex flex-col gap-4">
-        <Suspense
-          fallback={
-            <Delayed>
-              <SkeletonRows />
-            </Delayed>
-          }
-        >
-          {active.render()}
-        </Suspense>
+      <section
+        key={active.key}
+        role="tabpanel"
+        id={`panel-${active.key}`}
+        aria-labelledby={`tab-${active.key}`}
+        className="tab-enter flex flex-col gap-4"
+      >
+        <PageErrorBoundary>
+          <Suspense
+            fallback={
+              <LoadingFallback>
+                <SkeletonRows />
+              </LoadingFallback>
+            }
+          >
+            {active.render()}
+          </Suspense>
+        </PageErrorBoundary>
       </section>
     </div>
   );

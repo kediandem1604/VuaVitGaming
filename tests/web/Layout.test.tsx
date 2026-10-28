@@ -1,8 +1,11 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { Suspense } from 'react';
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { MeDto } from '../../src/shared/api-types';
 import { Layout } from '../../src/web/components/Layout';
+import { lazyPage } from '../../src/web/lib/lazyPage';
+import { endNavigation } from '../../src/web/lib/navPending';
 
 const me: MeDto = {
   id: 1,
@@ -18,6 +21,8 @@ const me: MeDto = {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  endNavigation();
 });
 
 const renderLayout = (who: MeDto, path = '/') =>
@@ -153,4 +158,66 @@ test('a failed logout shows its alert on its own line under the header row', asy
   // …mà là khối riêng ngay dưới hàng chứa nút Đăng xuất.
   expect(alert.previousElementSibling).not.toBe(button);
   expect(alert.previousElementSibling).toContainElement(button);
+});
+
+// Điều hướng tới trang lười: React Router đổi vị trí trong transition nên trang cũ đứng yên tới khi
+// chunk về — phải có phản hồi ngay (mục đích tô sẵn, vạch tiến trình sau 150ms, `main` bận).
+test('clicking a nav link to a lazy page gives feedback until the chunk arrives', async () => {
+  vi.useFakeTimers();
+  let resolve: (mod: { default: () => JSX.Element }) => void = () => undefined;
+  const Badges = lazyPage(() => new Promise<{ default: () => JSX.Element }>((r) => (resolve = r)));
+  render(
+    <MemoryRouter initialEntries={['/']}>
+      <Routes>
+        <Route
+          element={
+            <Layout me={me}>
+              <Suspense fallback={<p>khung xương</p>}>
+                <Outlet />
+              </Suspense>
+            </Layout>
+          }
+        >
+          <Route index element={<p>trang chủ</p>} />
+          <Route path="huy-hieu" element={<Badges />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  const [headerBadges, dockBadges] = screen.getAllByRole('link', { name: /Huy hiệu/ });
+  act(() => {
+    fireEvent.click(dockBadges!);
+  });
+  // Trang cũ còn đó (transition), nhưng mục đích đã tô vàng và `main` báo bận.
+  expect(screen.getByText('trang chủ')).toBeInTheDocument();
+  expect(headerBadges?.className).toMatch(/\bbg-gold\b/);
+  expect(dockBadges?.className).toMatch(/\btext-gold\b/);
+  const [headerHome] = screen.getAllByRole('link', { name: /Hôm nay/ });
+  expect(headerHome?.className).not.toMatch(/\bbg-gold\b/);
+  expect(screen.getByRole('main')).toHaveAttribute('aria-busy', 'true');
+  // Vạch tiến trình chỉ hiện sau 150ms (chunk về nhanh thì không nháy).
+  expect(document.querySelector('.nav-progress')).toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(150);
+  });
+  expect(document.querySelector('.nav-progress')).toHaveAttribute('aria-hidden', 'true');
+  expect(screen.getByRole('status')).toHaveTextContent('Đang tải…');
+
+  await act(async () => {
+    resolve({ default: () => <h1>Huy hiệu</h1> });
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole('heading', { name: 'Huy hiệu' })).toBeInTheDocument();
+  expect(document.querySelector('.nav-progress')).toBeNull();
+  expect(screen.getByRole('main')).not.toHaveAttribute('aria-busy');
+});
+
+test('styles.css: the navigation bar uses the motion tokens and stays still under reduced motion', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { resolve: resolvePath } = await import('node:path');
+  const css = readFileSync(resolvePath(__dirname, '../../src/web/styles.css'), 'utf8');
+  expect(css).toMatch(/\.nav-progress\s*\{[^}]*animation:\s*fade-in var\(--dur-base\)/);
+  // Vệt chạy chỉ khi không giảm chuyển động.
+  expect(css).toMatch(/@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.nav-progress::before/);
 });

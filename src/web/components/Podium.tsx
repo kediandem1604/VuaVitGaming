@@ -13,7 +13,6 @@
  * + tên (tên link chỉ là tên người). Điểm và mặt bục nằm ngoài link.
  */
 
-import { Link } from 'react-router';
 import type { LeaderboardRowDto, RoleDto } from '../../shared/api-types';
 import { seasonScoreUnit } from '../../shared/metric';
 import { cx } from '../lib/cx';
@@ -22,6 +21,7 @@ import { useStaggerOnce } from '../lib/motion';
 import { Avatar } from './Avatar';
 import { Character } from './Character';
 import { CountUp } from './CountUp';
+import { PrefetchLink } from './PrefetchLink';
 
 interface PodiumProps {
   role: RoleDto;
@@ -53,16 +53,16 @@ export function Podium({ role, rows }: PodiumProps) {
           <li key={row.memberId} className={cx('flex min-w-0 max-w-44 flex-1 flex-col items-center gap-1 text-center', order[index])}>
             {index === 0 ? (
               // `flex justify-center` để nhân vật (`w-full`, tối đa 120px) vẫn đứng giữa cột như khi chưa có link.
-              <Link to={memberPath(row.memberId)} className="flex w-full justify-center rounded-xl">
+              <PrefetchLink to={memberPath(row.memberId)} className="flex w-full justify-center rounded-xl">
                 <Character role={role} holderName={row.displayName} variant="current" />
-              </Link>
+              </PrefetchLink>
             ) : (
               // Một link cho cả avatar và tên: avatar không nhãn nên tên link chỉ là tên người; gạch chân tên khi rê chuột.
-              <Link to={memberPath(row.memberId)} className="flex w-full flex-col items-center gap-1 rounded-xl hover:underline">
+              <PrefetchLink to={memberPath(row.memberId)} className="flex w-full flex-col items-center gap-1 rounded-xl hover:underline">
                 <Avatar name={row.displayName} url={row.avatarUrl} className="size-14 text-xl" />
                 {/* Tên xuống dòng thay vì cắt "…": cột chỉ ~90px ở 320px, cắt thì mất cả tên ngắn. */}
                 <p className="w-full px-1 leading-tight font-bold break-words text-white">{row.displayName}</p>
-              </Link>
+              </PrefetchLink>
             )}
             <p className="px-1 text-sm leading-tight font-bold break-words text-gold">
               {/* Điểm đổi lúc đang xem thì đếm tới số mới (spec §5.6). */}

@@ -13,7 +13,7 @@
  */
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 import type { HallDto, HallRoleDto } from '../../shared/api-types';
 import { apiGet } from '../api';
 import type { CharacterVariant } from '../components/Character';
@@ -27,6 +27,7 @@ import { cx } from '../lib/cx';
 import { FACTION_LABEL, isFaction, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
 import { formatSeasonLabel } from '../lib/format';
 import { memberPath } from '../lib/links';
+import { PrefetchLink } from '../components/PrefetchLink';
 
 const TAB_PARAM = 'phe';
 
@@ -195,19 +196,19 @@ function HallTile({ entry, seasonId }: { entry: HallRoleDto; seasonId: string })
   return (
     <>
       {/* `flex` để `lift` (transform) có tác dụng — thẻ `a` inline không nhận transform; bo góc theo panel cho viền focus. */}
-      <Link to={`/bang-xep-hang?role=${role.id}&${SEASON_PARAM}=${seasonId}`} className="lift flex w-full rounded-2xl">
+      <PrefetchLink to={`/bang-xep-hang?role=${role.id}&${SEASON_PARAM}=${seasonId}`} className="lift flex w-full rounded-2xl">
         <RoleCard role={role} holderName={name} variant={variant} score={score} extra={extra} className="w-full" />
-      </Link>
+      </PrefetchLink>
       {shown && (
         // Giữa cột, sát dưới thẻ; tên dài xuống dòng (cột chỉ ~140px ở 320px), `max-w-full` để không kéo ô lưới
         // rộng ra; `wrap-anywhere` (overflow-wrap: anywhere) để tên không có dấu cách cũng bẻ được và không
         // tính vào bề rộng tối thiểu của ô.
-        <Link
+        <PrefetchLink
           to={memberPath(shown.memberId)}
           className="max-w-full justify-self-center self-start px-1 text-center text-sm leading-tight font-bold wrap-anywhere text-gold hover:underline"
         >
           {shown.displayName}
-        </Link>
+        </PrefetchLink>
       )}
     </>
   );

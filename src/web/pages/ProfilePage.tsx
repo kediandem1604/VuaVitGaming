@@ -10,7 +10,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy } from 'lucide-react';
 import { useEffect, useId, useState, type ChangeEvent, type FormEvent } from 'react';
-import { Link } from 'react-router';
 import type { HeldRoleDto, MeDto, PublicMemberDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { Avatar } from '../components/Avatar';
@@ -21,6 +20,7 @@ import { RoleCard } from '../components/RoleCard';
 import { ME_QUERY_KEY, useCurrentMember } from '../hooks/useMe';
 import { memberPath } from '../lib/links';
 import { titlesQuery } from '../lib/queries';
+import { PrefetchLink } from '../components/PrefetchLink';
 
 interface ProfilePatch {
   email?: string | null;
@@ -99,9 +99,9 @@ function HeldRolesSection({ me }: { me: MeDto }) {
           )
         }
       </QueryState>
-      <Link to="/khai-diem" className="btn-secondary self-start">
+      <PrefetchLink to="/khai-diem" className="btn-secondary self-start">
         Xem lịch sử khai điểm
-      </Link>
+      </PrefetchLink>
     </section>
   );
 }
@@ -144,9 +144,9 @@ function MyBadgesSection({ me }: { me: MeDto }) {
           )
         }
       </QueryState>
-      <Link to={memberPath(me.id)} className="btn-secondary self-start">
+      <PrefetchLink to={memberPath(me.id)} className="btn-secondary self-start">
         Xem trang công khai
-      </Link>
+      </PrefetchLink>
     </section>
   );
 }

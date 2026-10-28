@@ -703,12 +703,16 @@ test('switching season keeps the old board dimmed with aria-busy until the new o
   // Tiêu đề mùa đổi ngay, bảng cũ vẫn đứng (không nháy trống) nhưng khối đó báo bận.
   expect(screen.getByText('Tháng 9/2026')).toBeInTheDocument();
   const busyBlock = screen.getByRole('list', { name: 'Mọi hạng' }).closest('.query-block');
-  expect(busyBlock).toHaveAttribute('aria-busy', 'true');
+  expect(busyBlock).toHaveAttribute('data-busy', 'true');
+  // `aria-busy` ở khung thật bao quanh (không phải khối `display: contents`).
+  const busyHost = busyBlock?.parentElement?.closest('[aria-busy="true"]');
+  expect(busyHost).not.toBeNull();
+  expect(busyHost).not.toHaveClass('query-block');
   expect(screen.queryByText('Chưa có ai khai điểm mùa này')).not.toBeInTheDocument();
 
   release();
   // Mùa 9 của Ngỗng không có ai: bảng cũ nhường chỗ cho câu trống, hết bận.
   expect(await screen.findByText('Chưa có ai khai điểm mùa này')).toBeInTheDocument();
   expect(screen.queryByRole('list', { name: 'Mọi hạng' })).not.toBeInTheDocument();
-  expect(document.querySelector('.query-block[aria-busy="true"]')).toBeNull();
+  expect(document.querySelector('.query-block[data-busy="true"], [aria-busy="true"]')).toBeNull();
 });

@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { QueryState } from '../../src/web/components/QueryState';
-import { Delayed, PageSkeleton, Skeleton, SkeletonCards, SkeletonRows } from '../../src/web/components/Skeleton';
+import { Delayed, LoadingFallback, PageSkeleton, Skeleton, SkeletonCards, SkeletonRows } from '../../src/web/components/Skeleton';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -52,6 +52,20 @@ test('QueryState shows the default row skeleton after 150ms, not before', () => 
   expect(screen.queryByText('Đang tải…')).not.toBeInTheDocument();
   act(() => vi.advanceTimersByTime(150));
   expect(container.querySelector('[data-skeleton="rows"]')).not.toBeNull();
+  // Khung xương ẩn khỏi cây truy cập; trình đọc màn hình nghe "Đang tải…" qua một dòng `status` ẩn.
+  expect(screen.getByRole('status')).toHaveTextContent('Đang tải…');
+  expect(screen.getByRole('status').className).toMatch(/\bsr-only\b/);
+});
+
+test('LoadingFallback announces loading only once its skeleton shows', () => {
+  render(
+    <LoadingFallback>
+      <SkeletonRows />
+    </LoadingFallback>,
+  );
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(150));
+  expect(screen.getByRole('status')).toHaveTextContent('Đang tải…');
 });
 
 test('QueryState takes a custom skeleton', () => {
@@ -64,15 +78,38 @@ test('QueryState takes a custom skeleton', () => {
   expect(container.querySelector('[data-skeleton="cards"]')).not.toBeNull();
 });
 
-test('placeholder data renders dimmed with aria-busy; fresh data clears it', () => {
-  const { container, rerender } = render(
-    <QueryState query={{ ...pending, data: ['cũ'], isPlaceholderData: true }}>{(rows) => <p>{rows.join()}</p>}</QueryState>,
+test('placeholder data dims the block and marks the nearest real container busy; fresh data clears it', () => {
+  const view = (rows: string[], isPlaceholderData: boolean) => (
+    <section data-testid="khung">
+      <h2>Bảng</h2>
+      <QueryState query={{ ...pending, data: rows, isPlaceholderData }}>{(r) => <p>{r.join()}</p>}</QueryState>
+    </section>
   );
+  const { container, rerender } = render(view(['cũ'], true));
   const block = container.querySelector('.query-block');
-  expect(block).toHaveAttribute('aria-busy', 'true');
+  // `display: contents` bị một số trình duyệt bỏ khỏi cây truy cập: `aria-busy` đặt ở `section`, khối chỉ mang dấu để mờ.
+  expect(block).toHaveAttribute('data-busy', 'true');
+  expect(block).not.toHaveAttribute('aria-busy');
+  expect(screen.getByTestId('khung')).toHaveAttribute('aria-busy', 'true');
   expect(screen.getByText('cũ')).toBeInTheDocument();
 
-  rerender(<QueryState query={{ ...pending, data: ['mới'], isPlaceholderData: false }}>{(rows) => <p>{rows.join()}</p>}</QueryState>);
-  expect(container.querySelector('.query-block')).toHaveAttribute('aria-busy', 'false');
+  rerender(view(['mới'], false));
+  expect(container.querySelector('.query-block')).toHaveAttribute('data-busy', 'false');
+  expect(screen.getByTestId('khung')).not.toHaveAttribute('aria-busy');
   expect(screen.getByText('mới')).toBeInTheDocument();
+});
+
+test('two busy blocks in one container: it stays busy until both have fresh data', () => {
+  const view = (a: boolean, b: boolean) => (
+    <div role="tabpanel" data-testid="panel">
+      <QueryState query={{ ...pending, data: 1, isPlaceholderData: a }}>{() => <p>a</p>}</QueryState>
+      <QueryState query={{ ...pending, data: 2, isPlaceholderData: b }}>{() => <p>b</p>}</QueryState>
+    </div>
+  );
+  const { rerender } = render(view(true, true));
+  expect(screen.getByTestId('panel')).toHaveAttribute('aria-busy', 'true');
+  rerender(view(false, true));
+  expect(screen.getByTestId('panel')).toHaveAttribute('aria-busy', 'true');
+  rerender(view(false, false));
+  expect(screen.getByTestId('panel')).not.toHaveAttribute('aria-busy');
 });

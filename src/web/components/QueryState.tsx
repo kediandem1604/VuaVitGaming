@@ -1,6 +1,22 @@
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { errorMessage } from '../api';
-import { Delayed, SkeletonRows } from './Skeleton';
+import { LoadingFallback, SkeletonRows } from './Skeleton';
+
+/** Khung thật nhận `aria-busy` thay cho `.query-block` (`display: contents`, có thể bị bỏ khỏi cây truy cập). */
+const BUSY_HOST = 'section, [role="tabpanel"], [role="region"], article, main';
+
+/** Số khối đang bận trong mỗi khung: hai `QueryState` chung một khung thì khung còn bận tới khi cả hai xong. */
+const busyCounts = new WeakMap<Element, number>();
+
+function markBusy(host: Element): () => void {
+  busyCounts.set(host, (busyCounts.get(host) ?? 0) + 1);
+  host.setAttribute('aria-busy', 'true');
+  return () => {
+    const left = (busyCounts.get(host) ?? 1) - 1;
+    busyCounts.set(host, left);
+    if (left <= 0) host.removeAttribute('aria-busy');
+  };
+}
 
 /**
  * Phần kết quả truy vấn mà khối này cần. Kết quả của `useQuery` lẫn `useInfiniteQuery` đều
@@ -27,13 +43,24 @@ interface QueryStateProps<T> {
  * Thử lại) / có dữ liệu. Có dữ liệu cũ thì vẫn hiện dữ liệu khi tải lại lỗi.
  *
  * Có dữ liệu: bọc trong `.query-block` (`display: contents`, không đổi bố cục của cha) mang
- * `aria-busy` — khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc thì con mờ còn 60%
- * (CSS `.query-block[aria-busy="true"] > *`), bố cục đứng yên, không nháy trống (spec §4.4).
+ * `data-busy` — khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc thì con mờ còn 60%
+ * (CSS `.query-block[data-busy="true"] > *`), bố cục đứng yên, không nháy trống (spec §4.4).
+ * `aria-busy` đặt ở khung thật gần nhất (`section`, tabpanel… — `BUSY_HOST`, không có thì cha
+ * trực tiếp): phần tử `display: contents` có thể bị trình duyệt bỏ khỏi cây truy cập.
  */
 export function QueryState<T>({ query, children, skeleton }: QueryStateProps<T>) {
+  const block = useRef<HTMLDivElement>(null);
+  const busy = query.data !== undefined && query.isPlaceholderData === true;
+
+  useLayoutEffect(() => {
+    const parent = block.current?.parentElement;
+    if (!busy || !parent) return;
+    return markBusy(parent.closest(BUSY_HOST) ?? parent);
+  }, [busy]);
+
   if (query.data !== undefined) {
     return (
-      <div className="query-block" aria-busy={query.isPlaceholderData === true}>
+      <div ref={block} className="query-block" data-busy={busy}>
         {children(query.data)}
       </div>
     );
@@ -50,5 +77,5 @@ export function QueryState<T>({ query, children, skeleton }: QueryStateProps<T>)
       </div>
     );
   }
-  return <Delayed>{skeleton ?? <SkeletonRows />}</Delayed>;
+  return <LoadingFallback>{skeleton ?? <SkeletonRows />}</LoadingFallback>;
 }

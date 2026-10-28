@@ -12,7 +12,8 @@ import { Suspense, type ReactNode } from 'react';
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from 'react-router';
 import { ApiError, errorMessage } from './api';
 import { Layout } from './components/Layout';
-import { Delayed, PageSkeleton } from './components/Skeleton';
+import { PageErrorBoundary } from './components/PageErrorBoundary';
+import { LoadingFallback, PageSkeleton } from './components/Skeleton';
 import { useCurrentMember, useMe } from './hooks/useMe';
 import { prefersReducedMotion } from './lib/motion';
 import { supportsViewTransitions, useDisplayedLocation } from './lib/viewTransition';
@@ -77,15 +78,18 @@ function Shell() {
     return (
       <Layout me={me.data}>
         <div key={pathname} className={cssEnter ? 'page-enter' : undefined}>
-          <Suspense
-            fallback={
-              <Delayed>
-                <PageSkeleton />
-              </Delayed>
-            }
-          >
-            <Outlet context={me.data} />
-          </Suspense>
+          {/* Chunk vẫn hỏng sau lần tự tải lại → panel lỗi + "Tải lại trang"; `key` theo trang nên sang trang khác là thử lại. */}
+          <PageErrorBoundary>
+            <Suspense
+              fallback={
+                <LoadingFallback>
+                  <PageSkeleton />
+                </LoadingFallback>
+              }
+            >
+              <Outlet context={me.data} />
+            </Suspense>
+          </PageErrorBoundary>
         </div>
       </Layout>
     );

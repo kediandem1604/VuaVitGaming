@@ -7,9 +7,12 @@
  *
  * Tìm tab theo `id` và tablist qua `closest('[role="tablist"]')` ngay trong layout effect — không
  * nhận ref của tablist vì ref của cha chỉ được gắn sau layout effect của con (lần đo đầu sẽ trượt).
+ *
+ * Lần đo đầu chưa có `data-ready` nên CSS không chuyển động: vạch đứng ngay dưới tab, không mọc ra
+ * từ mép trái lúc tải trang. Một khung hình sau mới bật `data-ready` để các lần đổi tab sau trượt.
  */
 
-import { useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { cx } from '../lib/cx';
 
 interface TabIndicatorProps {
@@ -26,6 +29,15 @@ interface Box {
 
 export function TabIndicator({ selectedId, className }: TabIndicatorProps) {
   const [box, setBox] = useState<Box | null>(null);
+  const [ready, setReady] = useState(false);
+  const measured = box !== null;
+
+  // Đã đặt vị trí đầu tiên → khung hình sau mới cho trượt.
+  useEffect(() => {
+    if (!measured || ready) return;
+    const frame = requestAnimationFrame(() => setReady(true));
+    return () => cancelAnimationFrame(frame);
+  }, [measured, ready]);
 
   useLayoutEffect(() => {
     const tab = document.getElementById(selectedId);
@@ -48,6 +60,7 @@ export function TabIndicator({ selectedId, className }: TabIndicatorProps) {
       aria-hidden="true"
       data-tab-indicator=""
       data-for={selectedId}
+      data-ready={ready ? '' : undefined}
       className={cx('tab-indicator pointer-events-none absolute bottom-0 left-0 h-[3px] w-px bg-gold', className)}
       // Chưa đo được (tab chưa có trong DOM) thì ẩn, không để vạch 1px nằm ở góc.
       style={box ? { transform: `translateX(${box.x}px) scaleX(${box.w})` } : { opacity: 0 }}

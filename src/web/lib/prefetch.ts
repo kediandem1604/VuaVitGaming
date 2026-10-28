@@ -15,6 +15,8 @@ import { useContext, useEffect, useRef, type FocusEvent, type PointerEvent, type
 export const HOVER_INTENT_MS = 80;
 
 interface RouteEntry {
+  /** Các đoạn của mẫu đường dẫn; đoạn bắt đầu bằng `:` khớp mọi giá trị (`/thanh-vien/:id`). */
+  segments: string[];
   load: () => Promise<unknown>;
   data?: (queryClient: QueryClient) => void;
   /** Lời hứa import đang chạy hoặc đã xong: không gọi `load` lần hai; lỗi thì xoá để lần sau thử lại. */
@@ -23,8 +25,13 @@ interface RouteEntry {
 
 const registry = new Map<string, RouteEntry>();
 
+/**
+ * Đăng ký trang `path` (có thể có `:param`). `load` phải là import THÔ (`LazyPage.preload`): tải
+ * trước lỗi chỉ từ chối, không bao giờ tải lại trang (`lib/lazyPage.ts`).
+ */
 export function registerPrefetchRoute(path: string, load: () => Promise<unknown>, data?: (queryClient: QueryClient) => void): void {
-  registry.set(normalize(path), { load, data, chunk: null });
+  const bare = normalize(path);
+  registry.set(bare, { segments: bare.split('/'), load, data, chunk: null });
 }
 
 /** Chỉ cho test: xoá sổ đăng ký giữa các test. */
@@ -33,9 +40,29 @@ export function resetPrefetchRegistry(): void {
 }
 
 /** Bỏ query string/hash, bỏ `/` cuối (trừ gốc) để `/dai-sanh?mua=…` cũng khớp `/dai-sanh`. */
-function normalize(path: string): string {
+export function normalize(path: string): string {
   const bare = path.split(/[?#]/)[0] ?? '';
   return bare.length > 1 ? bare.replace(/\/+$/, '') : bare;
+}
+
+function lookup(path: string): RouteEntry | undefined {
+  const bare = normalize(path);
+  const exact = registry.get(bare);
+  if (exact) return exact;
+  const segments = bare.split('/');
+  for (const entry of registry.values()) {
+    if (entry.segments.length !== segments.length) continue;
+    if (entry.segments.every((seg, i) => (seg.startsWith(':') ? segments[i] !== '' : seg === segments[i]))) return entry;
+  }
+  return undefined;
+}
+
+/** Bắt đầu import chunk nếu chưa; lỗi thì xoá lời hứa (lần sau thử lại) và nuốt lỗi. */
+function startChunk(entry: RouteEntry): Promise<unknown> {
+  entry.chunk ??= entry.load().catch(() => {
+    entry.chunk = null;
+  });
+  return entry.chunk;
 }
 
 interface NetworkInformationLike {
@@ -51,13 +78,17 @@ export function saveDataOn(): boolean {
 /** Tải trước chunk + dữ liệu của trang `path`; đường dẫn chưa đăng ký hoặc đang tiết kiệm dữ liệu thì không làm gì. */
 export function prefetchRoute(path: string, queryClient?: QueryClient): void {
   if (saveDataOn()) return;
-  const entry = registry.get(normalize(path));
+  loadRoute(path, queryClient);
+}
+
+/**
+ * Như `prefetchRoute` nhưng không xét "tiết kiệm dữ liệu": dùng khi người dùng đã bấm link (điều
+ * hướng thật, chunk và dữ liệu đằng nào cũng phải tải) — bắt đầu sớm hơn lần render vài nhịp.
+ */
+export function loadRoute(path: string, queryClient?: QueryClient | null): void {
+  const entry = lookup(path);
   if (!entry) return;
-  if (entry.chunk === null) {
-    entry.chunk = entry.load().catch(() => {
-      entry.chunk = null;
-    });
-  }
+  void startChunk(entry);
   if (queryClient && entry.data) {
     try {
       entry.data(queryClient);
@@ -73,14 +104,9 @@ export function prefetchRoute(path: string, queryClient?: QueryClient): void {
  * dẫn chưa đăng ký (trang trong chunk chính) hay tải lỗi thì coi như sẵn sàng — `lazyPage` lo lỗi.
  */
 export function routeChunkReady(path: string): Promise<void> {
-  const entry = registry.get(normalize(path));
+  const entry = lookup(path);
   if (!entry) return Promise.resolve();
-  if (entry.chunk === null) {
-    entry.chunk = entry.load().catch(() => {
-      entry.chunk = null;
-    });
-  }
-  return entry.chunk.then(
+  return startChunk(entry).then(
     () => undefined,
     () => undefined,
   );
