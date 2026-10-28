@@ -22,8 +22,8 @@ function firstKeyFor(kit: Kit): string {
 
 const part = (name: string) => document.querySelector(`svg [data-part="${name}"]`);
 
-/** Ba bộ có phần vẽ sau thân (brief Task 4): ba lô, áo choàng, đôi cánh. */
-const WITH_BACK: Kit[] = ['explorer', 'vampire', 'heart'];
+/** Các bộ có phần vẽ sau thân: ba lô, áo choàng, đôi cánh, cánh/đuôi chim. */
+const WITH_BACK: Kit[] = ['explorer', 'vampire', 'heart', 'bird'];
 
 afterEach(cleanup);
 

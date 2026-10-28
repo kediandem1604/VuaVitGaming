@@ -28,9 +28,10 @@ import type { RoleDto } from '../../shared/api-types';
 import { cx } from '../lib/cx';
 import { nameplateFontSize, truncateName } from '../lib/nameplate';
 import { PALETTE } from '../lib/palette';
-import { FACTION_COLOUR, kitForRole } from '../lib/roleKits';
+import { bodyLook, FACTION_COLOUR, kitForRole } from '../lib/roleKits';
 import { GooseBody } from './goose/GooseBody';
 import { KitArt } from './goose/kits';
+import { starPath } from './goose/kits/shapes';
 
 export type CharacterVariant = 'current' | 'previous' | 'empty';
 
@@ -73,11 +74,11 @@ export function Character({ role, holderName, variant, size = 120, nameplate = t
 
   const figure = (
     <g data-part="figure" opacity={dimmed ? DIMMED_OPACITY : undefined}>
-      {!empty && <Glow colour={FACTION_COLOUR[role.faction]} />}
+      {!empty && <Glow colour={FACTION_COLOUR[role.faction]} mystic={role.faction === 'neutral'} />}
       {drawn && (
         <g data-part="pose" className={dressed ? 'goose-idle' : undefined} style={dressed ? idleStyle : undefined}>
           {dressed && <KitArt kit={kit} role={role} layer="back" />}
-          <GooseBody silhouette={empty} />
+          <GooseBody silhouette={empty} look={dressed ? bodyLook(role.key) : undefined} />
           {dressed && <KitArt kit={kit} role={role} layer="front" />}
         </g>
       )}
@@ -105,6 +106,7 @@ export function Character({ role, holderName, variant, size = 120, nameplate = t
       )}
       <svg viewBox="0 0 120 160" className="relative block h-full w-full overflow-visible" aria-hidden="true">
         {drawn && figure}
+        {!empty && <Pumpkin />}
         {nameplate && <Nameplate text={text} muted={empty} />}
         {nameplate && dimmed && <PreviousTag />}
       </svg>
@@ -112,15 +114,43 @@ export function Character({ role, holderName, variant, size = 120, nameplate = t
   );
 }
 
-/** Vòng sáng phe dưới chân: hai elip cùng màu chồng nhau, vòng ngoài mờ hơn, cho cảm giác toả sáng. */
-function Glow({ colour }: { colour: string }) {
+/**
+ * Vòng sáng phe dưới chân: hai elip cùng màu chồng nhau, vòng ngoài mờ hơn, cho cảm giác toả sáng.
+ * Phe thứ 3 (`mystic`) thêm vòng phép mảnh và ba đốm sao lấp lánh quanh chân (`aura-twinkle`,
+ * chỉ đổi `opacity`, tắt khi giảm chuyển động).
+ */
+function Glow({ colour, mystic }: { colour: string; mystic: boolean }) {
   return (
     <g data-part="glow" fill={colour}>
       <ellipse cx="60" cy="153" rx="40" ry="6.5" opacity="0.2" />
       <ellipse cx="60" cy="153" rx="30" ry="4.5" opacity="0.45" />
+      {mystic && (
+        <>
+          <ellipse cx="60" cy="153" rx="46" ry="8" fill="none" stroke={PALETTE['third-soft']} strokeWidth={1.2} strokeDasharray="3 4" opacity="0.7" />
+          <path className="aura-twinkle" d={SPARKS[0]} fill={PALETTE['third-soft']} />
+          <path className="aura-twinkle" d={SPARKS[1]} fill={PALETTE['third-soft']} style={{ animationDelay: '-0.8s' }} />
+          <path className="aura-twinkle" d={SPARKS[2]} fill={PALETTE.white} style={{ animationDelay: '-1.6s' }} />
+        </>
+      )}
     </g>
   );
 }
+
+/** Bí ngô cười cạnh chân trái — chỉ hiện khi bật chủ đề Halloween (`hw-only`). */
+function Pumpkin() {
+  return (
+    <g className="hw-only" data-part="pumpkin">
+      <path d="M13 139 Q14 134 17 133" fill="none" stroke="#3C6B2F" strokeWidth={2.4} strokeLinecap="round" />
+      <ellipse cx="14" cy="147" rx="10" ry="8" fill="#FF8A1F" stroke={PALETTE.ink} strokeWidth={2.5} />
+      <path d="M14 139.5 L14 154.5" stroke={PALETTE.ink} strokeWidth={1.2} opacity={0.4} />
+      <path d="M9 144 L11.5 146 L9 147 Z M19 144 L16.5 146 L19 147 Z" fill="#3A1A00" />
+      <path d="M8.5 149.5 Q14 154 19.5 149.5 L17 150.5 L15.5 149.6 L14 151 L12.5 149.6 L11 150.5 Z" fill="#3A1A00" />
+    </g>
+  );
+}
+
+/** Ba đốm sao bốn cánh quanh chân của phe thứ 3. */
+const SPARKS = [starPath(10, 124, 4, 1.2, 4), starPath(108, 134, 3.5, 1, 4), starPath(100, 156, 2.5, 0.8, 4)] as const;
 
 /** Bảng tên: chữ trắng đậm viền tối (`paint-order: stroke` để viền không ăn vào nét chữ). */
 function Nameplate({ text, muted }: { text: string; muted: boolean }) {

@@ -18,7 +18,7 @@ import { seasonScoreUnit } from '../../shared/metric';
 import { cx } from '../lib/cx';
 import { memberPath } from '../lib/links';
 import { useStaggerOnce } from '../lib/motion';
-import { Avatar } from './Avatar';
+import { RankAvatar } from './RankAvatar';
 import { Character } from './Character';
 import { CountUp } from './CountUp';
 import { PrefetchLink } from './PrefetchLink';
@@ -59,7 +59,7 @@ export function Podium({ role, rows }: PodiumProps) {
             ) : (
               // Một link cho cả avatar và tên: avatar không nhãn nên tên link chỉ là tên người; gạch chân tên khi rê chuột.
               <PrefetchLink to={memberPath(row.memberId)} className="flex w-full flex-col items-center gap-1 rounded-xl hover:underline">
-                <Avatar name={row.displayName} url={row.avatarUrl} className="size-14 text-xl" />
+                <RankAvatar rank={row.rank} name={row.displayName} url={row.avatarUrl} className="size-14 text-xl" pip={false} />
                 {/* Tên xuống dòng thay vì cắt "…": cột chỉ ~90px ở 320px, cắt thì mất cả tên ngắn. */}
                 <p className="w-full px-1 leading-tight font-bold break-words text-white">{row.displayName}</p>
               </PrefetchLink>

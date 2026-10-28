@@ -11,7 +11,7 @@
 import type { ComponentType } from 'react';
 import type { Kit, KitRole } from '../../../lib/roleKits';
 import { Badge } from './Badge';
-import { Bird } from './Bird';
+import { Bird, BirdBack } from './Bird';
 import { Bomb } from './Bomb';
 import { Clown } from './Clown';
 import { Crown } from './Crown';
@@ -57,6 +57,7 @@ const FRONT: Record<Kit, KitPart> = {
 
 /** Lớp sau thân — chỉ bộ nào có phần vẽ sau lưng mới khai báo. */
 const BACK: Partial<Record<Kit, KitPart>> = {
+  bird: BirdBack,
   heart: HeartWings,
   explorer: ExplorerPack,
   vampire: VampireCape,

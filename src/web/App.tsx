@@ -11,6 +11,7 @@
 import { Suspense, type ReactNode } from 'react';
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from 'react-router';
 import { ApiError, errorMessage } from './api';
+import { HalloweenDecor } from './components/HalloweenDecor';
 import { Layout } from './components/Layout';
 import { PageErrorBoundary } from './components/PageErrorBoundary';
 import { LoadingFallback, PageSkeleton } from './components/Skeleton';
@@ -26,6 +27,7 @@ import { AdminPage, BadgesPage, HallPage, LeaderboardPage, MemberPage, MvpPage, 
 export function App() {
   return (
     <BrowserRouter>
+      <HalloweenDecor />
       <RoutedApp />
     </BrowserRouter>
   );

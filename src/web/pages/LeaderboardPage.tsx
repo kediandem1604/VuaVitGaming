@@ -27,12 +27,12 @@ import { useSearchParams } from 'react-router';
 import type { Faction, FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleDto } from '../../shared/api-types';
 import { formatSeasonScore, hasExtraMetric } from '../../shared/metric';
 import { apiGet } from '../api';
-import { Avatar } from '../components/Avatar';
 import { CountUp } from '../components/CountUp';
 import { EmptyState } from '../components/EmptyState';
 import { FactionTotals } from '../components/FactionTotals';
 import { Podium } from '../components/Podium';
 import { QueryState } from '../components/QueryState';
+import { RankAvatar } from '../components/RankAvatar';
 import { RankMedal } from '../components/RankMedal';
 import { SeasonSelect } from '../components/SeasonSelect';
 import { Select, type SelectGroup } from '../components/Select';
@@ -219,11 +219,11 @@ function FactionBlock({ faction, rows, seasonId }: FactionBlockProps) {
  */
 function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string }) {
   return (
-    <li className="flex items-start gap-2 px-3 py-2">
+    <li className="flex items-start gap-2 px-3 py-2.5">
       {/* Huy chương 1-2-3 (server trả tối đa 3 dòng mỗi phe; nhiều hơn thì ghi số). */}
       <RankMedal rank={row.rank} className="pt-0.5" />
-      {/* Avatar chỉ trang trí: tên viết ngay bên cạnh. */}
-      <Avatar name={row.displayName} url={row.avatarUrl} className="size-8 text-sm" />
+      {/* Avatar chỉ trang trí: tên viết ngay bên cạnh. Hạng 1-3 có khung vàng/bạc/đồng. */}
+      <RankAvatar rank={row.rank} name={row.displayName} url={row.avatarUrl} className="size-9 text-sm" pip={false} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
         <div className="flex items-baseline justify-between gap-2">
           <PrefetchLink to={memberPath(row.memberId)} className="min-w-0 truncate font-bold text-white hover:underline">
@@ -309,7 +309,7 @@ function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
             <span className="w-7 shrink-0 text-center text-base font-bold text-white tabular-nums" title={`Hạng ${row.rank}`}>
               {row.rank === 1 ? '👑' : row.rank}
             </span>
-            <Avatar name={row.displayName} url={row.avatarUrl} className="size-9 text-sm" />
+            <RankAvatar rank={row.rank} name={row.displayName} url={row.avatarUrl} className="size-9 text-sm" pip={false} />
             <PrefetchLink to={memberPath(row.memberId)} className="min-w-0 flex-1 truncate font-bold text-white hover:underline">
               {row.displayName}
             </PrefetchLink>

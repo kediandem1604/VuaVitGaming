@@ -25,7 +25,7 @@
  * trình vàng mảnh trên cùng (`.nav-progress`) cùng dòng `role="status"` "Đang tải…" cho trình đọc màn hình.
  */
 
-import { Award, ChartColumn, Crown, House, PenLine, Trophy, User, Wrench, type LucideIcon } from 'lucide-react';
+import { Award, ChartColumn, Crown, House, LogOut, PenLine, Trophy, User, Wrench, type LucideIcon } from 'lucide-react';
 import { useLayoutEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import type { MeDto } from '../../shared/api-types';
@@ -34,6 +34,7 @@ import { cx } from '../lib/cx';
 import { arriveNavigation, usePendingNavigation } from '../lib/navPending';
 import { Avatar } from './Avatar';
 import { DuckMark } from './DuckMark';
+import { ThemeToggle } from './HalloweenDecor';
 import { PrefetchNavLink } from './PrefetchLink';
 import { Delayed } from './Skeleton';
 
@@ -101,7 +102,7 @@ export function Layout({ me, children }: LayoutProps) {
         </Delayed>
       )}
       {/* `vt-header`/`vt-dock`/`vt-page`: tên View Transitions — header và dock đứng yên, chỉ `main` chuyển cảnh (spec §5.1). */}
-      <header className="vt-header sticky top-0 z-10 border-b-2 border-night-800 bg-night-950/90 backdrop-blur">
+      <header className="vt-header header-glow sticky top-0 z-10 border-b-2 border-night-800 bg-night-950/90 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-2">
           <div className="flex items-center gap-3">
             {/* Chữ "GGD Hub" 20px ≥ 18px nên dùng được `text-raised` (spec §3.2). */}
@@ -133,7 +134,7 @@ export function Layout({ me, children }: LayoutProps) {
                     className={({ isActive }) =>
                       cx(
                         'flex items-center gap-1 rounded-full px-1.5 py-1 text-sm font-bold whitespace-nowrap',
-                        highlighted(item, isActive) ? 'bg-gold text-gold-ink' : 'text-night-200 hover:bg-night-700',
+                        highlighted(item, isActive) ? 'nav-active-glow bg-gold text-gold-ink' : 'text-night-200 hover:bg-night-700',
                       )
                     }
                   >
@@ -161,13 +162,20 @@ export function Layout({ me, children }: LayoutProps) {
                   {me.displayName}
                 </span>
               </span>
+              <ThemeToggle />
+              {/*
+                Từ lg chỉ còn icon (chữ "Đăng xuất" vẫn là tên nút, `title` cho rê chuột): nhường chỗ
+                cho nút chủ đề mà hàng viên thuốc vẫn vừa như trước.
+              */}
               <button
                 type="button"
-                className="btn-secondary px-3 py-1 text-sm whitespace-nowrap"
+                title="Đăng xuất"
+                className="btn-secondary px-3 py-1 text-sm whitespace-nowrap lg:px-2"
                 disabled={logoutState === 'busy'}
                 onClick={() => void logout()}
               >
-                Đăng xuất
+                <LogOut aria-hidden="true" className="hidden size-4 lg:block" strokeWidth={2.5} />
+                <span className="lg:sr-only">Đăng xuất</span>
               </button>
             </div>
           </div>
@@ -187,7 +195,7 @@ export function Layout({ me, children }: LayoutProps) {
       {/* Thanh dock: khay tối bo hai góc trên 20px (spec §5.2). */}
       <nav
         aria-label="Điều hướng chính"
-        className="vt-dock fixed inset-x-0 bottom-0 z-10 rounded-t-[20px] border-t-2 border-night-700 bg-night-950 pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="vt-dock fixed inset-x-0 bottom-0 z-10 rounded-t-[20px] border-t-2 border-night-700 bg-night-950 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_-12px_rgb(0_0_0/0.8)] lg:hidden"
       >
         <div className="mx-auto flex w-full max-w-xl">
           {items.map((item) => {
@@ -207,7 +215,7 @@ export function Layout({ me, children }: LayoutProps) {
                 {({ isActive }) => (
                   <>
                     {/* Chấm vàng trên icon của mục đang mở; mục khác giữ chỗ bằng chấm trong suốt để icon không nhảy. */}
-                    <span aria-hidden="true" className={cx('size-1.5 rounded-full', highlighted(item, isActive) ? 'bg-gold' : 'bg-transparent')} />
+                    <span aria-hidden="true" className={cx('size-1.5 rounded-full', highlighted(item, isActive) ? 'nav-active-glow bg-gold' : 'bg-transparent')} />
                     <Icon aria-hidden="true" className="size-[22px] shrink-0" strokeWidth={2.25} />
                     {/*
                       320px / 7 mục ≈ 46px (mod/admin 8 mục ≈ 40px), trừ lề còn 42px (36px) cho nhãn:

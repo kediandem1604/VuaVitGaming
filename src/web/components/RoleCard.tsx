@@ -47,9 +47,11 @@ export function RoleCard({ role, holderName, variant, score, extra, characterSiz
   return (
     // `p-0 overflow-hidden` để băng phe chạm sát mép và bị cắt theo góc bo; `min-w-0` để tên dài
     // xuống dòng trong ô lưới thay vì kéo ô rộng ra.
+    // `role-card` (styles.css): đèn sân khấu màu phe sau nhân vật, viền sáng màu phe khi rê chuột.
     <div
+      data-faction={role.faction}
       className={cx(
-        'panel flex min-w-0 flex-col items-center gap-1.5 overflow-hidden p-0 pb-3 text-center',
+        'role-card panel flex min-w-0 flex-col items-center gap-1.5 overflow-hidden p-0 pb-3 text-center',
         empty && 'border-dashed border-night-600',
         className,
       )}

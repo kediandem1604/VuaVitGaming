@@ -1,7 +1,7 @@
 /**
  * In ra một trang HTML tĩnh để xem bằng mắt 18 bộ đồ của nhân vật (spec §4.2): mỗi bộ
  * một con ngỗng mẫu mặc bộ đó, kèm tên bộ và role mẫu, ở cỡ 120 (ô Đại sảnh) và 72 (trang
- * Hồ sơ); rồi 12 loài chim của bộ `bird` để so màu mào; cuối trang là cỡ 200 để soi nét
+ * Hồ sơ); rồi mọi loài chim (bộ `bird`) cùng Bồ nông ở cỡ 200 — gần như cả phe thứ 3; cuối trang là cỡ 200 để soi nét
  * viền và vị trí. Không chạm database.
  *
  *   npx tsx --tsconfig tsconfig.web.json scripts/kit-gallery.tsx > kits.html
@@ -35,7 +35,8 @@ function sampleRole(kit: Kit): RoleDto {
   return roleFromSeed(seed.key);
 }
 
-const BIRDS = ROLES.filter((r) => kitForRole(r.key) === 'bird').map((r) => r.key);
+/** Mọi loài chim (bộ `bird`) và Bồ nông (`pouch`) — gần như cả phe thứ 3. */
+const BIRDS = ROLES.filter((r) => kitForRole(r.key) === 'bird' || r.key === 'pelican').map((r) => r.key);
 
 function Card({ role, label, size }: { role: RoleDto; label: string; size: number }) {
   return (
@@ -70,10 +71,10 @@ function Gallery() {
             <Card key={kit} role={sampleRole(kit)} label={kit} size={72} />
           ))}
         </section>
-        <h1>Bộ `bird` — màu mào theo loài</h1>
-        <section className="grid small">
+        <h1>Phe thứ 3 và các loài chim — mỗi loài một bộ riêng</h1>
+        <section className="grid large">
           {BIRDS.map((key) => (
-            <Card key={key} role={roleFromSeed(key)} label={key} size={72} />
+            <Card key={key} role={roleFromSeed(key)} label={key} size={200} />
           ))}
         </section>
         <h1>Cỡ 200 — soi nét viền và vị trí</h1>

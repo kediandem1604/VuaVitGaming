@@ -9,7 +9,7 @@ import { PALETTE } from '../lib/palette';
 
 export function DuckMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" aria-hidden="true" className={className}>
+    <svg viewBox="0 0 32 32" aria-hidden="true" className={className} overflow="visible">
       <path
         d="M16 3 C23 3 28 9 28 16 C28 23.5 22.5 29 16 29 C9.5 29 4 23.5 4 16 C4 9 9 3 16 3 Z"
         fill={PALETTE.white}
@@ -29,6 +29,12 @@ export function DuckMark({ className }: { className?: string }) {
         strokeWidth={1.6}
         strokeLinejoin="round"
       />
+      {/* Mũ phù thuỷ chỉ hiện khi bật chủ đề Halloween (`hw-only`). */}
+      <g className="hw-only">
+        <path d="M5 8 C10 6 14 0 22 -6 C20 -1 21 3 25 8 Z" fill="#432A5C" stroke={PALETTE.ink} strokeWidth={1.6} strokeLinejoin="round" />
+        <rect x="9" y="4.6" width="14" height="2.6" fill="#FF9A2E" />
+        <ellipse cx="15.5" cy="8" rx="13" ry="2.4" fill="#432A5C" stroke={PALETTE.ink} strokeWidth={1.6} />
+      </g>
     </svg>
   );
 }
