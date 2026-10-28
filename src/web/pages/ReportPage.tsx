@@ -50,6 +50,7 @@ import { QueryState } from '../components/QueryState';
 import { DUPLICATE_NOTE, PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../lib/accusations';
 import { cx } from '../lib/cx';
 import { FACTION_LABEL } from '../lib/factions';
+import { usePresence } from '../lib/motion';
 import { addDaysIso, formatDateLabel, formatTime, vnTodayIso } from '../lib/format';
 import { rolesQuery } from '../lib/queries';
 import { MY_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
@@ -544,6 +545,12 @@ function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
   const normalised = normalizeText(query);
   const open = selected === null && normalised !== '';
   const matches = open ? roles.filter((role) => roleMatches(role, normalised)).slice(0, MAX_SUGGESTIONS) : [];
+  // Danh sách gợi ý mở = phóng + mờ vào, đóng = còn một nhịp mờ ra (spec §5.2); lúc mờ ra giữ nguyên
+  // các dòng vừa hiện (chọn xong thì `matches` đã rỗng) để không nháy sang "Không có role nào khớp".
+  const popup = usePresence(open);
+  const lastMatches = useRef(matches);
+  if (open) lastMatches.current = matches;
+  const shown = open ? matches : lastMatches.current;
 
   const choose = (role: RoleDto) => {
     onSelect(role);
@@ -578,17 +585,20 @@ function RolePicker({ roles, selected, onSelect }: RolePickerProps) {
           if (selected) onSelect(null);
         }}
       />
-      {open &&
-        (matches.length === 0 ? (
-          <p className={HINT_CLASS}>Không có role nào khớp</p>
+      {popup.mounted &&
+        (shown.length === 0 ? (
+          open && <p className={HINT_CLASS}>Không có role nào khớp</p>
         ) : (
           <ul
             id={listId}
             role="listbox"
             aria-label="Kết quả tìm role"
-            className="popover flex max-h-80 flex-col gap-0.5 overflow-y-auto p-1"
+            className="popover layer-pop flex max-h-80 flex-col gap-0.5 overflow-y-auto p-1"
+            data-state={popup.state}
+            aria-hidden={open ? undefined : true}
+            inert={open ? undefined : true}
           >
-            {matches.map((role) => (
+            {shown.map((role) => (
               // Viền focus lùi vào trong (-outline-offset) để không bị khung cuộn cắt mất.
               <li
                 key={role.id}

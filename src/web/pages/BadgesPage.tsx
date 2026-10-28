@@ -17,6 +17,8 @@ import { BadgeCard } from '../components/BadgeCard';
 import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
 import { SkeletonCards } from '../components/Skeleton';
+import { cx } from '../lib/cx';
+import { useStaggerOnce } from '../lib/motion';
 import { vnMonthOf } from '../lib/format';
 
 /** Cỡ trang cố định ở client: cũng là mốc để biết trang vừa tải là trang cuối (ít dòng hơn). */
@@ -103,13 +105,15 @@ function monthHeading(monthId: string): string {
 
 function MonthGroup({ monthId, badges }: { monthId: string; badges: BadgeDto[] }) {
   const headingId = useId();
+  // Lần hiện đầu: 8 thẻ đầu mờ + trượt so le (spec §5.4).
+  const stagger = useStaggerOnce();
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <h2 id={headingId} className={HEADING_CLASS}>
         {monthHeading(monthId)}
       </h2>
       {/* Một cột ở điện thoại (`grid-cols-1` = `minmax(0,1fr)`: cột không nở theo tên dài trong thẻ, để `truncate` cắt được), hai từ `sm`, ba từ `lg`. */}
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className={cx('grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3', stagger)}>
         {badges.map((badge) => (
           <li key={badge.id} className="flex">
             <BadgeCard badge={badge} showMember className="w-full" />

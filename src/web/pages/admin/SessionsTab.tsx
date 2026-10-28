@@ -17,6 +17,7 @@ import type { EndOptionDto, ModeDto, OpenVoteRoundDto, SessionDto } from '../../
 import { apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { Modal } from '../../components/Modal';
+import { Presence } from '../../components/Presence';
 import { QueryState } from '../../components/QueryState';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatDayLabel, formatTime, vnTodayIso } from '../../lib/format';
@@ -310,8 +311,13 @@ function AdminSessionRow({ session, onMoved }: { session: SessionDto; onMoved: (
             )}
           </div>
         )}
-        {ending && <EndDialog session={session} label={label} onClose={() => setEnding(false)} />}
-        {editing && <EditDialog session={session} label={label} onClose={() => setEditing(false)} onMoved={onMoved} />}
+        {/* `Presence` giữ hộp thêm một nhịp mờ ra khi đóng (spec §5.2). */}
+        <Presence present={ending}>
+          <EndDialog session={session} label={label} onClose={() => setEnding(false)} />
+        </Presence>
+        <Presence present={editing}>
+          <EditDialog session={session} label={label} onClose={() => setEditing(false)} onMoved={onMoved} />
+        </Presence>
       </article>
     </li>
   );

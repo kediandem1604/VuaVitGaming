@@ -28,6 +28,7 @@ import type { Faction, FactionTopDto, FactionTopRowDto, LeaderboardRowDto, RoleD
 import { formatSeasonScore, hasExtraMetric } from '../../shared/metric';
 import { apiGet } from '../api';
 import { Avatar } from '../components/Avatar';
+import { CountUp } from '../components/CountUp';
 import { EmptyState } from '../components/EmptyState';
 import { FactionTotals } from '../components/FactionTotals';
 import { Podium } from '../components/Podium';
@@ -40,6 +41,7 @@ import { cx } from '../lib/cx';
 import { FACTION_BAND, FACTION_LABEL, FACTION_SHORT_LABEL, FACTION_TEXT, FACTIONS, isSpecialRole, SPECIAL_LABEL } from '../lib/factions';
 import { formatSeasonLabel } from '../lib/format';
 import { memberPath } from '../lib/links';
+import { useStaggerOnce } from '../lib/motion';
 import { rolesQuery } from '../lib/queries';
 
 const ROLE_PARAM = 'role';
@@ -189,6 +191,7 @@ interface FactionBlockProps {
 /** Một khối phe: panel có băng phe trên cùng (như thẻ role), rồi các dòng hoặc "Chưa có ai". */
 function FactionBlock({ faction, rows, seasonId }: FactionBlockProps) {
   const label = FACTION_LABEL[faction];
+  const stagger = useStaggerOnce();
   return (
     // `p-0 overflow-hidden` để băng phe chạm sát mép và bị cắt theo góc bo.
     <div className="panel flex flex-col overflow-hidden p-0">
@@ -196,7 +199,7 @@ function FactionBlock({ faction, rows, seasonId }: FactionBlockProps) {
       {rows.length === 0 ? (
         <p className="px-3 py-3 text-sm text-night-300">Chưa có ai</p>
       ) : (
-        <ol aria-label={`Top 3 ${label}`} className="divide-y divide-night-700">
+        <ol aria-label={`Top 3 ${label}`} className={cx('divide-y divide-night-700', stagger)}>
           {rows.map((row) => (
             <FactionRow key={`${row.memberId}-${row.role.id}`} row={row} seasonId={seasonId} />
           ))}
@@ -225,7 +228,9 @@ function FactionRow({ row, seasonId }: { row: FactionTopRowDto; seasonId: string
           <Link to={memberPath(row.memberId)} className="min-w-0 truncate font-bold text-white hover:underline">
             {row.displayName}
           </Link>
-          <span className="shrink-0 font-bold text-gold tabular-nums">{row.points} điểm</span>
+          <span className="shrink-0 font-bold text-gold tabular-nums">
+            <CountUp value={row.points} /> điểm
+          </span>
         </div>
         <p className="text-sm break-words text-night-300">
           <Link to={`/bang-xep-hang?${ROLE_PARAM}=${row.role.id}&${SEASON_PARAM}=${seasonId}`} className="font-bold text-night-200 hover:underline">
@@ -283,6 +288,8 @@ function RoleSelect({ roles, value, onChange }: RoleSelectProps) {
 
 /** Bục vinh danh rồi bảng đầy đủ mọi hạng (kể cả top 3), hàng kẻ `night-700`; tên mỗi hàng là link tới trang thành viên. */
 function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
+  // Lần hiện đầu: 8 hàng đầu mờ + trượt so le (spec §5.4); làm mới dữ liệu sau đó không chạy lại.
+  const stagger = useStaggerOnce();
   if (rows.length === 0) {
     return (
       <EmptyState>
@@ -295,7 +302,7 @@ function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
     <div className="flex flex-col gap-4">
       <Podium role={role} rows={rows} />
 
-      <ol aria-label="Mọi hạng" className="panel divide-y divide-night-700 p-0">
+      <ol aria-label="Mọi hạng" className={cx('panel divide-y divide-night-700 p-0', stagger)}>
         {rows.map((row) => (
           <li key={row.memberId} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
             <span className="w-7 shrink-0 text-center text-base font-bold text-white tabular-nums" title={`Hạng ${row.rank}`}>
@@ -314,7 +321,7 @@ function Board({ role, rows }: { role: RoleDto; rows: LeaderboardRowDto[] }) {
                 <span className="font-bold text-gold tabular-nums">{formatSeasonScore(row.score, role)}</span>
               ) : (
                 <span className="font-bold text-gold tabular-nums" title={role.metricLabel}>
-                  {row.score}
+                  <CountUp value={row.score} />
                 </span>
               )}
               <span className="text-sm text-night-300 tabular-nums">{row.games} trận</span>

@@ -15,6 +15,8 @@ import type { AccessLevel, AdminMemberDto, MemberStatus } from '../../../shared/
 import { GAMES_INVALID_MESSAGE, GAMES_MAX, GAMES_MIN, isValidGamesTotal } from '../../../shared/games';
 import { apiGet, apiSend, errorMessage } from '../../api';
 import { QueryState } from '../../components/QueryState';
+import { cx } from '../../lib/cx';
+import { useStaggerOnce } from '../../lib/motion';
 import { useCurrentMember } from '../../hooks/useMe';
 import { formatDateLabel } from '../../lib/format';
 import { MEMBER_QUERY_KEY } from '../../lib/queryKeys';
@@ -59,6 +61,8 @@ export function MembersTab() {
   const queryKey = [...ADMIN_MEMBERS_KEY, debouncedQ, status];
   // Gõ tìm/đổi trạng thái: giữ danh sách cũ mờ tới khi kết quả mới về (spec §4.4).
   const members = useQuery({ queryKey, queryFn: () => apiGet<AdminMemberDto[]>(url), placeholderData: keepPreviousData });
+  // Lần hiện đầu: 8 dòng đầu mờ + trượt so le (spec §5.4); gõ tìm sau đó không chạy lại.
+  const stagger = useStaggerOnce();
 
   return (
     <section className="flex flex-col gap-3">
@@ -94,7 +98,7 @@ export function MembersTab() {
           <>
             <p className="text-sm text-night-300">{list.length} thành viên</p>
             {list.length > 0 && (
-              <ul className="panel flex flex-col divide-y divide-night-700 p-0">
+              <ul className={cx('panel flex flex-col divide-y divide-night-700 p-0', stagger)}>
                 {list.map((member) => (
                   <MemberRow key={member.id} member={member} canEdit={isAdmin} />
                 ))}

@@ -27,6 +27,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { normalizeText } from '../../shared/text';
 import { cx } from '../lib/cx';
+import { usePresence } from '../lib/motion';
 
 export interface SelectOption<T extends string | number> {
   value: T;
@@ -122,6 +123,8 @@ export function Select<T extends string | number>({ label, value, onChange, grou
   const [flipUp, setFlipUp] = useState(false);
   const [alignRight, setAlignRight] = useState(false);
   const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
+  // Khung mở = phóng 0.96→1 + mờ vào; đóng = còn trong DOM một nhịp mờ ra rồi gỡ (spec §5.2).
+  const popup = usePresence(open);
 
   const allOptions = groups.flatMap((group) => group.options);
   const selected = allOptions.find((option) => option.value === value);
@@ -317,16 +320,21 @@ export function Select<T extends string | number>({ label, value, onChange, grou
           <Chevron open={open} />
         </button>
 
-        {open && (
+        {popup.mounted && (
           <div
             className={cx(
               // Điện thoại (và bố cục dọc): rộng bằng nút; hàng ngang từ `sm` rộng theo nội dung nhưng
               // không hẹp hơn nút và không quá 20rem, bám mép trái hoặc phải của nút tuỳ nút ở nửa nào màn hình.
-              'popover absolute left-0 right-0 z-20 flex flex-col overflow-hidden',
+              'popover layer-pop absolute left-0 right-0 z-20 flex flex-col overflow-hidden',
               !stacked && 'sm:w-max sm:max-w-80 sm:min-w-full',
               !stacked && (alignRight ? 'sm:left-auto' : 'sm:right-auto'),
               flipUp ? 'bottom-full mb-1' : 'top-full mt-1',
             )}
+            // Gốc phóng ở phía khung mở ra từ nút (`data-side`); đang mờ ra thì ẩn khỏi cây truy cập và không nhận tương tác.
+            data-state={popup.state}
+            data-side={flipUp ? 'top' : 'bottom'}
+            aria-hidden={open ? undefined : true}
+            inert={open ? undefined : true}
             // Tính lúc mở (xem `popupMaxHeight`).
             style={maxHeight !== undefined ? { maxHeight } : undefined}
             onPointerDown={onPopupPointerDown}
@@ -435,7 +443,7 @@ function OptionRow({ id, label, selected, active, onHover, onPick }: OptionRowPr
 /** Mũi tên ▾ bên phải nút; lật lên khi khung đang mở. */
 function Chevron({ open }: { open: boolean }) {
   return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" className={cx('size-4 shrink-0 text-night-300 transition-transform', open && 'rotate-180')} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" viewBox="0 0 20 20" className={cx('size-4 shrink-0 text-night-300 transition-transform duration-(--dur-base) ease-(--ease-out)', open && 'rotate-180')} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="m5 8 5 5 5-5" />
     </svg>
   );

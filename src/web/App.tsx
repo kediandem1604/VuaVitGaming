@@ -9,11 +9,13 @@
  */
 
 import { Suspense, type ReactNode } from 'react';
-import { BrowserRouter, Outlet, Route, Routes } from 'react-router';
+import { BrowserRouter, Outlet, Route, Routes, useLocation } from 'react-router';
 import { ApiError, errorMessage } from './api';
 import { Layout } from './components/Layout';
 import { Delayed, PageSkeleton } from './components/Skeleton';
 import { useCurrentMember, useMe } from './hooks/useMe';
+import { prefersReducedMotion } from './lib/motion';
+import { supportsViewTransitions, useDisplayedLocation } from './lib/viewTransition';
 import { LoginPage } from './pages/LoginPage';
 import { ForbiddenPage, NotFoundPage } from './pages/PlaceholderPage';
 import { TodayPage } from './pages/TodayPage';
@@ -22,49 +24,69 @@ import { AdminPage, BadgesPage, HallPage, LeaderboardPage, MemberPage, MvpPage, 
 export function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route element={<Shell />}>
-          <Route index element={<TodayPage />} />
-          <Route path="dai-sanh" element={<HallPage />} />
-          <Route path="bang-xep-hang" element={<LeaderboardPage />} />
-          <Route path="tri-an" element={<MvpPage />} />
-          <Route path="huy-hieu" element={<BadgesPage />} />
-          <Route path="thanh-vien/:id" element={<MemberPage />} />
-          <Route path="khai-diem" element={<ReportPage />} />
-          <Route path="ho-so" element={<ProfilePage />} />
-          <Route
-            path="quan-tri"
-            element={
-              <StaffOnly>
-                <AdminPage />
-              </StaffOnly>
-            }
-          />
-          <Route path="*" element={<NotFoundPage />} />
-        </Route>
-      </Routes>
+      <RoutedApp />
     </BrowserRouter>
+  );
+}
+
+/**
+ * Cây route nhận vị trí qua `useDisplayedLocation` (spec §5.1): đổi `pathname` thì DOM đổi bên
+ * trong `document.startViewTransition` (trang cũ mờ ra, trang mới mờ vào trượt lên; header/dock
+ * đứng yên nhờ `view-transition-name` trong `Layout`); đổi query string thì đổi ngay. Mọi hook
+ * `useLocation`/`useSearchParams`/`useParams` bên trong đều đọc vị trí hiển thị này.
+ */
+function RoutedApp() {
+  const displayed = useDisplayedLocation();
+  return (
+    <Routes location={displayed}>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<Shell />}>
+        <Route index element={<TodayPage />} />
+        <Route path="dai-sanh" element={<HallPage />} />
+        <Route path="bang-xep-hang" element={<LeaderboardPage />} />
+        <Route path="tri-an" element={<MvpPage />} />
+        <Route path="huy-hieu" element={<BadgesPage />} />
+        <Route path="thanh-vien/:id" element={<MemberPage />} />
+        <Route path="khai-diem" element={<ReportPage />} />
+        <Route path="ho-so" element={<ProfilePage />} />
+        <Route
+          path="quan-tri"
+          element={
+            <StaffOnly>
+              <AdminPage />
+            </StaffOnly>
+          }
+        />
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+    </Routes>
   );
 }
 
 function Shell() {
   const me = useMe();
+  // Vị trí hiển thị (xem `RoutedApp`): khoá trang để chạy hoạt ảnh vào khi không có View Transitions.
+  const { pathname } = useLocation();
 
   // Có dữ liệu là giữ khung trang: một lần tải lại ngầm thất bại (TanStack vẫn
   // giữ `data` khi refetch lỗi) không được xoá cả trang và form người dùng đang gõ.
   if (me.data) {
+    // Không có View Transitions (hoặc máy giảm chuyển động → chỉ mờ vào nhanh): trang mới mờ vào +
+    // trượt 8px bằng CSS khi `pathname` đổi (`key`); đổi query string không gắn lại (spec §5.1).
+    const cssEnter = !supportsViewTransitions() || prefersReducedMotion();
     return (
       <Layout me={me.data}>
-        <Suspense
-          fallback={
-            <Delayed>
-              <PageSkeleton />
-            </Delayed>
-          }
-        >
-          <Outlet context={me.data} />
-        </Suspense>
+        <div key={pathname} className={cssEnter ? 'page-enter' : undefined}>
+          <Suspense
+            fallback={
+              <Delayed>
+                <PageSkeleton />
+              </Delayed>
+            }
+          >
+            <Outlet context={me.data} />
+          </Suspense>
+        </div>
       </Layout>
     );
   }

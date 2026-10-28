@@ -27,7 +27,7 @@ interface ToggleProps {
  * giảm chuyển động (`motion-safe`).
  */
 const TRACK_CLASS =
-  'relative h-7 w-12 rounded-full bg-night-700 ring-2 ring-night-600 after:absolute after:top-0.5 after:left-0.5 after:size-6 after:rounded-full after:border-2 after:border-night-950 after:bg-white peer-checked:bg-gold peer-checked:ring-gold peer-checked:after:translate-x-5 peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-gold peer-disabled:opacity-50 motion-safe:transition motion-safe:after:transition';
+  'relative h-7 w-12 rounded-full bg-night-700 ring-2 ring-night-600 after:absolute after:top-0.5 after:left-0.5 after:size-6 after:rounded-full after:border-2 after:border-night-950 after:bg-white peer-checked:bg-gold peer-checked:ring-gold peer-checked:after:translate-x-5 peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-gold peer-disabled:opacity-50 motion-safe:transition motion-safe:after:transition duration-(--dur-fast) ease-(--ease-out) after:duration-(--dur-fast) after:ease-(--ease-out)';
 
 export function Switch({ id, checked, disabled, onChange, children, className }: ToggleProps) {
   return (

@@ -18,8 +18,10 @@ import type { LeaderboardRowDto, RoleDto } from '../../shared/api-types';
 import { seasonScoreUnit } from '../../shared/metric';
 import { cx } from '../lib/cx';
 import { memberPath } from '../lib/links';
+import { useStaggerOnce } from '../lib/motion';
 import { Avatar } from './Avatar';
 import { Character } from './Character';
+import { CountUp } from './CountUp';
 
 interface PodiumProps {
   role: RoleDto;
@@ -39,9 +41,11 @@ const ORDER_NATURAL = ['order-1', 'order-2', 'order-3'] as const;
 
 export function Podium({ role, rows }: PodiumProps) {
   const order = rows.length >= STEPS.length ? ORDER_PODIUM : ORDER_NATURAL;
+  // Lần hiện đầu: ba mục mờ + trượt so le (spec §5.4).
+  const stagger = useStaggerOnce();
   return (
     // `items-end`: các mục đứng chung một sàn (viền dưới của `ol`), bục cao thấp khác nhau.
-    <ol aria-label="Bục vinh danh" className="flex items-end justify-center gap-2 border-b-3 border-night-950 px-1 sm:gap-4">
+    <ol aria-label="Bục vinh danh" className={cx('flex items-end justify-center gap-2 border-b-3 border-night-950 px-1 sm:gap-4', stagger)}>
       {STEPS.map((step, index) => {
         const row = rows[index];
         if (!row) return null;
@@ -61,7 +65,11 @@ export function Podium({ role, rows }: PodiumProps) {
               </Link>
             )}
             <p className="px-1 text-sm leading-tight font-bold break-words text-gold">
-              <span className="text-base tabular-nums">{row.score}</span> {seasonScoreUnit(role)}
+              {/* Điểm đổi lúc đang xem thì đếm tới số mới (spec §5.6). */}
+              <span className="text-base tabular-nums">
+                <CountUp value={row.score} />
+              </span>{' '}
+              {seasonScoreUnit(role)}
             </p>
             {/* Số hạng in trên mặt bục; "Hạng" chỉ dành cho trình đọc màn hình. */}
             <p

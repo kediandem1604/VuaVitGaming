@@ -16,10 +16,13 @@ import { apiGet } from '../api';
 import { cx } from '../lib/cx';
 import { FACTION_BAND, FACTION_SHORT_LABEL, FACTIONS } from '../lib/factions';
 import { memberPath } from '../lib/links';
+import { useStaggerOnce } from '../lib/motion';
 import { LEADERBOARD_TOTALS_KEY } from '../lib/queryKeys';
 import { Avatar } from './Avatar';
+import { CountUp } from './CountUp';
 import { QueryState } from './QueryState';
 import { RankMedal } from './RankMedal';
+import { TabIndicator } from './TabIndicator';
 
 const SCOPES: readonly TotalsScope[] = ['all', ...FACTIONS];
 
@@ -36,6 +39,9 @@ const SELECTED_TAB: Record<TotalsScope, string> = {
   duck: cx(FACTION_BAND.duck, 'text-white'),
   neutral: cx(FACTION_BAND.neutral, 'text-white'),
 };
+
+/** Màu vạch chỉ báo dưới tab đang chọn: vàng cho "Cả 3 phe", màu phe cho tab phe. */
+const INDICATOR: Record<TotalsScope, string> = { all: 'bg-gold', goose: FACTION_BAND.goose, duck: FACTION_BAND.duck, neutral: FACTION_BAND.neutral };
 
 export function FactionTotals({ seasonId }: { seasonId: string }) {
   const [scope, setScope] = useState<TotalsScope>('all');
@@ -71,8 +77,12 @@ export function FactionTotals({ seasonId }: { seasonId: string }) {
       <h2 id="faction-totals-heading" className="text-xl leading-tight font-extrabold text-white">
         Tổng điểm theo phe
       </h2>
-      {/* Dải tab cuộn ngang trong chính nó ở màn hình hẹp; `-my-1.5 py-1.5` chừa chỗ cho viền focus không bị cắt. */}
-      <div role="tablist" aria-label="Phe" className="-my-1.5 flex gap-2 overflow-x-auto py-1.5 [scrollbar-width:thin]">
+      {/*
+       * Dải tab cuộn ngang trong chính nó ở màn hình hẹp; `-my-1.5 py-1.5` chừa chỗ cho viền focus không bị cắt.
+       * `relative` để vạch chỉ báo (`TabIndicator`) trượt theo tab đang chọn, cuộn cùng dải (spec §5.3).
+       */}
+      <div role="tablist" aria-label="Phe" className="relative -my-1.5 flex gap-2 overflow-x-auto py-1.5 [scrollbar-width:thin]">
+        <TabIndicator selectedId={`totals-tab-${scope}`} className={INDICATOR[scope]} />
         {SCOPES.map((s) => {
           const selected = s === scope;
           return (
@@ -97,7 +107,10 @@ export function FactionTotals({ seasonId }: { seasonId: string }) {
         })}
       </div>
       <div role="tabpanel" id={PANEL_ID} aria-labelledby={`totals-tab-${scope}`}>
-        <QueryState query={totals}>{(data) => <TotalsBoard scope={scope} board={data.boards[scope]} />}</QueryState>
+        {/* Đổi tab: nội dung mới mờ vào (`key` gắn lại khối để hoạt ảnh chạy, spec §5.3). */}
+        <div key={scope} className="tab-enter">
+          <QueryState query={totals}>{(data) => <TotalsBoard scope={scope} board={data.boards[scope]} />}</QueryState>
+        </div>
       </div>
     </section>
   );
@@ -111,13 +124,15 @@ interface TotalsBoardProps {
 /** Một bảng: top 20 (dòng của tôi tô sáng) rồi dòng "Hạng của bạn" khi tôi có điểm nhưng không nằm trong top. */
 function TotalsBoard({ scope, board }: TotalsBoardProps) {
   const { top, me } = board;
+  const stagger = useStaggerOnce();
   if (top.length === 0) {
     return <p className="panel py-3 text-sm text-night-300">Chưa có ai có điểm trong mùa này</p>;
   }
   const meOutsideTop = me !== null && !top.some((row) => row.memberId === me.memberId);
   return (
     <div className="panel flex flex-col overflow-hidden p-0">
-      <ol aria-label={`Tổng điểm ${TAB_LABEL[scope]}`} className="divide-y divide-night-700">
+      {/* Lần hiện đầu: 8 dòng đầu mờ + trượt so le (spec §5.4). */}
+      <ol aria-label={`Tổng điểm ${TAB_LABEL[scope]}`} className={cx('divide-y divide-night-700', stagger)}>
         {top.map((row) => (
           <TotalsRow key={row.memberId} row={row} isMe={me?.memberId === row.memberId} />
         ))}
@@ -151,7 +166,10 @@ function TotalsRow({ row, isMe }: { row: FactionTotalRowDto; isMe: boolean }) {
         </Link>
         {isMe && <span className="sr-only">(bạn)</span>}
       </span>
-      <span className="shrink-0 font-bold text-gold tabular-nums">{row.points} điểm</span>
+      {/* Điểm đổi lúc đang xem (làm mới) thì đếm tới số mới (spec §5.6). */}
+      <span className="shrink-0 font-bold text-gold tabular-nums">
+        <CountUp value={row.points} /> điểm
+      </span>
     </li>
   );
 }

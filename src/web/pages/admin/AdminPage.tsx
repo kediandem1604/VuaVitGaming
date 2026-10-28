@@ -15,6 +15,7 @@
 import { Suspense, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { Delayed, SkeletonRows } from '../../components/Skeleton';
+import { TabIndicator } from '../../components/TabIndicator';
 import { useCurrentMember } from '../../hooks/useMe';
 import { cx } from '../../lib/cx';
 import { lazyPage } from '../../lib/lazyPage';
@@ -70,8 +71,10 @@ export function AdminPage() {
       {/*
        * Dải chip cuộn ngang trong chính nó (không cuộn cả trang); `-mx-4 px-4` cho dải chạm
        * mép màn hình nhỏ, `-my-1.5 py-1.5` chừa chỗ cho viền focus 3px (+2px) không bị khung cuộn cắt.
+       * `relative` để vạch chỉ báo (`TabIndicator`) trượt theo tab đang chọn, cuộn cùng dải (spec §5.3).
        */}
-      <div role="tablist" aria-label="Mục quản trị" className="-mx-4 -my-1.5 flex gap-2 overflow-x-auto px-4 py-1.5 [scrollbar-width:thin]">
+      <div role="tablist" aria-label="Mục quản trị" className="relative -mx-4 -my-1.5 flex gap-2 overflow-x-auto px-4 py-1.5 [scrollbar-width:thin]">
+        <TabIndicator selectedId={`tab-${active.key}`} />
         {tabs.map((tab) => {
           const selected = tab.key === active.key;
           return (
@@ -91,7 +94,8 @@ export function AdminPage() {
         })}
       </div>
 
-      <section role="tabpanel" id={`panel-${active.key}`} aria-labelledby={`tab-${active.key}`} className="flex flex-col gap-4">
+      {/* `key` theo tab để nội dung tab mới mờ vào (`tab-enter`, spec §5.3). */}
+      <section key={active.key} role="tabpanel" id={`panel-${active.key}`} aria-labelledby={`tab-${active.key}`} className="tab-enter flex flex-col gap-4">
         <Suspense
           fallback={
             <Delayed>

@@ -67,6 +67,25 @@ export function prefetchRoute(path: string, queryClient?: QueryClient): void {
   }
 }
 
+/**
+ * Lời hứa "chunk của trang `path` đã về" cho chuyển cảnh (spec §5.1): bắt đầu tải nếu chưa (kể cả khi
+ * tiết kiệm dữ liệu — lúc này người dùng đã điều hướng thật, chunk đằng nào cũng phải tải). Đường
+ * dẫn chưa đăng ký (trang trong chunk chính) hay tải lỗi thì coi như sẵn sàng — `lazyPage` lo lỗi.
+ */
+export function routeChunkReady(path: string): Promise<void> {
+  const entry = registry.get(normalize(path));
+  if (!entry) return Promise.resolve();
+  if (entry.chunk === null) {
+    entry.chunk = entry.load().catch(() => {
+      entry.chunk = null;
+    });
+  }
+  return entry.chunk.then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
 export interface PrefetchHandlers {
   onPointerEnter: (event: PointerEvent<HTMLElement>) => void;
   onPointerLeave: (event: PointerEvent<HTMLElement>) => void;

@@ -298,6 +298,8 @@ test('suggestions show a mini character and the faction, and the chosen role bec
   expect(chosen.querySelector('[data-kit="sword"]')).not.toBeNull();
   expect(within(chosen).queryByRole('img')).toBeNull();
   expect(screen.getByText(/Đã chọn/)).toHaveTextContent('Đã chọn: ⚔️ Kiếm sĩ (Swordsman)');
+  // Danh sách gợi ý còn trong DOM một nhịp mờ ra (ẩn với trình đọc màn hình) rồi mới gỡ (spec §5.2).
+  await waitFor(() => expect(document.querySelector('[role="listbox"]')).toBeNull());
   expect(screen.getByText('Phe Vịt')).toBeInTheDocument();
 });
 

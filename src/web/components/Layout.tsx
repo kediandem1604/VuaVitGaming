@@ -73,7 +73,8 @@ export function Layout({ me, children }: LayoutProps) {
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-10 border-b-2 border-night-800 bg-night-950/90 backdrop-blur">
+      {/* `vt-header`/`vt-dock`/`vt-page`: tên View Transitions — header và dock đứng yên, chỉ `main` chuyển cảnh (spec §5.1). */}
+      <header className="vt-header sticky top-0 z-10 border-b-2 border-night-800 bg-night-950/90 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-2">
           <div className="flex items-center gap-3">
             {/* Chữ "GGD Hub" 20px ≥ 18px nên dùng được `text-raised` (spec §3.2). */}
@@ -154,12 +155,12 @@ export function Layout({ me, children }: LayoutProps) {
       </header>
 
       {/* Chừa chỗ cho thanh dock khi nó còn hiện (< lg). */}
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-4 pb-24 lg:pb-8">{children}</main>
+      <main className="vt-page mx-auto w-full max-w-5xl flex-1 px-4 py-4 pb-24 lg:pb-8">{children}</main>
 
       {/* Thanh dock: khay tối bo hai góc trên 20px (spec §5.2). */}
       <nav
         aria-label="Điều hướng chính"
-        className="fixed inset-x-0 bottom-0 z-10 rounded-t-[20px] border-t-2 border-night-700 bg-night-950 pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="vt-dock fixed inset-x-0 bottom-0 z-10 rounded-t-[20px] border-t-2 border-night-700 bg-night-950 pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
         <div className="mx-auto flex w-full max-w-xl">
           {items.map((item) => {

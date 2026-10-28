@@ -6,9 +6,15 @@
  *
  * Nội dung tải trễ (vd danh sách hạng mục) vẫn ổn: lúc mở chưa có gì để nhận tiêu điểm
  * thì hộp nhận; bẫy Tab tính lại danh sách phần tử ở mỗi lần bấm phím.
+ *
+ * Chuyển động (spec §5.2): nền mờ vào/ra, hộp phóng 0.96→1 khi mở và mờ ra khi đóng. Cha bọc
+ * trong `<Presence present={…}>` để hộp còn trong DOM một nhịp mờ ra; lúc đó lớp phủ `inert` +
+ * `aria-hidden` (không nhận bấm/phím, không còn trong cây truy cập) và tiêu điểm trả về ngay cho
+ * phần tử đã mở — không chờ hoạt ảnh xong. Không có `Presence` thì hộp gỡ ngay như trước.
  */
 
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { usePresenceState } from './Presence';
 
 interface ModalProps {
   /** id của tiêu đề bên trong hộp (`aria-labelledby`). */
@@ -26,16 +32,27 @@ function focusableIn(root: HTMLElement): HTMLElement[] {
 
 export function Modal({ titleId, onClose, children }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const state = usePresenceState();
+  const closing = state === 'closed';
 
-  // Mở: nhớ phần tử đang có tiêu điểm, đưa tiêu điểm vào hộp. Đóng (unmount): trả lại.
+  // Mở: nhớ phần tử đang có tiêu điểm, đưa tiêu điểm vào hộp. Gỡ: trả lại (nếu chưa trả lúc đóng).
   useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     if (dialog) (focusableIn(dialog)[0] ?? dialog).focus();
-    return () => {
-      if (opener && opener.isConnected) opener.focus();
-    };
+    return restoreFocus;
   }, []);
+
+  // Bắt đầu mờ ra: trả tiêu điểm ngay, không bắt người dùng chờ hoạt ảnh.
+  useEffect(() => {
+    if (closing) restoreFocus();
+  }, [closing]);
+
+  function restoreFocus() {
+    const opener = openerRef.current;
+    if (opener && opener.isConnected) opener.focus();
+  }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -67,14 +84,22 @@ export function Modal({ titleId, onClose, children }: ModalProps) {
 
   return (
     // Lớp phủ `night-950` mờ 70%; hộp là `panel` (viền đậm) — spec §5.4.
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-night-950/70 p-4 sm:items-center" onClick={onClose}>
+    <div
+      className="backdrop-fade fixed inset-0 z-20 flex items-end justify-center bg-night-950/70 p-4 sm:items-center"
+      data-state={state}
+      aria-hidden={closing || undefined}
+      inert={closing || undefined}
+      onClick={onClose}
+    >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="panel flex max-h-full w-full max-w-md flex-col gap-3 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+        className="panel layer-pop flex max-h-full w-full max-w-md flex-col gap-3 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+        data-state={state}
+        data-side="center"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={onKeyDown}
       >

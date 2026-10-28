@@ -45,6 +45,7 @@ import { HighlightLink } from '../../components/HighlightLink';
 import { QueryState } from '../../components/QueryState';
 import { PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../../lib/accusations';
 import { cx } from '../../lib/cx';
+import { useStaggerOnce } from '../../lib/motion';
 import { formatDateLabel, formatTime } from '../../lib/format';
 import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY, TITLES_QUERY_KEY } from '../../lib/queryKeys';
 
@@ -86,6 +87,8 @@ export function ReviewsTab() {
 function PendingQueue() {
   const headingId = useId();
   const queue = useQuery({ queryKey: PENDING_REPORTS_KEY, queryFn: () => apiGet<ReportDto[]>('/api/admin/reports?status=pending') });
+  // Lần hiện đầu: 8 dòng đầu mờ + trượt so le (spec §5.4); duyệt/huỷ làm mới sau đó không chạy lại.
+  const stagger = useStaggerOnce();
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
@@ -97,7 +100,7 @@ function PendingQueue() {
               <p>Không có lần khai nào chờ duyệt</p>
             </EmptyState>
           ) : (
-            <ul className="panel flex flex-col divide-y divide-night-700 p-0">
+            <ul className={cx('panel flex flex-col divide-y divide-night-700 p-0', stagger)}>
               {list.map((report) => (
                 <PendingReport key={report.id} report={report} />
               ))}

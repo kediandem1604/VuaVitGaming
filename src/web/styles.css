@@ -73,6 +73,37 @@
   /* Chỉ có giao diện tối (spec §3.6). */
   :root {
     color-scheme: dark;
+
+    /*
+     * Bộ chuyển động thống nhất (spec §5): mọi `transition`/`animation` trong app lấy thời gian và
+     * nhịp từ đây, không ghi số cứng (test `motion.test.tsx` quét). `--ease-spring` chỉ cho nút
+     * lún/nảy nhẹ. `--stagger-step` là bước so le giữa hai dòng danh sách (`.stagger-in`).
+     * Hoạt ảnh nhân vật và vệt sáng khung xương có nhịp riêng (`--dur-goose-*`, `--dur-skeleton`).
+     */
+    --dur-fast: 120ms;
+    --dur-base: 200ms;
+    --dur-slow: 320ms;
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+    --ease-in: cubic-bezier(0.4, 0, 1, 1);
+    --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+    --stagger-step: 30ms;
+    --dur-goose-hop: 600ms;
+    --dur-goose-idle: 3s;
+    --dur-goose-blink: 5.2s;
+    --dur-skeleton: 1.2s;
+  }
+
+  /*
+   * Giảm chuyển động (spec §5.8): chỉ còn mờ vào/ra `--dur-fast` — mọi thời gian dài hơn rút về
+   * `--dur-fast`, dòng danh sách không so le. Phần tắt dịch chuyển/phóng nằm ở khối
+   * `@media (prefers-reduced-motion: reduce)` cuối file.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --dur-base: var(--dur-fast);
+      --dur-slow: var(--dur-fast);
+      --stagger-step: 0ms;
+    }
   }
 
   /*
@@ -123,8 +154,10 @@
 
 /*
  * Nút khối kiểu game: viền 3px, viền đáy 6px tạo độ dày. Khi nhấn, viền đáy còn 3px
- * và nút dịch xuống 3px — mép dưới đứng yên nên trông như lún. `disabled` không lún,
- * nền `night-700` chữ `night-300`. Lún là trạng thái tức thời, không có chuyển động.
+ * và nút dịch xuống 3px — mép dưới đứng yên nên trông như lún — và co `scale(0.97)` (spec §5.5).
+ * Lún xảy ra tức thời (viền đáy đổi không animate được, nên transform cũng đổi ngay để mép dưới
+ * không nhảy); thả ra thì nút trở về trong `--dur-fast` `--ease-spring` (nảy nhẹ). Máy giảm
+ * chuyển động: không chuyển động cả hai chiều. `disabled` không lún, nền `night-700` chữ `night-300`.
  *
  * Rê chuột thì nền **tối** đi 6% (một lớp đen 6% vẽ trên màu nền, dưới chữ — như
  * brightness 0.94 nhưng chỉ cho nền). Làm sáng thì chữ trắng trên nền Discord tụt còn
@@ -134,6 +167,7 @@
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-xl border-3 border-night-950 px-4 py-2 text-base leading-tight font-bold select-none;
   border-bottom-width: 6px;
+  transition: transform var(--dur-fast) var(--ease-spring);
 
   @media (hover: hover) {
     &:hover:not(:disabled) {
@@ -143,7 +177,12 @@
 
   &:active:not(:disabled) {
     border-bottom-width: 3px;
-    transform: translateY(3px);
+    transform: translateY(3px) scale(0.97);
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
   }
 
   &:disabled {
@@ -235,10 +274,10 @@
   @apply inline-flex items-center gap-1 rounded-full border-2 border-night-950 bg-night-700 px-3 py-1 text-sm leading-tight font-bold text-white whitespace-nowrap;
 }
 
-/* Thẻ nhích lên 2px khi rê chuột — chỉ thiết bị có chuột và máy không giảm chuyển động (spec §3.5). */
+/* Thẻ nhích lên 2px trong `--dur-base` khi rê chuột — chỉ thiết bị có chuột và máy không giảm chuyển động (spec §3.5, §5.5). */
 @utility lift {
   @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    transition: transform 150ms ease-out;
+    transition: transform var(--dur-base) var(--ease-out);
 
     &:hover {
       transform: translateY(-2px);
@@ -256,7 +295,7 @@
   @media (prefers-reduced-motion: no-preference) {
     background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.08) 50%, transparent 100%);
     background-size: 200% 100%;
-    animation: skeleton-shine 1.2s linear infinite;
+    animation: skeleton-shine var(--dur-skeleton) linear infinite;
   }
 }
 
@@ -272,14 +311,15 @@
 /*
  * Khối bọc dữ liệu của `QueryState`: `display: contents` để không chen vào bố cục (gap/grid) của
  * cha. Khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc (`aria-busy="true"`), các con mờ
- * còn 60% trong 120ms (spec §4.4) — bố cục đứng yên, không nháy trống.
+ * còn 60% trong `--dur-fast` (spec §4.4) — bố cục đứng yên, không nháy trống. Hoạt ảnh danh sách
+ * (`.stagger-in`) đặt ở từng dòng, không ở con trực tiếp này, nên hai thứ không giẫm nhau.
  */
 .query-block {
   display: contents;
 }
 
 .query-block > * {
-  transition: opacity 120ms ease-out;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
 .query-block[aria-busy='true'] > * {
@@ -311,18 +351,18 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .goose[data-hopping] {
-    animation: goose-hop 0.6s ease-out;
+    animation: goose-hop var(--dur-goose-hop) var(--ease-out);
   }
 
   .goose-idle {
-    animation: goose-idle 3s ease-in-out infinite;
+    animation: goose-idle var(--dur-goose-idle) ease-in-out infinite;
     animation-delay: var(--goose-delay, 0s);
   }
 
   .goose-eyes {
     transform-box: fill-box;
     transform-origin: center;
-    animation: goose-blink 5.2s infinite;
+    animation: goose-blink var(--dur-goose-blink) infinite;
     animation-delay: var(--goose-delay, 0s);
   }
 }
@@ -369,5 +409,217 @@
   }
   97% {
     transform: scaleY(0.1);
+  }
+}
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * Bộ chuyển động thống nhất (spec §5) — chỉ animate `transform`/`opacity`, mọi thời gian/nhịp
+ * lấy từ biến ở `:root`. Khối giảm chuyển động ở cuối file rút mọi hiệu ứng về mờ `--dur-fast`.
+ * ---------------------------------------------------------------------------------------------
+ */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Lớp nổi mở: phóng 0.96→1 + mờ vào. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Trang/tab mới: mờ vào + trượt lên 8px. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Dòng danh sách: mờ vào + trượt lên 4px. */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Thông báo/lỗi: trượt xuống 4px + mờ vào. */
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/*
+ * §5.1 Chuyển trang. Có View Transitions: `main` mang tên `page` — khung cũ mờ ra `--dur-fast`,
+ * khung mới mờ vào trượt lên `--dur-base`; header và dock có tên riêng nên đứng yên (ảnh cũ ẩn,
+ * ảnh mới hiện ngay); gốc (`root`, chỉ còn nền sao) không chuyển cảnh. `::view-transition` không
+ * bắt sự kiện trỏ để không chặn bấm trong lúc chuyển cảnh (spec §5.9). Không có View Transitions
+ * (hoặc giảm chuyển động): `.page-enter` gắn lại theo khoá route và chạy `rise-in`.
+ */
+.vt-page {
+  view-transition-name: page;
+}
+
+.vt-header {
+  view-transition-name: site-header;
+}
+
+.vt-dock {
+  view-transition-name: site-dock;
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-old(root),
+::view-transition-old(site-header),
+::view-transition-old(site-dock) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(root),
+::view-transition-new(site-header),
+::view-transition-new(site-dock) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-group(page) {
+  animation-duration: var(--dur-base);
+  animation-timing-function: var(--ease-out);
+}
+
+::view-transition-old(page) {
+  animation: fade-out var(--dur-fast) var(--ease-in) both;
+}
+
+::view-transition-new(page) {
+  animation: rise-in var(--dur-base) var(--ease-out) both;
+}
+
+.page-enter {
+  animation: rise-in var(--dur-base) var(--ease-out) both;
+}
+
+/*
+ * §5.2 Lớp nổi (popup `Select`, `Modal`, gợi ý `RolePicker`): `data-state` do `usePresence` đặt —
+ * mở = `pop-in` `--dur-base` `--ease-out`, gốc phóng ở phía mở ra (`data-side`: khung mở xuống
+ * phóng từ mép trên, mở lên phóng từ mép dưới, hộp thoại từ tâm); đóng = `fade-out` `--dur-fast`
+ * `--ease-in`, không nhận sự kiện trỏ (JS còn đặt `inert`), gỡ khỏi DOM bằng hẹn giờ.
+ * `.backdrop-fade` là nền mờ của Modal: chỉ mờ vào/ra.
+ */
+.layer-pop {
+  transform-origin: top center;
+}
+
+.layer-pop[data-side='top'] {
+  transform-origin: bottom center;
+}
+
+.layer-pop[data-side='center'] {
+  transform-origin: center;
+}
+
+.layer-pop[data-state='open'] {
+  animation: pop-in var(--dur-base) var(--ease-out) both;
+}
+
+.backdrop-fade[data-state='open'] {
+  animation: fade-in var(--dur-base) var(--ease-out) both;
+}
+
+.layer-pop[data-state='closed'],
+.backdrop-fade[data-state='closed'] {
+  animation: fade-out var(--dur-fast) var(--ease-in) both;
+  pointer-events: none;
+}
+
+/* §5.3 Tab: vạch chỉ báo trượt (`TabIndicator`, chỉ `transform`); nội dung tab mới mờ vào. */
+.tab-indicator {
+  transform-origin: left center;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.tab-enter {
+  animation: fade-in var(--dur-base) var(--ease-out) both;
+}
+
+/*
+ * §5.4 Danh sách lần hiện đầu (`useStaggerOnce` gắn lớp rồi bỏ sau lượt đầu): 8 dòng đầu mờ +
+ * trượt 4px, so le `--stagger-step`; dòng 9 trở đi hiện ngay. Đặt ở dòng (`> *`), không ở khối
+ * dữ liệu của `QueryState`.
+ */
+.stagger-in > :nth-child(-n + 8) {
+  animation: row-in var(--dur-base) var(--ease-out) both;
+}
+
+.stagger-in > :nth-child(2) {
+  animation-delay: calc(var(--stagger-step) * 1);
+}
+
+.stagger-in > :nth-child(3) {
+  animation-delay: calc(var(--stagger-step) * 2);
+}
+
+.stagger-in > :nth-child(4) {
+  animation-delay: calc(var(--stagger-step) * 3);
+}
+
+.stagger-in > :nth-child(5) {
+  animation-delay: calc(var(--stagger-step) * 4);
+}
+
+.stagger-in > :nth-child(6) {
+  animation-delay: calc(var(--stagger-step) * 5);
+}
+
+.stagger-in > :nth-child(7) {
+  animation-delay: calc(var(--stagger-step) * 6);
+}
+
+.stagger-in > :nth-child(8) {
+  animation-delay: calc(var(--stagger-step) * 7);
+}
+
+/* §5.7 Thông báo/lỗi trong form: trượt xuống 4px + mờ vào khi xuất hiện. */
+[role='alert'] {
+  animation: drop-in var(--dur-base) var(--ease-out) both;
+}
+
+/*
+ * §5.8 Giảm chuyển động: mọi hiệu ứng trên chỉ còn mờ vào/ra `--dur-fast` (biến `--dur-base`/
+ * `--dur-slow`/`--stagger-step` đã rút ở `:root`; View Transitions và đếm số bị JS bỏ qua; vệt
+ * sáng khung xương và nhân vật tắt ở khối `no-preference` của chúng). Ở đây đổi mọi hoạt ảnh có
+ * dịch chuyển/phóng sang `fade-in` và tắt vạch tab trượt.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .tab-enter,
+  .layer-pop[data-state='open'],
+  .backdrop-fade[data-state='open'],
+  .stagger-in > :nth-child(-n + 8),
+  [role='alert'] {
+    animation-name: fade-in;
+    animation-duration: var(--dur-fast);
+  }
+
+  .tab-indicator {
+    transition: none;
   }
 }
