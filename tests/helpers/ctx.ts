@@ -1,7 +1,7 @@
 import type { Config } from '../../src/server/config.js';
 import type { Ctx } from '../../src/server/ctx.js';
 import { testDb } from './db.js';
-import { FakeDirectory, FakeMailer, FakeNotifier } from './fakes.js';
+import { FakeDirectory, FakeMailer, FakeNotifier, FakeRankRoles } from './fakes.js';
 
 /** Mốc "bây giờ" mặc định của mọi test: 19:00 ngày 22/10/2026 giờ VN. */
 export const DEFAULT_TEST_NOW = '2026-10-22T12:00:00Z';
@@ -43,11 +43,13 @@ export function makeTestCtx(): {
   mailer: FakeMailer;
   notifier: FakeNotifier;
   directory: FakeDirectory;
+  rankRoles: FakeRankRoles;
   setNow(iso: string): void;
 } {
   const mailer = new FakeMailer();
   const notifier = new FakeNotifier();
   const directory = new FakeDirectory();
+  const rankRoles = new FakeRankRoles();
   let now = new Date(DEFAULT_TEST_NOW);
 
   const ctx: Ctx = {
@@ -55,6 +57,7 @@ export function makeTestCtx(): {
     mailer,
     notifier,
     directory,
+    rankRoles,
     // Bản sao mới mỗi lần: service nào lỡ sửa Date nhận được cũng không làm lệch đồng hồ test.
     now: () => new Date(now.getTime()),
     config: testConfig(),
@@ -65,6 +68,7 @@ export function makeTestCtx(): {
     mailer,
     notifier,
     directory,
+    rankRoles,
     setNow(iso: string): void {
       const next = new Date(iso);
       if (Number.isNaN(next.getTime())) throw new Error(`setNow: mốc thời gian không hợp lệ "${iso}"`);

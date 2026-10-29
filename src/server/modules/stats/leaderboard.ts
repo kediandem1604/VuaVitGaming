@@ -431,6 +431,14 @@ export async function getFactionTotals(ctx: Ctx, seasonId: string, viewerId: num
   };
 }
 
+/** Bảng tổng điểm đầy đủ của từng phe (người có tổng > 0) — đúng thứ tự `getFactionTotals`. */
+export async function getFactionTotalBoards(ctx: Ctx, seasonId: string): Promise<Record<Faction, { memberId: number; points: number }[]>> {
+  checkSeasonId(seasonId);
+  const perFaction = await aggsByFaction(ctx.db, seasonId, { keepNonPositive: true });
+  const board = (faction: Faction) => sumByMember(perFaction[faction]).map(({ memberId, points }) => ({ memberId, points }));
+  return { goose: board('goose'), duck: board('duck'), neutral: board('neutral') };
+}
+
 // ---------------------------------------------------------------------------
 // Đại sảnh hoá thân
 // ---------------------------------------------------------------------------

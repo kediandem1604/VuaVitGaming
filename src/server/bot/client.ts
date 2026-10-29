@@ -10,17 +10,19 @@ import type { Interaction } from 'discord.js';
 import type { DiscordStatus } from '../../shared/api-types.js';
 import type { Config } from '../config.js';
 import type { Ctx } from '../ctx.js';
-import type { DiscordNotifier, GuildDirectory } from '../ports.js';
+import type { DiscordNotifier, GuildDirectory, RankRoleAdmin } from '../ports.js';
 import { commandDefinitions } from './commands.js';
 import { DiscordJsNotifier } from './discord-notifier.js';
 import { DiscordGuildDirectory, toGuildMemberInfo } from './guild-directory.js';
 import { handleInteraction } from './interactions.js';
 import { memberEventHandlers, onReadySync, safeHandler } from './member-events.js';
+import { DiscordRankRoles } from './rank-roles.js';
 
 export interface Bot {
   client: Client;
   notifier: DiscordNotifier;
   directory: GuildDirectory;
+  rankRoles: RankRoleAdmin;
   /** Đăng nhập và chờ tới khi client sẵn sàng; reject nếu token sai hay không nối được. */
   start(): Promise<void>;
   /** `ready` khi client đang nối Discord (cho `/healthz`); `down` trước khi đăng nhập hay khi mất kết nối. */
@@ -80,6 +82,7 @@ export function createBot(getCtx: () => Ctx, config: Config, opts: BotOptions = 
     client,
     notifier: new DiscordJsNotifier(client, config),
     directory: new DiscordGuildDirectory(client, guildId),
+    rankRoles: new DiscordRankRoles(client, guildId),
     start: () => loginAndWaitReady(client, token),
     status: () => (client.isReady() ? 'ready' : 'down'),
   };

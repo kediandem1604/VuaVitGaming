@@ -36,6 +36,7 @@ async function main(): Promise<void> {
     mailer: createMailer(config.mail),
     notifier: bot.notifier,
     directory: bot.directory,
+    rankRoles: bot.rankRoles,
     now: () => new Date(),
     config,
   };

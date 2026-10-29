@@ -109,3 +109,33 @@ export interface GuildMemberInfo {
 export interface GuildDirectory {
   getMember(discordId: string): Promise<GuildMemberInfo | null>;
 }
+
+/** Một role thứ hạng bot tự tạo khi server chưa có (tên, màu `0xRRGGBB`, hiện tách nhóm hay không). */
+export interface RankRoleSpec {
+  name: string;
+  color: number;
+  hoist: boolean;
+}
+
+/**
+ * Gắn/gỡ role thứ hạng trong server cấu hình. Lỗi do bot thiếu quyền (Manage Roles, hay role
+ * của bot nằm dưới role cần gắn) → `RankRolePermissionError`; lỗi khác ném nguyên vẹn.
+ */
+export interface RankRoleAdmin {
+  /** ID role của `spec`: `knownId` nếu role đó còn trong server; không thì role cùng tên; không có nữa thì tạo mới. */
+  ensureRole(spec: RankRoleSpec, knownId: string | null): Promise<string>;
+  /** discordId của mọi người đang mang role. */
+  holders(roleId: string): Promise<string[]>;
+  /** Người đã rời server thì coi như xong. */
+  addRole(discordId: string, roleId: string): Promise<void>;
+  /** Người đã rời server thì coi như xong. */
+  removeRole(discordId: string, roleId: string): Promise<void>;
+}
+
+/** Bot không quản lý được role thứ hạng vì lỗi chỉ admin sửa được (Discord 50013 / 50001); lỗi gốc ở `cause`. */
+export class RankRolePermissionError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'RankRolePermissionError';
+  }
+}

@@ -6,7 +6,8 @@
  *
  * Việc hiện có: nhắc giờ, tự kết thúc buổi, đóng vote đến hạn, đăng/sửa bù tin buổi,
  * đăng bù tin vote, mùa giải (nhắc mod ngày 3, chốt mùa 00:05 ngày 4, đăng bù bảng tổng
- * kết), huy hiệu (trao danh hiệu tháng đã chốt, đăng bù tổng kết), dọn phiên web hết hạn.
+ * kết), huy hiệu (trao danh hiệu tháng đã chốt, đăng bù tổng kết), role Discord top 3 mỗi phe,
+ * dọn phiên web hết hạn.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -17,6 +18,7 @@ import { closeDueRounds, syncVotes } from '../modules/mvp/votes.js';
 import { runReminders } from '../modules/reminders/service.js';
 import { runSeasonJobs } from '../modules/seasons/service.js';
 import { autoEndSessions } from '../modules/sessions/end.js';
+import { syncRankRoles } from '../modules/stats/rank-roles.js';
 import { syncSessionMessage } from '../modules/sessions/service.js';
 import { releaseLease as releaseLeaseRow, tryAcquireLease } from './lease.js';
 
@@ -78,7 +80,7 @@ export async function cleanupWebSessions(ctx: Ctx): Promise<number> {
  * và đóng vote (đổi trạng thái, tự đăng Discord); rồi đăng bù tin buổi, tin vote và
  * kết quả vote (gom cả những gì hai việc trước không đăng được); việc mùa giải (chỉ có
  * gì để làm quanh ngày 3–4 hằng tháng) rồi huy hiệu ngay sau (tháng vừa chốt được trao
- * danh hiệu trong cùng lượt); cuối cùng dọn dẹp.
+ * danh hiệu trong cùng lượt); gắn/gỡ role top mỗi phe; cuối cùng dọn dẹp.
  */
 export function defaultJobs(): Job[] {
   return [
@@ -89,6 +91,7 @@ export function defaultJobs(): Job[] {
     { name: 'vote-sync', run: syncVotes },
     { name: 'season', run: runSeasonJobs },
     { name: 'badges', run: runBadgeJobs },
+    { name: 'rank-roles', run: syncRankRoles },
     { name: 'web-session-cleanup', run: cleanupWebSessions },
   ];
 }

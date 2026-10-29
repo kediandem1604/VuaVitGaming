@@ -31,7 +31,7 @@ import { castVote, closeVoteRound } from '../src/server/modules/mvp/votes.js';
 import { endSession } from '../src/server/modules/sessions/end.js';
 import { cancelSession, createSession, setAttendance } from '../src/server/modules/sessions/service.js';
 import { reviewReport, submitReport } from '../src/server/modules/stats/reports.js';
-import type { DiscordNotifier, GuildDirectory, Mailer } from '../src/server/ports.js';
+import type { DiscordNotifier, GuildDirectory, Mailer, RankRoleAdmin } from '../src/server/ports.js';
 import { seedReferenceData } from '../src/server/seed/seed.js';
 
 // ---------------------------------------------------------------------------
@@ -180,6 +180,14 @@ const unusedDirectory: GuildDirectory = {
     throw new Error('Dữ liệu mẫu không hỏi danh bạ Discord');
   },
 };
+const unusedRankRoles: RankRoleAdmin = {
+  ensureRole: async () => {
+    throw new Error('Dữ liệu mẫu không gắn role Discord');
+  },
+  holders: async () => [],
+  addRole: async () => {},
+  removeRole: async () => {},
+};
 
 interface Clock {
   ctx: Ctx;
@@ -218,6 +226,7 @@ function makeCtx(databaseUrl: string): Clock {
     mailer: unusedMailer,
     notifier: new SilentNotifier(),
     directory: unusedDirectory,
+    rankRoles: unusedRankRoles,
     now: () => new Date(now.getTime()),
     config,
   };
