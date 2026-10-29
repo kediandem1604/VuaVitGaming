@@ -435,8 +435,52 @@ test('a session without bounties draws no card (no empty right column)', async (
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/1/bounties')).toBe(true));
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(screen.queryByRole('region', { name: /^Treo thưởng/ })).not.toBeInTheDocument();
-  // Vẫn cột 1 như khi có treo thưởng: thẻ không nhảy chỗ khi thẻ treo thưởng tải xong.
-  expect(sessionCard).toHaveClass('lg:col-start-1');
+  // Ngày không có treo thưởng: giữ lưới cũ (không ép cột 1, không chừa cột phải trống).
+  expect(sessionCard).not.toHaveClass('lg:col-start-1');
+});
+
+test('a day with several sessions and no bounties keeps them side by side (no forced column)', async () => {
+  const early: SessionDto = { ...oneSession, id: 1, startsAt: '2026-10-22T10:00:00.000Z' };
+  const late: SessionDto = { ...oneSession, id: 2, startsAt: '2026-10-22T13:00:00.000Z' };
+  const empty = () => json(200, sessionBounties({ bounties: [], myClaims: [] }));
+  const fetchMock = stubFetch({ ...dayRoutes([early, late]), 'GET /api/sessions/1/bounties': empty, 'GET /api/sessions/2/bounties': empty });
+  renderPage();
+  const earlyCard = await screen.findByRole('article', { name: '17:00 Cổ điển' });
+  const lateCard = screen.getByRole('article', { name: '20:00 Cổ điển' });
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/bounties'))).toHaveLength(2));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(screen.queryByRole('region', { name: /^Treo thưởng/ })).not.toBeInTheDocument();
+  expect(earlyCard).not.toHaveClass('lg:col-start-1');
+  expect(lateCard).not.toHaveClass('lg:col-start-1');
+});
+
+test('while bounty queries are loading the old grid is kept; pairs appear only once all have resolved', async () => {
+  const early: SessionDto = { ...oneSession, id: 1, startsAt: '2026-10-22T10:00:00.000Z' };
+  const late: SessionDto = { ...oneSession, id: 2, startsAt: '2026-10-22T13:00:00.000Z' };
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  stubFetch({
+    ...dayRoutes([early, late]),
+    'GET /api/sessions/1/bounties': () => json(200, sessionBounties()),
+    'GET /api/sessions/2/bounties': async () => {
+      await gate;
+      return json(200, sessionBounties({ sessionId: 2, bounties: [], myClaims: [] }));
+    },
+  });
+  renderPage();
+  const earlyCard = await screen.findByRole('article', { name: '17:00 Cổ điển' });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Buổi 1 đã có treo thưởng nhưng buổi 2 chưa trả lời: chưa đổi lưới, chưa vẽ thẻ.
+  expect(screen.queryByRole('region', { name: /^Treo thưởng/ })).not.toBeInTheDocument();
+  expect(earlyCard).not.toHaveClass('lg:col-start-1');
+
+  release();
+  const card = await bountyCard();
+  expect(earlyCard).toHaveClass('lg:col-start-1');
+  expect(screen.getByRole('article', { name: '20:00 Cổ điển' })).toHaveClass('lg:col-start-1');
+  expect(card).toHaveClass('lg:col-start-2');
 });
 
 test('several sessions where only some have bounties: each session in column 1, its bounty card beside it in column 2', async () => {

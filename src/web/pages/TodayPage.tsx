@@ -7,9 +7,11 @@
  * Dòng nhắc giờ trên mỗi thẻ lấy kênh nhắc từ hồ sơ người đang đăng nhập (`useCurrentMember`).
  *
  * Treo thưởng (spec treo thưởng §6): buổi chưa huỷ có mục áp dụng (hoặc mình đã có lần nhận) thì thẻ
- * "Treo thưởng" (`BountyCard`) đứng ngay sau thẻ buổi trong cùng lưới — từ `lg` thẻ buổi ép về cột
- * trái (`lg:col-start-1`) và thẻ treo thưởng nằm cột phải, màn nhỏ thì xếp dưới. Buổi không có mục
- * thì không vẽ thẻ, các thẻ buổi xếp hai cột như cũ. Hỏi treo thưởng lỗi thì lặng lẽ không vẽ thẻ
+ * "Treo thưởng" (`BountyCard`) đứng ngay sau thẻ buổi trong cùng lưới, màn nhỏ thì xếp dưới. Từ `lg`,
+ * khi ít nhất một buổi trong ngày có thẻ treo thưởng, lưới xếp theo cặp: mọi thẻ buổi ở cột trái
+ * (`lg:col-start-1`), thẻ treo thưởng của nó cột phải. Ngày không buổi nào có treo thưởng thì các
+ * thẻ buổi xếp hai cột như cũ (không chừa cột phải trống). Cách xếp chỉ chọn khi mọi lần hỏi treo
+ * thưởng của ngày đã xong (thành công hay lỗi) — trước đó giữ lưới cũ, nên đổi tối đa một lần. Hỏi treo thưởng lỗi thì lặng lẽ không vẽ thẻ
  * (phần phụ, không chắn trang). Nhận xong: chèn lần nhận vào cache của thẻ, làm mới hàng chờ duyệt
  * và "Treo thưởng của tôi"; lỗi thì hiện dưới mục đó và tải lại thẻ. Điểm danh xong cũng tải lại thẻ
  * (`attended` đổi).
@@ -19,7 +21,7 @@
  * và tải lại danh sách để thẻ phản ánh trạng thái thật (đã đủ người, đã huỷ…).
  */
 
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Users } from 'lucide-react';
 import type { BountyClaimDto, HallOfDayDto, MeDto, SessionBountiesDto, SessionDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
@@ -70,14 +72,7 @@ export function TodayPage() {
                 <p>Hôm nay chưa có buổi chơi nào</p>
               </EmptyState>
             ) : (
-              // Hai cột từ `lg`; `items-start` để thẻ ngắn (đã huỷ) không bị kéo cao bằng thẻ bên cạnh.
-              // Mỗi buổi một hàng: thẻ buổi luôn ở cột 1, thẻ treo thưởng (nếu có) ở cột 2 ngay cạnh
-              // (xem `TodaySession`) — tự xếp chỗ sẽ để lại ô trống khi chỉ vài buổi có treo thưởng.
-              <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-                {sortByStart(list).map((session) => (
-                  <TodaySession key={session.id} session={session} reminders={reminders} />
-                ))}
-              </div>
+              <SessionGrid list={list} reminders={reminders} />
             )
           }
         </QueryState>
@@ -144,13 +139,14 @@ export function toggleMySeat(session: SessionDto, me: MeDto, going: boolean): Se
  * chứa, thứ tự ghế do server quyết); lỗi (đã đủ người, đã đóng…) thì trả lại bản chụp trước đó,
  * hiện lỗi dưới thẻ như cũ và tải lại danh sách để thẻ phản ánh trạng thái thật.
  */
-function TodaySession({ session, reminders }: { session: SessionDto; reminders: ReminderChannels }) {
+function TodaySession({ session, reminders, paired }: { session: SessionDto; reminders: ReminderChannels; paired: boolean }) {
   const queryClient = useQueryClient();
   const me = useCurrentMember();
   const bountiesQuery = sessionBountiesQuery(session.id);
   // Buổi đã huỷ không nhận thưởng được nữa: không hỏi, không vẽ thẻ.
   const bounties = useQuery({ ...bountiesQuery, enabled: session.status !== 'cancelled' });
-  const showBounties = session.status !== 'cancelled' && hasBountyRows(bounties.data);
+  // Chỉ vẽ thẻ khi lưới đã chọn xếp theo cặp (mọi lần hỏi đã xong), để thẻ không hiện lẻ trong lưới cũ.
+  const showBounties = paired && session.status !== 'cancelled' && hasBountyRows(bounties.data);
   const claim = useMutation({
     mutationFn: (bountyId: number) => apiSend<BountyClaimDto>('POST', `/api/sessions/${session.id}/bounties/${bountyId}/claim`, {}),
     onSuccess: (created) => {
@@ -194,8 +190,8 @@ function TodaySession({ session, reminders }: { session: SessionDto; reminders: 
         error={attendance.isError ? errorMessage(attendance.error) : null}
         onToggle={(going) => attendance.mutate(going)}
         reminders={reminders}
-        // Luôn cột 1 (kể cả khi chưa tải xong treo thưởng) để thẻ không nhảy chỗ khi thẻ treo thưởng hiện ra.
-        className="lg:col-start-1"
+        // Xếp theo cặp: mọi thẻ buổi ở cột 1 (kể cả buổi không có treo thưởng) để không có ô trống.
+        className={paired ? 'lg:col-start-1' : undefined}
       />
       {showBounties && bounties.data && (
         <BountyCard
@@ -208,6 +204,27 @@ function TodaySession({ session, reminders }: { session: SessionDto; reminders: 
         />
       )}
     </>
+  );
+}
+
+/**
+ * Lưới buổi chơi: hai cột từ `lg`; `items-start` để thẻ ngắn (đã huỷ) không bị kéo cao bằng thẻ
+ * bên cạnh. Xếp theo cặp (buổi cột 1, treo thưởng cột 2) chỉ khi mọi lần hỏi treo thưởng đã xong và
+ * có ít nhất một buổi có thẻ — tự xếp chỗ khi chỉ vài buổi có treo thưởng sẽ để lại ô trống.
+ * Dùng chung khoá cache với `TodaySession`, nên không gọi API thêm lần nào.
+ */
+function SessionGrid({ list, reminders }: { list: SessionDto[]; reminders: ReminderChannels }) {
+  const sorted = sortByStart(list);
+  const results = useQueries({
+    queries: sorted.filter((session) => session.status !== 'cancelled').map((session) => sessionBountiesQuery(session.id)),
+  });
+  const paired = results.every((result) => !result.isPending) && results.some((result) => hasBountyRows(result.data));
+  return (
+    <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+      {sorted.map((session) => (
+        <TodaySession key={session.id} session={session} reminders={reminders} paired={paired} />
+      ))}
+    </div>
   );
 }
 
