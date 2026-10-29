@@ -21,6 +21,7 @@ import type { OAuthClient } from '../modules/auth/oauth.js';
 import { installAuth } from './auth-plugin.js';
 import { adminCategoryRoutes } from './routes/admin-categories.js';
 import { adminMiscRoutes } from './routes/admin-misc.js';
+import { bountyRoutes } from './routes/bounties.js';
 import { adminModeRoutes } from './routes/admin-modes.js';
 import { authRoutes } from './routes/auth.js';
 import { badgeRoutes } from './routes/badges.js';
@@ -86,6 +87,7 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(roleRoutes);
   await app.register(statsRoutes);
   await app.register(badgeRoutes);
+  await app.register(bountyRoutes);
 
   const webDistDir = deps.webDistDir;
   if (webDistDir !== undefined) {

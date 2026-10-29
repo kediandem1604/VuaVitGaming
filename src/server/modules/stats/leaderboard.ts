@@ -15,6 +15,12 @@
  * cuối. Tổng điểm theo phe (`getFactionTotals`) cộng các cặp đó theo người cho từng phe và
  * cho cả ba phe.
  *
+ * Treo thưởng (spec treo thưởng §4 "Điểm"): lần nhận `approved` có ngày chơi trong mùa cộng
+ * `points` CHÉP trên lần nhận (sửa mục sau đó không đổi) vào ô (role chép trên lần nhận, người) —
+ * nên có mặt ở mọi bảng dùng điểm mùa (bảng role, hoá thân, Đại sảnh, Top 3 mỗi phe, Tổng điểm
+ * theo phe, chốt mùa) — nhưng KHÔNG tăng `games`. Lần nhận không có role chỉ cộng vào bảng tổng
+ * "Cả 3 phe". Mốc phân hoà gồm cả `reviewedAt` của lần nhận.
+ *
  * Chỉ người có điểm > 0 mới lên bảng (điểm mùa có thể âm khi bị trừ nhiều hơn được cộng):
  * role mà mọi lần khai đã duyệt gộp lại ≤ 0 thì chưa ai hoá thân (§4.7 chỉ lưu top 1 "có
  * điểm > 0"), và nhờ vậy `getRoleLeaderboard(...)[0]` luôn chính là người đang hoá thân
@@ -87,6 +93,13 @@ function compareAgg(x: Agg, y: Agg): number {
   return y.score - x.score || x.lastApprovedAt.getTime() - y.lastApprovedAt.getTime() || x.memberId - y.memberId;
 }
 
+/** Điểm treo thưởng không gắn role của một người trong mùa (chỉ vào bảng tổng "Cả 3 phe"). */
+interface Unassigned {
+  memberId: number;
+  score: number;
+  lastApprovedAt: Date;
+}
+
 /**
  * Gộp các lần khai đã duyệt có ngày chơi trong mùa theo (role, người) bằng MỘT truy vấn
  * GROUP BY theo (role, người, nguồn) — tổng `value`, `extraValue`, `penaltyValue`,
@@ -96,16 +109,40 @@ function compareAgg(x: Agg, y: Agg): number {
  * tại của role — thêm đúng một truy vấn lấy điểm của các role có ô (không có ô nào thì không
  * truy vấn). Mặc định bỏ ô ≤ 0 điểm (chỉ người có điểm > 0 lên bảng); `keepNonPositive` giữ
  * cả ô âm/0 cho nơi cần cộng dồn qua nhiều role rồi mới lọc (Tổng điểm theo phe — bị trừ ở
- * một role phải kéo tổng xuống). Trả về đã sắp theo thứ tự xếp hạng.
+ * một role phải kéo tổng xuống). Trả về đã sắp theo thứ tự xếp hạng. Phần treo thưởng: xem
+ * `aggregateSeasonCells`.
  */
 async function aggregateSeason(db: DbClient, seasonId: string, roleId?: number, opts: { keepNonPositive?: boolean } = {}): Promise<Agg[]> {
+  return (await aggregateSeasonCells(db, seasonId, roleId, opts)).cells;
+}
+
+/**
+ * Như `aggregateSeason`, cộng thêm lần nhận treo thưởng đã duyệt của mùa — đúng MỘT truy vấn gộp
+ * nữa (GROUP BY role, người trên `bounty_claims`): lần nhận có role cộng `points` vào ô (role,
+ * người) mà không tăng `games` (ô chỉ có lần nhận vẫn được tạo, 0 trận); lần nhận không role trả
+ * riêng trong `unassigned` theo người (chỉ bảng tổng "Cả 3 phe" dùng). Có `roleId` thì chỉ lấy
+ * lần nhận của role đó (`unassigned` rỗng).
+ */
+async function aggregateSeasonCells(
+  db: DbClient,
+  seasonId: string,
+  roleId?: number,
+  opts: { keepNonPositive?: boolean } = {},
+): Promise<{ cells: Agg[]; unassigned: Unassigned[] }> {
   const { first, last } = seasonDateRange(seasonId);
+  const playedOn = { gte: dateOnlyToDb(first), lte: dateOnlyToDb(last) };
+  const claimGroups = await db.bountyClaim.groupBy({
+    by: ['roleId', 'memberId'],
+    where: { status: 'approved', ...(roleId === undefined ? {} : { roleId }), playedOn },
+    _sum: { points: true },
+    _max: { reviewedAt: true },
+  });
   const groups = await db.statReport.groupBy({
     by: ['roleId', 'memberId', 'source'],
     where: {
       status: 'approved',
       ...(roleId === undefined ? {} : { roleId }),
-      playedOn: { gte: dateOnlyToDb(first), lte: dateOnlyToDb(last) },
+      playedOn,
     },
     _sum: { value: true, extraValue: true, penaltyValue: true, bonusPoints: true },
     _count: { _all: true },
@@ -137,8 +174,28 @@ async function aggregateSeason(db: DbClient, seasonId: string, roleId?: number, 
       if (lastApprovedAt > cell.lastApprovedAt) cell.lastApprovedAt = lastApprovedAt;
     }
   }
+
+  // Lần nhận treo thưởng: có role → cộng vào ô (không thêm trận); không role → riêng theo người.
+  const unassigned: Unassigned[] = [];
+  for (const g of claimGroups) {
+    const score = g._sum.points ?? 0;
+    // Lần nhận đã duyệt luôn có reviewedAt; phòng hờ dữ liệu lạ.
+    const lastApprovedAt = g._max.reviewedAt ?? new Date(0);
+    if (g.roleId === null) {
+      unassigned.push({ memberId: g.memberId, score, lastApprovedAt });
+      continue;
+    }
+    const key = `${g.roleId}:${g.memberId}`;
+    const cell = cells.get(key);
+    if (!cell) cells.set(key, { roleId: g.roleId, memberId: g.memberId, score, games: 0, lastApprovedAt });
+    else {
+      cell.score += score;
+      if (lastApprovedAt > cell.lastApprovedAt) cell.lastApprovedAt = lastApprovedAt;
+    }
+  }
+
   const all = [...cells.values()];
-  return (opts.keepNonPositive ? all : all.filter((g) => g.score > 0)).sort(compareAgg);
+  return { cells: (opts.keepNonPositive ? all : all.filter((g) => g.score > 0)).sort(compareAgg), unassigned };
 }
 
 /** Điểm hiện tại của một role: điểm mỗi đơn vị chính, phụ (null nếu không có), phạt (null nếu không có). */
@@ -258,11 +315,16 @@ function compareFactionAgg(x: FactionAgg, y: FactionAgg): number {
  * "Top mỗi phe" (chỉ ô điểm > 0) và "Tổng điểm theo phe" (`keepNonPositive`: giữ cả ô âm/0 để
  * cộng dồn). Điểm xếp hạng là đúng điểm mùa của ô (không còn hệ số ×5). Mọi role tính cho phe
  * của chính nó, kể cả role chế độ đặc biệt và role đã tắt (lịch sử). Đúng một truy vấn gộp lần
- * khai (`aggregateSeason` không lọc role) cộng một truy vấn lấy role của các ô. Mỗi phe đã sắp
- * theo `compareFactionAgg`.
+ * khai và một truy vấn gộp lần nhận treo thưởng (`aggregateSeasonCells` không lọc role) cộng
+ * một truy vấn lấy role của các ô. Kèm `unassigned`: điểm treo thưởng không role theo người.
+ * Mỗi phe đã sắp theo `compareFactionAgg`.
  */
-async function aggsByFaction(db: DbClient, seasonId: string, opts: { keepNonPositive?: boolean } = {}): Promise<Record<Faction, FactionAgg[]>> {
-  const aggs = await aggregateSeason(db, seasonId, undefined, opts);
+async function aggsByFaction(
+  db: DbClient,
+  seasonId: string,
+  opts: { keepNonPositive?: boolean } = {},
+): Promise<{ perFaction: Record<Faction, FactionAgg[]>; unassigned: Unassigned[] }> {
+  const { cells: aggs, unassigned } = await aggregateSeasonCells(db, seasonId, undefined, opts);
   const roles = await db.role.findMany({
     where: { id: { in: [...new Set(aggs.map((x) => x.roleId))] } },
     select: {
@@ -304,7 +366,7 @@ async function aggsByFaction(db: DbClient, seasonId: string, opts: { keepNonPosi
     });
   }
   for (const faction of FACTIONS) perFaction[faction].sort(compareFactionAgg);
-  return perFaction;
+  return { perFaction, unassigned };
 }
 
 /**
@@ -318,7 +380,7 @@ export async function getFactionTop(ctx: Ctx, seasonId: string, limit = 3): Prom
   if (!Number.isInteger(limit) || limit < 1) throw appError('VALIDATION', 'Giới hạn không hợp lệ');
   const take = Math.min(limit, MAX_LIMIT);
 
-  const perFaction = await aggsByFaction(ctx.db, seasonId);
+  const { perFaction } = await aggsByFaction(ctx.db, seasonId);
   for (const faction of FACTIONS) perFaction[faction] = perFaction[faction].slice(0, take);
 
   const shown = FACTIONS.flatMap((faction) => perFaction[faction]);
@@ -372,7 +434,7 @@ function compareTotal(x: Total, y: Total): number {
  * Cộng các ô theo người (bỏ qua role), kể cả ô âm/0 — bị trừ ở một role kéo tổng xuống; chỉ giữ
  * người có tổng > 0, xếp theo `compareTotal`.
  */
-function sumByMember(aggs: FactionAgg[]): Total[] {
+function sumByMember(aggs: readonly Pick<Agg, 'memberId' | 'score' | 'lastApprovedAt'>[]): Total[] {
   const totals = new Map<number, Total>();
   for (const agg of aggs) {
     const t = totals.get(agg.memberId);
@@ -395,13 +457,15 @@ function sumByMember(aggs: FactionAgg[]): Total[] {
  * gần nhất (trong các cặp được cộng) sớm hơn xếp
  * trên → id nhỏ trước; hạng 1..n. Mỗi bảng trả `TOTALS_TOP` dòng đầu và `me` — dòng của người
  * xem nếu họ có điểm ở bảng đó (kể cả đã trong top), không thì `null`. Đúng một truy vấn gộp
- * lần khai (`aggsByFaction`).
+ * lần khai và một truy vấn gộp lần nhận treo thưởng (`aggsByFaction`); "Cả 3 phe" cộng thêm điểm
+ * treo thưởng không gắn role.
  */
 export async function getFactionTotals(ctx: Ctx, seasonId: string, viewerId: number): Promise<FactionTotalsDto> {
   checkSeasonId(seasonId);
-  const perFaction = await aggsByFaction(ctx.db, seasonId, { keepNonPositive: true });
+  const { perFaction, unassigned } = await aggsByFaction(ctx.db, seasonId, { keepNonPositive: true });
   const ranked: Record<TotalsScope, Total[]> = {
-    all: sumByMember(FACTIONS.flatMap((faction) => perFaction[faction])),
+    // "Cả 3 phe" cộng thêm điểm treo thưởng không gắn role.
+    all: sumByMember([...FACTIONS.flatMap((faction) => perFaction[faction]), ...unassigned]),
     goose: sumByMember(perFaction.goose),
     duck: sumByMember(perFaction.duck),
     neutral: sumByMember(perFaction.neutral),
@@ -434,7 +498,7 @@ export async function getFactionTotals(ctx: Ctx, seasonId: string, viewerId: num
 /** Bảng tổng điểm đầy đủ của từng phe (người có tổng > 0) — đúng thứ tự `getFactionTotals`. */
 export async function getFactionTotalBoards(ctx: Ctx, seasonId: string): Promise<Record<Faction, { memberId: number; points: number }[]>> {
   checkSeasonId(seasonId);
-  const perFaction = await aggsByFaction(ctx.db, seasonId, { keepNonPositive: true });
+  const { perFaction } = await aggsByFaction(ctx.db, seasonId, { keepNonPositive: true });
   const board = (faction: Faction) => sumByMember(perFaction[faction]).map(({ memberId, points }) => ({ memberId, points }));
   return { goose: board('goose'), duck: board('duck'), neutral: board('neutral') };
 }
@@ -446,7 +510,7 @@ export async function getFactionTotalBoards(ctx: Ctx, seasonId: string): Promise
 /**
  * Đại sảnh một mùa: mọi role đang bật theo thứ tự danh mục. Mùa đã chốt lấy người giữ
  * từ `role_titles`; mùa đang mở (hoặc chưa có dòng `seasons`) tính trực tiếp — đúng một
- * truy vấn gộp lần khai. Role chưa ai hoá thân kèm `previous`: người giữ ở mùa ĐÃ CHỐT
+ * truy vấn gộp lần khai (và một gộp lần nhận treo thưởng). Role chưa ai hoá thân kèm `previous`: người giữ ở mùa ĐÃ CHỐT
  * gần nhất trước mùa này có kết quả cho role đó (không có → `null`).
  */
 export async function getHall(ctx: Ctx, seasonId: string): Promise<HallDto> {

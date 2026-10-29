@@ -32,7 +32,8 @@ export type ErrorCode =
   | 'HIGHLIGHT_TOO_LARGE'
   | 'HIGHLIGHT_BUSY'
   | 'HIGHLIGHT_CHANNEL_UNAVAILABLE'
-  | 'DISCORD_UNAVAILABLE';
+  | 'DISCORD_UNAVAILABLE'
+  | 'BOUNTY_HAS_CLAIMS';
 
 const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   NOT_FOUND: { status: 404, message: 'Không tìm thấy' },
@@ -70,6 +71,8 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
     message: 'Bot không đăng được vào kênh #highlight (thiếu quyền hoặc kênh đã bị xoá) — báo admin',
   },
   DISCORD_UNAVAILABLE: { status: 503, message: 'Không đăng được highlight lên Discord, thử lại sau' },
+  // Mục treo thưởng đã có lần nhận (kể cả bị từ chối) — giữ lịch sử, chỉ cho tắt.
+  BOUNTY_HAS_CLAIMS: { status: 409, message: 'Mục đã có lần nhận — chỉ tắt được, không xoá được' },
 };
 
 export class AppError extends Error {

@@ -547,3 +547,37 @@ export interface HealthDto {
   ok: true;
   discord: DiscordStatus;
 }
+
+// ---------------------------------------------------------------------------
+// Treo thưởng (spec treo thưởng §3, §5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Một mục treo thưởng (`GET /api/admin/bounties`, tạo/sửa). `role` null = "Mọi role" (điểm chỉ vào
+ * Tổng "Cả 3 phe"); `session` null = "Mọi buổi" (`startsAt` ISO 8601 UTC). `approvedClaims` = số lần
+ * nhận đã duyệt của mục.
+ */
+export interface BountyDto {
+  id: number;
+  title: string;
+  description: string | null;
+  points: number;
+  role: { id: number; nameVi: string; icon: string; faction: Faction } | null;
+  session: { id: number; startsAt: string; modeName: string } | null;
+  active: boolean;
+  approvedClaims: number;
+}
+
+/** Body `POST /api/admin/bounties`: tên 1–80, mô tả ≤ 200 (rỗng → null), điểm 1–50; `null` = mọi role / mọi buổi. */
+export interface BountyInput {
+  title: string;
+  description?: string | null;
+  points: number;
+  roleId: number | null;
+  sessionId: number | null;
+}
+
+/** Body `PATCH /api/admin/bounties/:id`: chỉ các trường được gửi; `active` để Tắt/Bật. */
+export interface BountyPatch extends Partial<BountyInput> {
+  active?: boolean;
+}

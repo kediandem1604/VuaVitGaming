@@ -8,7 +8,8 @@
  * sau) chạy lại bao nhiêu lần cũng được. Trong MỘT giao dịch: đặt `closedAt` có điều
  * kiện (chỉ lần đổi được từ null mới trao danh hiệu), từ chối mọi lần khai còn chờ duyệt
  * có ngày chơi trong mùa ('Mùa đã chốt', không có người duyệt) cùng báo cáo người chơi kèm
- * chúng (spec điểm role §6), rồi lưu top 1 mỗi role có
+ * chúng (spec điểm role §6) và mọi lần nhận treo thưởng còn chờ duyệt của mùa (spec treo thưởng
+ * §4, cùng lý do), rồi lưu top 1 mỗi role có
  * điểm > 0 vào `role_titles` (`skipDuplicates`). Mùa đã chốt mà gọi lại chỉ dọn lần khai
  * chờ duyệt lọt vào sau giờ chốt (kiểm-tra-rồi-ghi ở `reports.ts` có khe nhỏ) — không
  * tính lại danh hiệu đã trao.
@@ -113,15 +114,26 @@ function pendingInSeason(seasonId: string): Prisma.StatReportWhereInput {
   return { status: 'pending', playedOn: { gte: dateOnlyToDb(first), lte: dateOnlyToDb(last) } };
 }
 
+/** Điều kiện "lần nhận treo thưởng còn chờ duyệt có ngày chơi (của buổi) trong mùa". */
+function pendingClaimsInSeason(seasonId: string): Prisma.BountyClaimWhereInput {
+  const { first, last } = seasonDateRange(seasonId);
+  return { status: 'pending', playedOn: { gte: dateOnlyToDb(first), lte: dateOnlyToDb(last) } };
+}
+
 /** Từ chối tự động lúc chốt mùa: lý do cố định, không có người duyệt. */
 function autoRejection(now: Date): Prisma.StatReportUncheckedUpdateManyInput {
+  return { status: 'rejected', rejectReason: SEASON_CLOSED_REASON, reviewedAt: now, reviewedById: null };
+}
+
+/** Như `autoRejection`, cho lần nhận treo thưởng. */
+function autoClaimRejection(now: Date): Prisma.BountyClaimUncheckedUpdateManyInput {
   return { status: 'rejected', rejectReason: SEASON_CLOSED_REASON, reviewedAt: now, reviewedById: null };
 }
 
 /**
  * Chốt một mùa (xem đầu file). Mã mùa sai dạng → `VALIDATION`; mùa chưa có dòng thì tạo
  * rồi chốt luôn. Trả về số danh hiệu vừa ghi (0 khi mùa đã chốt từ trước) và số lần khai
- * chờ duyệt vừa bị từ chối. Sau khi giao dịch đã lưu, đăng bảng tổng kết nếu còn nợ; lỗi
+ * chờ duyệt vừa bị từ chối (không đếm lần nhận treo thưởng bị từ chối cùng lúc). Sau khi giao dịch đã lưu, đăng bảng tổng kết nếu còn nợ; lỗi
  * ở bước này chỉ ghi log — bộ hẹn giờ đăng bù.
  */
 export async function closeSeason(ctx: Ctx, seasonId: string): Promise<{ titles: number; autoRejected: number }> {
@@ -141,6 +153,7 @@ export async function closeSeason(ctx: Ctx, seasonId: string): Promise<{ titles:
     // Báo cáo người chơi kèm các lần khai này bị bác cùng lý do (trước, vì điều kiện dựa trên lần khai còn chờ).
     await rejectPendingAccusations(tx, pendingInSeason(seasonId), SEASON_CLOSED_REASON, now);
     const { count: autoRejected } = await tx.statReport.updateMany({ where: pendingInSeason(seasonId), data: autoRejection(now) });
+    await tx.bountyClaim.updateMany({ where: pendingClaimsInSeason(seasonId), data: autoClaimRejection(now) });
 
     let titles = 0;
     if (wasOpen) {
@@ -314,15 +327,23 @@ async function nudgeReviewers(ctx: Ctx, seasonId: string, now: Date): Promise<vo
   await ctx.db.season.updateMany({ where: { id: seasonId, reviewNudgedAt: null }, data: { reviewNudgedAt: now } });
 }
 
-/** Lần khai chờ duyệt lọt vào mùa đã chốt (khe kiểm-tra-rồi-ghi của `reports.ts`): từ chối như lúc chốt. Đếm trước cho rẻ. */
+/**
+ * Lần khai / lần nhận treo thưởng chờ duyệt lọt vào mùa đã chốt (khe kiểm-tra-rồi-ghi khi khai
+ * hay nhận): từ chối như lúc chốt. Đếm trước cho rẻ.
+ */
 async function rejectStrayPending(ctx: Ctx, seasonId: string, now: Date): Promise<void> {
   const where = pendingInSeason(seasonId);
-  if ((await ctx.db.statReport.count({ where })) === 0) return;
-  const count = await ctx.db.$transaction(async (tx) => {
+  const claimWhere = pendingClaimsInSeason(seasonId);
+  const [reports, claims] = [await ctx.db.statReport.count({ where }), await ctx.db.bountyClaim.count({ where: claimWhere })];
+  if (reports === 0 && claims === 0) return;
+  const counts = await ctx.db.$transaction(async (tx) => {
     await rejectPendingAccusations(tx, where, SEASON_CLOSED_REASON, now);
-    return (await tx.statReport.updateMany({ where, data: autoRejection(now) })).count;
+    const r = (await tx.statReport.updateMany({ where, data: autoRejection(now) })).count;
+    const c = (await tx.bountyClaim.updateMany({ where: claimWhere, data: autoClaimRejection(now) })).count;
+    return { r, c };
   });
-  if (count > 0) console.warn(`[seasons] Đã từ chối ${count} lần khai lọt vào mùa ${seasonId} sau giờ chốt`);
+  if (counts.r > 0) console.warn(`[seasons] Đã từ chối ${counts.r} lần khai lọt vào mùa ${seasonId} sau giờ chốt`);
+  if (counts.c > 0) console.warn(`[seasons] Đã từ chối ${counts.c} lần nhận treo thưởng lọt vào mùa ${seasonId} sau giờ chốt`);
 }
 
 // ---------------------------------------------------------------------------

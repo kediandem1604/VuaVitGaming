@@ -84,6 +84,21 @@ enum AccusationStatus {
   superseded
 }
 
+/// Trạng thái một lần nhận treo thưởng (spec treo thưởng §3–4) — giống lần khai: `revoked` chỉ từ
+/// `approved`, trạng thái cuối; CHECK bắt đủ người huỷ, giờ huỷ và lý do.
+enum BountyClaimStatus {
+  pending
+  approved
+  rejected
+  revoked
+}
+
+/// Nơi người chơi bấm nhận treo thưởng.
+enum BountyClaimSource {
+  web
+  discord
+}
+
 /// Nhóm hạng mục tri ân tính cho danh hiệu tháng: `mvp` (Khen → SMVP), `fun` (Vui → Vua tấu hài), `none` (không tính).
 enum BadgeGroup {
   mvp
@@ -129,6 +144,10 @@ model Member {
   accusationsReceived PlayerAccusation[] @relation("AccusationAccused")
   accusationsAsVictim PlayerAccusation[] @relation("AccusationVictim")
   accusationsReviewed PlayerAccusation[] @relation("AccusationReviewer")
+  bountiesCreated      Bounty[]      @relation("BountyCreator")
+  bountyClaims         BountyClaim[] @relation("BountyClaimMember")
+  bountyClaimsReviewed BountyClaim[] @relation("BountyClaimReviewer")
+  bountyClaimsRevoked  BountyClaim[] @relation("BountyClaimRevoker")
 
   @@map("members")
 }
@@ -173,6 +192,10 @@ model GameSession {
   discordDirty     Boolean       @default(false) @map("discord_dirty")
   createdById      Int           @map("created_by")
   endedAt          DateTime?     @map("ended_at") @db.Timestamptz(3)
+  /// Tin treo thưởng của buổi trong `#treo-thưởng` (kênh + id tin); cờ `bountyDirty` = tin cần đăng/sửa bù.
+  bountyChannelId  String?       @map("bounty_channel_id")
+  bountyMessageId  String?       @map("bounty_message_id")
+  bountyDirty      Boolean       @default(false) @map("bounty_dirty")
 
   mode          GameMode          @relation(fields: [modeId], references: [id])
   createdBy     Member            @relation("SessionCreator", fields: [createdById], references: [id])
@@ -180,6 +203,8 @@ model GameSession {
   notifications NotificationLog[]
   voteRound     VoteRound?
   statReports   StatReport[]
+  bounties      Bounty[]
+  bountyClaims  BountyClaim[]
 
   @@index([startsAt])
   @@map("game_sessions")
@@ -336,6 +361,8 @@ model Role {
   statReports StatReport[]
   roleTitles  RoleTitle[]
   accusations PlayerAccusation[]
+  bounties     Bounty[]
+  bountyClaims BountyClaim[]
 
   @@map("roles")
 }
@@ -415,6 +442,64 @@ model PlayerAccusation {
 
   @@index([accusedId, accusedRoleId, victimId, playedOn, status])
   @@map("player_accusations")
+}
+
+/// Mục treo thưởng (spec treo thưởng §3): `sessionId` null = áp dụng mọi buổi; `roleId` null = không
+/// gắn role (điểm chỉ vào Tổng "Cả 3 phe"). CHECK: tên 1–80 ký tự, mô tả ≤ 200, điểm 1–50. Mục đã có
+/// lần nhận không xoá được (khoá ngoại RESTRICT từ `bounty_claims`) — chỉ tắt.
+model Bounty {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  points      Int
+  roleId      Int?     @map("role_id")
+  sessionId   Int?     @map("session_id")
+  active      Boolean  @default(true)
+  createdById Int      @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  role      Role?         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  session   GameSession?  @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  createdBy Member        @relation("BountyCreator", fields: [createdById], references: [id])
+  claims    BountyClaim[]
+
+  @@index([sessionId])
+  @@map("bounties")
+}
+
+/// Một lần nhận treo thưởng. `roleId` và `points` chép từ mục lúc nhận — sửa mục sau đó không đổi
+/// lần nhận đã có. `playedOn` = ngày VN của buổi (mùa tính theo ngày này). Mỗi (mục, người, buổi)
+/// nhận một lần (UNIQUE) — bị từ chối cũng không nhận lại.
+model BountyClaim {
+  id           Int               @id @default(autoincrement())
+  bountyId     Int               @map("bounty_id")
+  memberId     Int               @map("member_id")
+  sessionId    Int               @map("session_id")
+  playedOn     DateTime          @map("played_on") @db.Date
+  roleId       Int?              @map("role_id")
+  points       Int
+  status       BountyClaimStatus @default(pending)
+  /// Lý do từ chối hoặc huỷ duyệt (bắt buộc ở cả hai trạng thái).
+  rejectReason String?           @map("reject_reason")
+  source       BountyClaimSource
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  reviewedById Int?              @map("reviewed_by")
+  reviewedAt   DateTime?         @map("reviewed_at") @db.Timestamptz(3)
+  revokedById  Int?              @map("revoked_by")
+  revokedAt    DateTime?         @map("revoked_at") @db.Timestamptz(3)
+
+  bounty     Bounty      @relation(fields: [bountyId], references: [id])
+  member     Member      @relation("BountyClaimMember", fields: [memberId], references: [id])
+  session    GameSession @relation(fields: [sessionId], references: [id])
+  role       Role?       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  reviewedBy Member?     @relation("BountyClaimReviewer", fields: [reviewedById], references: [id])
+  revokedBy  Member?     @relation("BountyClaimRevoker", fields: [revokedById], references: [id])
+
+  @@unique([bountyId, memberId, sessionId])
+  @@index([status, playedOn])
+  @@index([memberId, playedOn])
+  @@map("bounty_claims")
 }
 
 model Season {
