@@ -1,8 +1,17 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { AccusationDto, ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
-import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY, TITLES_QUERY_KEY } from '../../src/web/lib/queryKeys';
+import type { AccusationDto, BountyClaimDto, ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
+import {
+  APPROVED_BOUNTY_CLAIMS_KEY,
+  APPROVED_REPORTS_KEY,
+  LEADERBOARD_TOTALS_KEY,
+  MY_BOUNTY_CLAIMS_KEY,
+  MY_REPORTS_KEY,
+  PENDING_REPORTS_KEY,
+  SESSION_BOUNTIES_KEY,
+  TITLES_QUERY_KEY,
+} from '../../src/web/lib/queryKeys';
 import { ReviewsTab } from '../../src/web/pages/admin/ReviewsTab';
 
 /** Phần role của một lần khai; `over` ghi đè điểm mỗi lần, chỉ số phụ, chỉ số phạt (mặc định ×1, không có). */
@@ -68,6 +77,8 @@ const approved: ReviewedReportDto[] = [
 
 const PENDING_ROUTE = 'GET /api/admin/reports?status=pending';
 const APPROVED_ROUTE = 'GET /api/admin/reports?status=approved';
+const PENDING_BOUNTY_ROUTE = 'GET /api/admin/bounty-claims?status=pending';
+const APPROVED_BOUNTY_ROUTE = 'GET /api/admin/bounty-claims?status=approved';
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -75,9 +86,15 @@ const noContent = () => new Response(null, { status: 204 });
 
 type Handler = (init: RequestInit | undefined) => Response | Promise<Response>;
 
-/** Tuyến giả; hai danh sách (hàng chờ, đã duyệt) mặc định rỗng để mỗi test chỉ tả phần mình cần. */
+/** Tuyến giả; các danh sách (hàng chờ, đã duyệt — lần khai lẫn treo thưởng) mặc định rỗng để mỗi test chỉ tả phần mình cần. */
 function stubFetch(routes: Record<string, Handler>) {
-  const all: Record<string, Handler> = { [PENDING_ROUTE]: () => json(200, []), [APPROVED_ROUTE]: () => json(200, []), ...routes };
+  const all: Record<string, Handler> = {
+    [PENDING_ROUTE]: () => json(200, []),
+    [APPROVED_ROUTE]: () => json(200, []),
+    [PENDING_BOUNTY_ROUTE]: () => json(200, []),
+    [APPROVED_BOUNTY_ROUTE]: () => json(200, []),
+    ...routes,
+  };
   const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const key = `${init?.method ?? 'GET'} ${url}`;
@@ -690,4 +707,159 @@ test('a reason error of one form does not show under the other form', async () =
   fireEvent.click(within(first).getByRole('button', { name: 'Từ chối' }));
   expect(within(first).queryByRole('alert')).not.toBeInTheDocument();
   expect(postCalls(fetchMock)).toHaveLength(0);
+});
+
+// ---------------------------------------------------------------------------
+// Treo thưởng (spec treo thưởng §8)
+// ---------------------------------------------------------------------------
+
+const PELICAN = { id: 30, nameVi: 'Bồ nông', icon: '🦩', faction: 'neutral' as const };
+
+const bountyClaim = (over: Partial<BountyClaimDto> & Pick<BountyClaimDto, 'id'>): BountyClaimDto => ({
+  bounty: { id: 1, title: 'Bồ Nông nuốt hết vịt', description: null },
+  member: { id: 10, displayName: 'Vịt Mười' },
+  // 12:00Z = 19:00 giờ VN.
+  session: { id: 7, startsAt: '2026-10-22T12:00:00.000Z', modeName: 'Cổ điển' },
+  playedOn: '2026-10-22',
+  role: PELICAN,
+  points: 5,
+  status: 'pending',
+  rejectReason: null,
+  source: 'discord',
+  createdAt: '2026-10-22T15:00:00.000Z',
+  reviewedBy: null,
+  reviewedAt: null,
+  ...over,
+});
+
+const bountyQueue: BountyClaimDto[] = [bountyClaim({ id: 41 }), bountyClaim({ id: 42, member: { id: 11, displayName: 'Ngỗng Mười Một' }, role: null, points: 3, source: 'web', bounty: { id: 2, title: 'Tham gia đủ', description: null } })];
+
+const bountySection = () => screen.findByRole('region', { name: /^Treo thưởng chờ duyệt/ });
+const bountyItems = async () => within(await bountySection()).findAllByRole('listitem');
+
+test('the bounty queue shows member, bounty, points, session, date and source', async () => {
+  stubFetch({ [PENDING_BOUNTY_ROUTE]: () => json(200, bountyQueue) });
+  renderTab();
+  const items = await bountyItems();
+  expect(items).toHaveLength(2);
+  expect(screen.getByRole('heading', { name: 'Treo thưởng chờ duyệt (2)' })).toBeInTheDocument();
+  const first = items[0] as HTMLElement;
+  expect(first).toHaveTextContent('Vịt Mười');
+  expect(first).toHaveTextContent('🦩 Bồ Nông nuốt hết vịt');
+  expect(first).toHaveTextContent('+5');
+  expect(first).toHaveTextContent('Buổi 19:00 22/10/2026 — Cổ điển');
+  expect(first).toHaveTextContent('Discord');
+  expect(within(first).getByRole('button', { name: 'Duyệt' })).toBeInTheDocument();
+  expect(within(first).getByRole('button', { name: 'Từ chối' })).toBeInTheDocument();
+  expect(items[1]).toHaveTextContent('🎯 Tham gia đủ');
+  expect(items[1]).toHaveTextContent('Web');
+});
+
+test('an empty bounty queue says so', async () => {
+  stubFetch({});
+  renderTab();
+  expect(await screen.findByText('Không có treo thưởng nào chờ duyệt')).toBeInTheDocument();
+});
+
+test('approving a bounty claim posts approve: true, removes it and refreshes scores', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    [PENDING_BOUNTY_ROUTE]: () => json(200, bountyQueue),
+    'POST /api/admin/bounty-claims/41/review': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  const queryClient = renderTab();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const first = (await bountyItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt' }));
+  await waitFor(() => expect(posted).toEqual({ approve: true }));
+  await waitFor(async () => expect(await bountyItems()).toHaveLength(1));
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: APPROVED_BOUNTY_CLAIMS_KEY });
+  for (const key of ['leaderboard', 'leaderboard-factions', 'hall', 'member']) expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: LEADERBOARD_TOTALS_KEY });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: TITLES_QUERY_KEY });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_BOUNTY_CLAIMS_KEY });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: SESSION_BOUNTIES_KEY });
+});
+
+test('rejecting a bounty claim needs a reason, then posts it', async () => {
+  let posted: unknown = null;
+  const fetchMock = stubFetch({
+    [PENDING_BOUNTY_ROUTE]: () => json(200, bountyQueue),
+    'POST /api/admin/bounty-claims/41/review': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  renderTab();
+  const first = (await bountyItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Từ chối' }));
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận từ chối' }));
+  expect(within(first).getByRole('alert')).toHaveTextContent('Cần ghi lý do từ chối');
+  expect(postCalls(fetchMock)).toHaveLength(0);
+
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do từ chối' }), { target: { value: '  Không có clip ' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận từ chối' }));
+  await waitFor(() => expect(posted).toEqual({ approve: false, reason: 'Không có clip' }));
+  await waitFor(async () => expect(await bountyItems()).toHaveLength(1));
+});
+
+test('NOT_PENDING on a bounty claim shows the message and refetches the bounty queue', async () => {
+  let calls = 0;
+  stubFetch({
+    [PENDING_BOUNTY_ROUTE]: () => {
+      calls += 1;
+      return json(200, bountyQueue);
+    },
+    'POST /api/admin/bounty-claims/41/review': () => json(409, { error: { code: 'NOT_PENDING', message: 'Lần nhận này đã được xử lý' } }),
+  });
+  renderTab();
+  const first = (await bountyItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Lần nhận này đã được xử lý');
+  await waitFor(() => expect(calls).toBe(2));
+});
+
+test('recently approved mixes in bounty claims (newest review first) with a "Treo thưởng" label', async () => {
+  const approvedClaim = bountyClaim({ id: 51, status: 'approved', reviewedBy: { id: 12, displayName: 'Mod Mười Hai' }, reviewedAt: '2026-10-22T15:00:00.000Z' });
+  stubFetch({ [APPROVED_ROUTE]: () => json(200, approved), [APPROVED_BOUNTY_ROUTE]: () => json(200, [approvedClaim]) });
+  renderTab();
+  const items = await approvedItems();
+  expect(items).toHaveLength(3);
+  expect(screen.getByRole('heading', { name: 'Đã duyệt gần đây (3)' })).toBeInTheDocument();
+  // 15:00Z mới hơn 14:30Z của hai lần khai.
+  const first = items[0] as HTMLElement;
+  expect(within(first).getByText('Treo thưởng')).toBeInTheDocument();
+  expect(first).toHaveTextContent('Vịt Mười');
+  expect(first).toHaveTextContent('🦩 Bồ Nông nuốt hết vịt');
+  expect(first).toHaveTextContent('+5');
+  expect(first).toHaveTextContent('Duyệt bởi Mod Mười Hai lúc 22:00 22/10/2026');
+  expect(within(first).getByRole('button', { name: 'Huỷ duyệt' })).toBeInTheDocument();
+  expect(items[1]).toHaveTextContent('Ngỗng Chín');
+});
+
+test('revoking a bounty claim posts the reason, removes the row and refreshes scores', async () => {
+  const approvedClaim = bountyClaim({ id: 51, status: 'approved', reviewedBy: { id: 12, displayName: 'Mod Mười Hai' }, reviewedAt: '2026-10-22T15:00:00.000Z' });
+  let posted: unknown = null;
+  stubFetch({
+    [APPROVED_BOUNTY_ROUTE]: () => json(200, posted === null ? [approvedClaim] : []),
+    'POST /api/admin/bounty-claims/51/revoke': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  const queryClient = renderTab();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const first = (await approvedItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ duyệt' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do huỷ duyệt' }), { target: { value: ' Nhầm buổi ' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
+  await waitFor(() => expect(posted).toEqual({ reason: 'Nhầm buổi' }));
+  expect(await screen.findByText('Chưa có lần khai nào được duyệt trong mùa đang mở')).toBeInTheDocument();
+  for (const key of ['leaderboard', 'leaderboard-factions', 'hall', 'member']) expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: LEADERBOARD_TOTALS_KEY });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_BOUNTY_CLAIMS_KEY });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: SESSION_BOUNTIES_KEY });
 });

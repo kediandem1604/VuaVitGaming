@@ -35,6 +35,8 @@ interface SessionCardProps {
   error?: string | null;
   /** Kênh nhắc giờ của người đang xem (`reminderChannels(me)`), cho dòng nhắc dưới nút. */
   reminders: ReminderChannels;
+  /** Class thêm cho thẻ (vị trí trong lưới của trang cha). */
+  className?: string;
 }
 
 const STATUS_CHIP: Record<Exclude<SessionDto['status'], 'scheduled'>, { text: string; className: string }> = {
@@ -42,7 +44,7 @@ const STATUS_CHIP: Record<Exclude<SessionDto['status'], 'scheduled'>, { text: st
   ended: { text: 'Đã kết thúc', className: '' },
 };
 
-export function SessionCard({ session, onToggle, pending, error, reminders }: SessionCardProps) {
+export function SessionCard({ session, onToggle, pending, error, reminders, className }: SessionCardProps) {
   const taken = session.attendees.length;
   const full = taken >= session.capacity;
   const going = session.myStatus === 'going';
@@ -55,7 +57,7 @@ export function SessionCard({ session, onToggle, pending, error, reminders }: Se
   return (
     <article
       aria-label={`${formatTime(session.startsAt)} ${session.modeName}`}
-      className={cx('panel flex flex-col gap-3', !open && 'border-night-700 bg-night-800/60')}
+      className={cx('panel flex flex-col gap-3', !open && 'border-night-700 bg-night-800/60', className)}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         {/* Giờ 30px ≥ 18px nên dùng được chữ nổi `text-raised` (spec §3.2). */}

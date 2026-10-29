@@ -3,7 +3,7 @@
  * `normalizeText` dùng chung với lệnh slash), giá trị có `max` = `maxPerGame` và nhãn
  * = `metricLabel` của role, ngày chơi trong [hôm nay − 3, hôm nay] giờ VN, buổi của
  * ngày đó (không bắt buộc), ghi chú ≤ 300 ký tự — rồi "Lần khai của tôi" với trạng
- * thái và ô sửa cho lần khai còn chờ duyệt.
+ * thái và ô sửa cho lần khai còn chờ duyệt, kèm mục con "Treo thưởng của tôi" (spec treo thưởng §6).
  *
  * Giao diện Sảnh đêm: mỗi gợi ý role có nhân vật thu nhỏ (không bảng tên, chỉ trang trí) +
  * tên role + chip phe; role đã chọn hiện thành thẻ nhỏ có nhân vật; chip trạng thái lần khai: chờ
@@ -38,7 +38,7 @@
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { AccusationDto, AccusationInputDto, Faction, HighlightConfigDto, ReportDto, ReportRoleDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
+import type { AccusationDto, AccusationInputDto, BountyClaimDto, Faction, HighlightConfigDto, ReportDto, ReportRoleDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
 import { formatReportValue, hasExtraMetric, hasPenaltyMetric } from '../../shared/metric';
 import { normalizeText } from '../../shared/text';
 import { apiGet, apiSend, errorMessage } from '../api';
@@ -48,12 +48,13 @@ import { EmptyState } from '../components/EmptyState';
 import { HighlightLink } from '../components/HighlightLink';
 import { QueryState } from '../components/QueryState';
 import { DUPLICATE_NOTE, PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../lib/accusations';
+import { CLAIM_CHIP_CLASS, bountyIcon, claimStatusText, sessionText } from '../lib/bounties';
 import { cx } from '../lib/cx';
 import { FACTION_LABEL } from '../lib/factions';
 import { usePresence } from '../lib/motion';
 import { addDaysIso, formatDateLabel, formatTime, vnTodayIso } from '../lib/format';
 import { rolesQuery } from '../lib/queries';
-import { MY_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
+import { MY_BOUNTY_CLAIMS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
 import { HighlightButton, HighlightField, checkHighlight, uploadHighlight, type HighlightUpload } from './ReportHighlight';
 
 const HIGHLIGHT_CONFIG_KEY = ['reports', 'highlight-config'] as const;
@@ -224,6 +225,7 @@ export function ReportPage() {
             )
           }
         </QueryState>
+        <MyBounties />
       </section>
     </div>
   );
@@ -804,6 +806,58 @@ function NoteField({ id, value, onChange }: NoteFieldProps) {
         onChange={(event) => onChange(event.target.value)}
       />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Treo thưởng của tôi (spec treo thưởng §6)
+// ---------------------------------------------------------------------------
+
+/** Số lần nhận gần nhất hiện ở "Treo thưởng của tôi". */
+const MY_BOUNTIES_LIMIT = 20;
+
+/**
+ * Mục con "Treo thưởng của tôi" dưới "Lần khai của tôi": các lần nhận gần nhất — `{icon} {mục}`
+ * `+{điểm}`, buổi, chip trạng thái ("Chờ duyệt" / "Đã nhận +{điểm}" / "Bị từ chối: {lý do}" /
+ * "Đã bị huỷ: {lý do}"). Nhận thưởng ở trang Hôm nay (hoặc Discord), ở đây chỉ xem.
+ */
+function MyBounties() {
+  const headingId = useId();
+  const claims = useQuery({ queryKey: MY_BOUNTY_CLAIMS_KEY, queryFn: () => apiGet<BountyClaimDto[]>(`/api/bounty-claims/mine?limit=${MY_BOUNTIES_LIMIT}`) });
+
+  return (
+    <section aria-labelledby={headingId} className="mt-3 flex flex-col gap-3">
+      <h3 id={headingId} className="text-lg leading-tight font-extrabold text-white">
+        Treo thưởng của tôi
+      </h3>
+      <QueryState query={claims}>
+        {(list) =>
+          list.length === 0 ? (
+            <EmptyState>
+              <p>Bạn chưa nhận treo thưởng nào</p>
+            </EmptyState>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {list.map((claim) => (
+                <li key={claim.id} className="panel flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="min-w-0 font-bold break-words text-white">
+                      {bountyIcon(claim.role)} {claim.bounty.title}
+                    </span>
+                    <span className="chip bg-gold px-2.5 py-0.5 text-gold-ink tabular-nums">{`+${claim.points}`}</span>
+                    <time dateTime={claim.playedOn} className="ml-auto text-sm text-night-300 tabular-nums">
+                      {formatDateLabel(claim.playedOn)}
+                    </time>
+                  </div>
+                  <p className={HINT_CLASS}>Buổi {sessionText(claim.session)}</p>
+                  <span className={cx('chip self-start rounded-xl! break-words whitespace-normal!', CLAIM_CHIP_CLASS[claim.status])}>{claimStatusText(claim)}</span>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </QueryState>
+    </section>
   );
 }
 

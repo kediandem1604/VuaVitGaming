@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { HallOfDayDto, MeDto, SessionAttendeeDto, SessionDto } from '../../src/shared/api-types';
+import type { BountyClaimDto, BountyDto, HallOfDayDto, MeDto, SessionAttendeeDto, SessionBountiesDto, SessionDto } from '../../src/shared/api-types';
+import { MY_BOUNTY_CLAIMS_KEY, PENDING_BOUNTY_CLAIMS_KEY } from '../../src/web/lib/queryKeys';
 import { TodayPage } from '../../src/web/pages/TodayPage';
 
 const me: SessionAttendeeDto = { memberId: 9, displayName: 'Tôi', avatarUrl: null };
@@ -35,13 +36,20 @@ const json = (status: number, body: unknown) =>
 
 type Handler = (init: RequestInit | undefined, url: string) => Response | Promise<Response>;
 
+/** Thẻ treo thưởng của buổi: test không tả gì thì buổi không có mục nào (không vẽ thẻ). */
+const BOUNTIES_PATH = /^GET \/api\/sessions\/(\d+)\/bounties$/;
+const noBounties: Handler = (_init, url) => {
+  const sessionId = Number(BOUNTIES_PATH.exec(`GET ${url.split('?')[0]}`)?.[1]);
+  return json(200, { sessionId, attended: false, open: true, bounties: [], myClaims: [] });
+};
+
 /** fetch giả định tuyến theo `METHOD path` (bỏ query string). */
 function stubFetch(routes: Record<string, Handler>) {
   const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const path = url.split('?')[0] ?? url;
     const key = `${init?.method ?? 'GET'} ${path}`;
-    const handler = routes[key];
+    const handler = routes[key] ?? (BOUNTIES_PATH.test(key) ? noBounties : undefined);
     if (!handler) throw new Error(`Không có tuyến giả cho ${key}`);
     return Promise.resolve(handler(init, url));
   });
@@ -163,7 +171,7 @@ test('joining replaces that card with the returned session and updates the total
   expect(screen.getByText('4 người tham gia hôm nay')).toBeInTheDocument();
 
   // Không tải lại danh sách sau khi thành công: dùng ngay DTO trả về.
-  const listCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/sessions') && !String(url).includes('attendance'));
+  const listCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/sessions') && !String(url).includes('attendance') && !String(url).includes('bounties'));
   expect(listCalls).toHaveLength(1);
 });
 
@@ -341,4 +349,214 @@ test('leaving is optimistic too: my seat frees up at once', async () => {
   expect(screen.queryByRole('img', { name: 'Tôi' })).not.toBeInTheDocument();
   release();
   expect(await screen.findByRole('button', { name: 'Tham gia' })).toBeEnabled();
+});
+
+// ---------------------------------------------------------------------------
+// Thẻ "Treo thưởng" cạnh thẻ buổi chơi (spec treo thưởng §6)
+// ---------------------------------------------------------------------------
+
+const PELICAN = { id: 30, nameVi: 'Bồ nông', icon: '🦩', faction: 'neutral' as const };
+
+const bounty = (over: Partial<BountyDto> & Pick<BountyDto, 'id' | 'title'>): BountyDto => ({
+  description: null,
+  points: 3,
+  role: null,
+  session: null,
+  active: true,
+  approvedClaims: 0,
+  ...over,
+});
+
+const bounties: BountyDto[] = [
+  bounty({ id: 1, title: 'Bồ Nông nuốt hết vịt', description: 'Cả phe Vịt trong bụng', points: 5, role: PELICAN }),
+  bounty({ id: 2, title: 'Tham gia đủ từ game đầu tới game cuối', points: 3 }),
+];
+
+const claim = (over: Partial<BountyClaimDto> & Pick<BountyClaimDto, 'id' | 'status'>): BountyClaimDto => ({
+  bounty: { id: 1, title: 'Bồ Nông nuốt hết vịt', description: null },
+  member: { id: 9, displayName: 'Tôi' },
+  session: { id: 1, startsAt: '2026-10-22T12:00:00.000Z', modeName: 'Cổ điển' },
+  playedOn: '2026-10-22',
+  role: PELICAN,
+  points: 5,
+  rejectReason: null,
+  source: 'web',
+  createdAt: '2026-10-22T15:00:00.000Z',
+  reviewedBy: null,
+  reviewedAt: null,
+  ...over,
+});
+
+const sessionBounties = (over: Partial<SessionBountiesDto> = {}): SessionBountiesDto => ({ sessionId: 1, attended: true, open: true, bounties, myClaims: [], ...over });
+
+const oneSession: SessionDto = { ...base, id: 1, startsAt: '2026-10-22T12:00:00.000Z', attendees: [a, me], myStatus: 'going' };
+
+const dayRoutes = (list: SessionDto[]): Record<string, Handler> => ({
+  'GET /api/sessions': () => json(200, list),
+  'GET /api/mvp/day': () => json(200, emptyHall),
+  'GET /api/mvp/dates': () => json(200, []),
+});
+
+const bountyCard = () => screen.findByRole('region', { name: /^Treo thưởng/ });
+
+test('a session with bounties gets a "Treo thưởng" card beside it: two columns on lg, stacked below', async () => {
+  stubFetch({ ...dayRoutes([oneSession]), 'GET /api/sessions/1/bounties': () => json(200, sessionBounties()) });
+  renderPage();
+
+  const card = await bountyCard();
+  const sessionCard = screen.getByRole('article', { name: '19:00 Cổ điển' });
+  // Cùng một lưới: một cột trên màn nhỏ (xếp dưới), hai cột từ `lg` (buổi trái, treo thưởng phải).
+  const grid = card.parentElement as HTMLElement;
+  expect(grid).toBe(sessionCard.parentElement);
+  expect(grid).toHaveClass('grid', 'lg:grid-cols-2');
+  expect(grid.children[0]).toBe(sessionCard);
+  expect(grid.children[1]).toBe(card);
+  expect(sessionCard).toHaveClass('lg:col-start-1');
+
+  // Tiêu đề theo buổi (nhiều buổi trong ngày vẫn rõ thẻ nào của buổi nào).
+  expect(within(card).getByText('19:00 · Cổ điển')).toBeInTheDocument();
+  const items = within(card).getAllByRole('listitem');
+  expect(items).toHaveLength(2);
+  expect(items[0]).toHaveTextContent('🦩');
+  expect(items[0]).toHaveTextContent('Bồ Nông nuốt hết vịt');
+  expect(items[0]).toHaveTextContent('Cả phe Vịt trong bụng');
+  expect(within(items[0] as HTMLElement).getByText('+5')).toHaveClass('bg-gold');
+  // Mục không role: icon 🎯.
+  expect(items[1]).toHaveTextContent('🎯');
+  expect(within(items[1] as HTMLElement).getByRole('button', { name: 'Tôi đã hoàn thành' })).toHaveClass('btn-secondary');
+});
+
+test('a session without bounties draws no card (no empty right column)', async () => {
+  const fetchMock = stubFetch(dayRoutes([oneSession]));
+  renderPage();
+  const sessionCard = await screen.findByRole('article', { name: '19:00 Cổ điển' });
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/1/bounties')).toBe(true));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(screen.queryByRole('region', { name: /^Treo thưởng/ })).not.toBeInTheDocument();
+  expect(sessionCard).not.toHaveClass('lg:col-start-1');
+});
+
+test('a cancelled session does not even ask for bounties', async () => {
+  const cancelled: SessionDto = { ...oneSession, status: 'cancelled', myStatus: null, attendees: [] };
+  const fetchMock = stubFetch(dayRoutes([cancelled]));
+  renderPage();
+  await screen.findByText('Đã huỷ');
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/bounties'))).toBe(false);
+});
+
+test('"Tôi đã hoàn thành" posts the claim, shows "Chờ duyệt" and refreshes the review queue', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    ...dayRoutes([oneSession]),
+    'GET /api/sessions/1/bounties': () => json(200, sessionBounties()),
+    'POST /api/sessions/1/bounties/2/claim': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return json(201, claim({ id: 77, status: 'pending', bounty: { id: 2, title: 'Tham gia đủ', description: null }, role: null, points: 3 }));
+    },
+  });
+  const queryClient = renderPage();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const card = await bountyCard();
+  const second = within(card).getAllByRole('listitem')[1] as HTMLElement;
+
+  fireEvent.click(within(second).getByRole('button', { name: 'Tôi đã hoàn thành' }));
+
+  expect(await within(second).findByText('Chờ duyệt')).toBeInTheDocument();
+  expect(posted).toEqual({});
+  expect(within(second).queryByRole('button', { name: 'Tôi đã hoàn thành' })).not.toBeInTheDocument();
+  // Mục kia vẫn còn nút.
+  expect(within(within(card).getAllByRole('listitem')[0] as HTMLElement).getByRole('button', { name: 'Tôi đã hoàn thành' })).toBeInTheDocument();
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: PENDING_BOUNTY_CLAIMS_KEY });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_BOUNTY_CLAIMS_KEY });
+});
+
+test('a failed claim shows the server message under that bounty and refetches the card', async () => {
+  let calls = 0;
+  stubFetch({
+    ...dayRoutes([oneSession]),
+    'GET /api/sessions/1/bounties': () => {
+      calls += 1;
+      return json(200, sessionBounties());
+    },
+    'POST /api/sessions/1/bounties/1/claim': () => json(409, { error: { code: 'BOUNTY_ALREADY_CLAIMED', message: 'Bạn đã nhận mục này ở buổi này rồi' } }),
+  });
+  renderPage();
+  const first = within(await bountyCard()).getAllByRole('listitem')[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Tôi đã hoàn thành' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Bạn đã nhận mục này ở buổi này rồi');
+  await waitFor(() => expect(calls).toBe(2));
+});
+
+test('my claims show their status chip instead of the button', async () => {
+  stubFetch({
+    ...dayRoutes([oneSession]),
+    'GET /api/sessions/1/bounties': () =>
+      json(
+        200,
+        sessionBounties({
+          bounties: [...bounties, bounty({ id: 3, title: 'Binh lính giết 3 vịt', points: 4 }), bounty({ id: 4, title: 'Sống sót tới cuối', points: 2 })],
+          myClaims: [
+            claim({ id: 1, status: 'approved', points: 5 }),
+            claim({ id: 2, status: 'rejected', bounty: { id: 2, title: 'x', description: null }, rejectReason: 'Không có clip' }),
+            claim({ id: 3, status: 'revoked', bounty: { id: 3, title: 'y', description: null }, rejectReason: 'Nhầm buổi' }),
+            claim({ id: 4, status: 'pending', bounty: { id: 4, title: 'z', description: null } }),
+          ],
+        }),
+      ),
+  });
+  renderPage();
+  const items = within(await bountyCard()).getAllByRole('listitem');
+  expect(items[0]).toHaveTextContent('Đã nhận +5');
+  expect(items[1]).toHaveTextContent('Bị từ chối: Không có clip');
+  expect(items[2]).toHaveTextContent('Đã bị huỷ: Nhầm buổi');
+  expect(items[3]).toHaveTextContent('Chờ duyệt');
+  expect(screen.queryByRole('button', { name: 'Tôi đã hoàn thành' })).not.toBeInTheDocument();
+});
+
+test('a claim of a bounty that was turned off still shows on the card', async () => {
+  stubFetch({
+    ...dayRoutes([oneSession]),
+    'GET /api/sessions/1/bounties': () =>
+      json(200, sessionBounties({ bounties: [], myClaims: [claim({ id: 5, status: 'pending', bounty: { id: 9, title: 'Mục đã tắt', description: null } })] })),
+  });
+  renderPage();
+  const items = within(await bountyCard()).getAllByRole('listitem');
+  expect(items).toHaveLength(1);
+  expect(items[0]).toHaveTextContent('Mục đã tắt');
+  expect(items[0]).toHaveTextContent('Chờ duyệt');
+});
+
+test('not attending: no button, a small "Tham gia buổi để nhận thưởng" note', async () => {
+  stubFetch({ ...dayRoutes([oneSession]), 'GET /api/sessions/1/bounties': () => json(200, sessionBounties({ attended: false })) });
+  renderPage();
+  const card = await bountyCard();
+  expect(within(card).getByText('Tham gia buổi để nhận thưởng')).toBeInTheDocument();
+  expect(within(card).queryByRole('button', { name: 'Tôi đã hoàn thành' })).not.toBeInTheDocument();
+});
+
+test('expired (open = false): the button is hidden, the bounties still show', async () => {
+  stubFetch({ ...dayRoutes([oneSession]), 'GET /api/sessions/1/bounties': () => json(200, sessionBounties({ open: false })) });
+  renderPage();
+  const card = await bountyCard();
+  expect(within(card).getAllByRole('listitem')).toHaveLength(2);
+  expect(within(card).queryByRole('button', { name: 'Tôi đã hoàn thành' })).not.toBeInTheDocument();
+  expect(within(card).queryByText('Tham gia buổi để nhận thưởng')).not.toBeInTheDocument();
+});
+
+test('joining a session refreshes its bounty card (attended changes)', async () => {
+  const notGoing: SessionDto = { ...oneSession, attendees: [a], myStatus: null };
+  let attended = false;
+  stubFetch({
+    ...dayRoutes([notGoing]),
+    'GET /api/sessions/1/bounties': () => json(200, sessionBounties({ attended })),
+    'POST /api/sessions/1/attendance': () => {
+      attended = true;
+      return json(200, oneSession);
+    },
+  });
+  renderPage();
+  const card = await bountyCard();
+  expect(within(card).getByText('Tham gia buổi để nhận thưởng')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Tham gia' }));
+  expect(await within(card).findAllByRole('button', { name: 'Tôi đã hoàn thành' })).toHaveLength(2);
 });

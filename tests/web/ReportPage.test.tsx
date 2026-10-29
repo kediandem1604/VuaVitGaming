@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { AccusationDto, HighlightConfigDto, MeDto, MemberOptionDto, ReportDto, RoleDto, SessionDto } from '../../src/shared/api-types';
+import type { AccusationDto, BountyClaimDto, HighlightConfigDto, MeDto, MemberOptionDto, ReportDto, RoleDto, SessionDto } from '../../src/shared/api-types';
 import { vnTodayIso } from '../../src/web/lib/format';
 import { PENDING_REPORTS_KEY } from '../../src/web/lib/queryKeys';
 import { ReportPage } from '../../src/web/pages/ReportPage';
@@ -159,13 +159,16 @@ function stubFetch(routes: Record<string, Handler>) {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const path = url.split('?')[0] ?? url;
     const key = `${init?.method ?? 'GET'} ${path}`;
-    const handler = routes[key];
+    // "Treo thưởng của tôi": test không tả gì thì chưa nhận mục nào.
+    const handler = routes[key] ?? (key === MY_BOUNTIES_ROUTE ? () => json(200, []) : undefined);
     if (!handler) throw new Error(`Không có tuyến giả cho ${key}`);
     return Promise.resolve(handler(init, url));
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
+
+const MY_BOUNTIES_ROUTE = 'GET /api/bounty-claims/mine';
 
 /** Người đang đăng nhập (id 9) và danh sách chọn người cho ô báo cáo (có cả tôi — web tự loại). */
 const me: MeDto = { id: 9, memberCode: 'GGD-0009', displayName: 'Tôi', avatarUrl: null, email: null, notifyEmail: true, notifyDm: true, accessLevel: 'member' };
@@ -1199,4 +1202,58 @@ test('editing a report whose accusation is unchanged omits accusation (keeps its
   fireEvent.click(within(first).getByRole('button', { name: 'Lưu' }));
   await waitFor(() => expect(bodies).toHaveLength(2));
   expect(bodies[1]).toEqual({ value: 4, playedOn: today, note: null, accusation: { accusedId: 10, accusedRoleId: 20, victimId: 11, victimFaction: 'duck' } });
+});
+
+// ---------------------------------------------------------------------------
+// Treo thưởng của tôi (spec treo thưởng §6)
+// ---------------------------------------------------------------------------
+
+const myClaim = (over: Partial<BountyClaimDto> & Pick<BountyClaimDto, 'id' | 'status'>): BountyClaimDto => ({
+  bounty: { id: 1, title: 'Bồ Nông nuốt hết vịt', description: null },
+  member: { id: 9, displayName: 'Tôi' },
+  // 12:00Z = 19:00 giờ VN.
+  session: { id: 7, startsAt: '2026-10-22T12:00:00.000Z', modeName: 'Cổ điển' },
+  playedOn: '2026-10-22',
+  role: { id: 30, nameVi: 'Bồ nông', icon: '🦩', faction: 'neutral' },
+  points: 5,
+  rejectReason: null,
+  source: 'web',
+  createdAt: '2026-10-22T15:00:00.000Z',
+  reviewedBy: null,
+  reviewedAt: null,
+  ...over,
+});
+
+test('"Treo thưởng của tôi" lists my latest claims with their status under "Lần khai của tôi"', async () => {
+  const fetchMock = stubFetch({
+    ...baseRoutes,
+    [MY_BOUNTIES_ROUTE]: () =>
+      json(200, [
+        myClaim({ id: 1, status: 'pending' }),
+        myClaim({ id: 2, status: 'approved', role: null, points: 3, bounty: { id: 2, title: 'Tham gia đủ', description: null } }),
+        myClaim({ id: 3, status: 'rejected', rejectReason: 'Không có clip' }),
+        myClaim({ id: 4, status: 'revoked', rejectReason: 'Nhầm buổi' }),
+      ]),
+  });
+  renderPage();
+  const section = await screen.findByRole('region', { name: 'Treo thưởng của tôi' });
+  expect(within(section).getByRole('heading', { level: 3, name: 'Treo thưởng của tôi' })).toBeInTheDocument();
+  const items = await within(section).findAllByRole('listitem');
+  expect(items).toHaveLength(4);
+  expect(items[0]).toHaveTextContent('🦩 Bồ Nông nuốt hết vịt');
+  expect(items[0]).toHaveTextContent('+5');
+  expect(items[0]).toHaveTextContent('Buổi 19:00 22/10/2026 — Cổ điển');
+  expect(within(items[0] as HTMLElement).getByText('Chờ duyệt')).toHaveClass('chip', 'bg-gold');
+  expect(items[1]).toHaveTextContent('🎯 Tham gia đủ');
+  expect(within(items[1] as HTMLElement).getByText('Đã nhận +3')).toHaveClass('chip', 'bg-ok');
+  expect(items[2]).toHaveTextContent('Bị từ chối: Không có clip');
+  expect(items[3]).toHaveTextContent('Đã bị huỷ: Nhầm buổi');
+  expect(fetchMock).toHaveBeenCalledWith('/api/bounty-claims/mine?limit=20', expect.anything());
+});
+
+test('"Treo thưởng của tôi" says so when I have no claims', async () => {
+  stubFetch(baseRoutes);
+  renderPage();
+  const section = await screen.findByRole('region', { name: 'Treo thưởng của tôi' });
+  expect(await within(section).findByText('Bạn chưa nhận treo thưởng nào')).toBeInTheDocument();
 });

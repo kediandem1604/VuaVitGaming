@@ -1,6 +1,6 @@
 /**
- * Trang Quản trị (spec §8): các tab theo quyền — mod thấy Buổi chơi, Duyệt điểm,
- * Thành viên, Gửi lỗi; admin thấy thêm Hạng mục MVP, Role, Cài đặt. Tab đang mở nằm
+ * Trang Quản trị (spec §8): các tab theo quyền — mod thấy Buổi chơi, Duyệt điểm, Treo thưởng
+ * (spec treo thưởng §5), Thành viên, Gửi lỗi; admin thấy thêm Hạng mục MVP, Role, Cài đặt. Tab đang mở nằm
  * trong `?tab=` để chia sẻ/tải lại được; giá trị lạ (hoặc tab admin với mod) thì về
  * tab mặc định. Mỗi tab là một file riêng trong thư mục này; App đã chặn thành viên
  * thường (`StaffOnly`), server vẫn kiểm tra quyền cho từng API.
@@ -27,6 +27,7 @@ import { saveDataOn } from '../../lib/prefetch';
 
 const SessionsTab = lazyPage(() => import('./SessionsTab').then((m) => ({ default: m.SessionsTab })));
 const ReviewsTab = lazyPage(() => import('./ReviewsTab').then((m) => ({ default: m.ReviewsTab })));
+const BountiesTab = lazyPage(() => import('./BountiesTab').then((m) => ({ default: m.BountiesTab })));
 const MembersTab = lazyPage(() => import('./MembersTab').then((m) => ({ default: m.MembersTab })));
 const FailuresTab = lazyPage(() => import('./FailuresTab').then((m) => ({ default: m.FailuresTab })));
 const CategoriesTab = lazyPage(() => import('./CategoriesTab').then((m) => ({ default: m.CategoriesTab })));
@@ -49,6 +50,7 @@ const SESSIONS_TAB: TabDef = { key: 'buoi-choi', label: 'Buổi chơi', adminOnl
 const TABS: readonly TabDef[] = [
   SESSIONS_TAB,
   { key: 'duyet-diem', label: 'Duyệt điểm', adminOnly: false, render: () => <ReviewsTab />, preload: ReviewsTab.preload },
+  { key: 'treo-thuong', label: 'Treo thưởng', adminOnly: false, render: () => <BountiesTab />, preload: BountiesTab.preload },
   { key: 'thanh-vien', label: 'Thành viên', adminOnly: false, render: () => <MembersTab />, preload: MembersTab.preload },
   { key: 'gui-loi', label: 'Gửi lỗi', adminOnly: false, render: () => <FailuresTab />, preload: FailuresTab.preload },
   { key: 'hang-muc', label: 'Hạng mục MVP', adminOnly: true, render: () => <CategoriesTab />, preload: CategoriesTab.preload },

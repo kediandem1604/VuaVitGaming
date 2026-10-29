@@ -6,6 +6,14 @@
  *
  * Dòng nhắc giờ trên mỗi thẻ lấy kênh nhắc từ hồ sơ người đang đăng nhập (`useCurrentMember`).
  *
+ * Treo thưởng (spec treo thưởng §6): buổi chưa huỷ có mục áp dụng (hoặc mình đã có lần nhận) thì thẻ
+ * "Treo thưởng" (`BountyCard`) đứng ngay sau thẻ buổi trong cùng lưới — từ `lg` thẻ buổi ép về cột
+ * trái (`lg:col-start-1`) và thẻ treo thưởng nằm cột phải, màn nhỏ thì xếp dưới. Buổi không có mục
+ * thì không vẽ thẻ, các thẻ buổi xếp hai cột như cũ. Hỏi treo thưởng lỗi thì lặng lẽ không vẽ thẻ
+ * (phần phụ, không chắn trang). Nhận xong: chèn lần nhận vào cache của thẻ, làm mới hàng chờ duyệt
+ * và "Treo thưởng của tôi"; lỗi thì hiện dưới mục đó và tải lại thẻ. Điểm danh xong cũng tải lại thẻ
+ * (`attended` đổi).
+ *
  * Điểm danh: cập nhật lạc quan (ghế đổi ngay khi bấm, xem `TodaySession`), rồi thay đúng
  * buổi đó trong cache bằng DTO trả về; lỗi thì trả lại như cũ, hiện thông báo ngay dưới thẻ
  * và tải lại danh sách để thẻ phản ánh trạng thái thật (đã đủ người, đã huỷ…).
@@ -13,8 +21,9 @@
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Users } from 'lucide-react';
-import type { HallOfDayDto, MeDto, SessionDto } from '../../shared/api-types';
+import type { BountyClaimDto, HallOfDayDto, MeDto, SessionBountiesDto, SessionDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
+import { BountyCard, hasBountyRows } from '../components/BountyCard';
 import { DailyHall } from '../components/DailyHall';
 import { EmptyState } from '../components/EmptyState';
 import { QueryState } from '../components/QueryState';
@@ -22,7 +31,8 @@ import { SessionCard } from '../components/SessionCard';
 import { SkeletonCards } from '../components/Skeleton';
 import { useCurrentMember } from '../hooks/useMe';
 import { formatDayLabel, formatDayMonth } from '../lib/format';
-import { mvpDatesQuery } from '../lib/queries';
+import { mvpDatesQuery, sessionBountiesQuery } from '../lib/queries';
+import { MY_BOUNTY_CLAIMS_KEY, PENDING_BOUNTY_CLAIMS_KEY } from '../lib/queryKeys';
 import { reminderChannels, type ReminderChannels } from '../lib/reminders';
 
 export const SESSIONS_TODAY_KEY = ['sessions', 'today'] as const;
@@ -61,6 +71,7 @@ export function TodayPage() {
               </EmptyState>
             ) : (
               // Hai cột từ `lg`; `items-start` để thẻ ngắn (đã huỷ) không bị kéo cao bằng thẻ bên cạnh.
+              // Thẻ treo thưởng của một buổi là ô ngay sau thẻ buổi trong cùng lưới (xem `TodaySession`).
               <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
                 {sortByStart(list).map((session) => (
                   <TodaySession key={session.id} session={session} reminders={reminders} />
@@ -135,6 +146,22 @@ export function toggleMySeat(session: SessionDto, me: MeDto, going: boolean): Se
 function TodaySession({ session, reminders }: { session: SessionDto; reminders: ReminderChannels }) {
   const queryClient = useQueryClient();
   const me = useCurrentMember();
+  const bountiesQuery = sessionBountiesQuery(session.id);
+  // Buổi đã huỷ không nhận thưởng được nữa: không hỏi, không vẽ thẻ.
+  const bounties = useQuery({ ...bountiesQuery, enabled: session.status !== 'cancelled' });
+  const showBounties = session.status !== 'cancelled' && hasBountyRows(bounties.data);
+  const claim = useMutation({
+    mutationFn: (bountyId: number) => apiSend<BountyClaimDto>('POST', `/api/sessions/${session.id}/bounties/${bountyId}/claim`, {}),
+    onSuccess: (created) => {
+      queryClient.setQueryData<SessionBountiesDto>(bountiesQuery.queryKey, (current) =>
+        current ? { ...current, myClaims: [...current.myClaims.filter((item) => item.bounty.id !== created.bounty.id), created] } : current,
+      );
+      void queryClient.invalidateQueries({ queryKey: PENDING_BOUNTY_CLAIMS_KEY });
+      void queryClient.invalidateQueries({ queryKey: MY_BOUNTY_CLAIMS_KEY });
+    },
+    // Đã nhận rồi (web/Discord), quá hạn, mục vừa tắt…: thẻ đang xem đã cũ.
+    onError: () => void queryClient.invalidateQueries({ queryKey: bountiesQuery.queryKey }),
+  });
   const attendance = useMutation({
     mutationFn: (going: boolean) => apiSend<SessionDto>('POST', `/api/sessions/${session.id}/attendance`, { going }),
     onMutate: async (going) => {
@@ -149,6 +176,8 @@ function TodaySession({ session, reminders }: { session: SessionDto; reminders: 
       queryClient.setQueryData<SessionDto[]>(SESSIONS_TODAY_KEY, (current) =>
         current?.map((item) => (item.id === updated.id ? updated : item)),
       );
+      // Tham gia/huỷ đổi `attended` của thẻ treo thưởng.
+      void queryClient.invalidateQueries({ queryKey: bountiesQuery.queryKey });
     },
     onError: (_error, _going, context) => {
       if (context?.previous) queryClient.setQueryData(SESSIONS_TODAY_KEY, context.previous);
@@ -157,13 +186,25 @@ function TodaySession({ session, reminders }: { session: SessionDto; reminders: 
   });
 
   return (
-    <SessionCard
-      session={session}
-      pending={attendance.isPending}
-      error={attendance.isError ? errorMessage(attendance.error) : null}
-      onToggle={(going) => attendance.mutate(going)}
-      reminders={reminders}
-    />
+    <>
+      <SessionCard
+        session={session}
+        pending={attendance.isPending}
+        error={attendance.isError ? errorMessage(attendance.error) : null}
+        onToggle={(going) => attendance.mutate(going)}
+        reminders={reminders}
+        className={showBounties ? 'lg:col-start-1' : undefined}
+      />
+      {showBounties && bounties.data && (
+        <BountyCard
+          data={bounties.data}
+          session={session}
+          onClaim={(bountyId) => claim.mutate(bountyId)}
+          claimingId={claim.isPending ? (claim.variables ?? null) : null}
+          error={claim.isError && claim.variables !== undefined ? { bountyId: claim.variables, message: errorMessage(claim.error) } : null}
+        />
+      )}
+    </>
   );
 }
 

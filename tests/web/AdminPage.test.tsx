@@ -17,7 +17,7 @@ const mod: MeDto = {
 };
 const admin: MeDto = { ...mod, id: 2, memberCode: 'GGD-0002', displayName: 'Admin Hai', accessLevel: 'admin' };
 
-const MOD_TABS = ['Buổi chơi', 'Duyệt điểm', 'Thành viên', 'Gửi lỗi'];
+const MOD_TABS = ['Buổi chơi', 'Duyệt điểm', 'Treo thưởng', 'Thành viên', 'Gửi lỗi'];
 const ADMIN_TABS = [...MOD_TABS, 'Hạng mục MVP', 'Role', 'Cài đặt'];
 
 const json = (status: number, body: unknown) =>
@@ -63,7 +63,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test('a mod sees the four mod tabs, defaulting to Buổi chơi', async () => {
+test('a mod sees the five mod tabs, defaulting to Buổi chơi', async () => {
   stubEmptyApi();
   renderAt(mod);
 

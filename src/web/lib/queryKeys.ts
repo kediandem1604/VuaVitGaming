@@ -16,3 +16,13 @@ export const TITLES_QUERY_KEY = ['me', 'titles'] as const;
 export const MEMBER_QUERY_KEY = ['member'] as const;
 /** Tiền tố khoá bảng "Tổng điểm theo phe" (`['leaderboard-totals', mùa]`) — tab Duyệt điểm làm mới sau khi huỷ duyệt. */
 export const LEADERBOARD_TOTALS_KEY = ['leaderboard-totals'] as const;
+/** Danh sách mục treo thưởng của tab Quản trị → Treo thưởng. */
+export const ADMIN_BOUNTIES_KEY = ['admin', 'bounties'] as const;
+/** Hàng chờ "Treo thưởng chờ duyệt" của tab Duyệt điểm — trang Hôm nay làm mới sau khi nhận. */
+export const PENDING_BOUNTY_CLAIMS_KEY = ['admin', 'bounty-claims', 'pending'] as const;
+/** Lần nhận treo thưởng đã duyệt trong mục "Đã duyệt gần đây" của tab Duyệt điểm. */
+export const APPROVED_BOUNTY_CLAIMS_KEY = ['admin', 'bounty-claims', 'approved'] as const;
+/** "Treo thưởng của tôi" (trang Khai điểm) — trang Hôm nay và tab Duyệt điểm làm mới. */
+export const MY_BOUNTY_CLAIMS_KEY = ['bounty-claims', 'mine'] as const;
+/** Tiền tố khoá thẻ treo thưởng của từng buổi (`['session-bounties', id]`) — tab Treo thưởng và Duyệt điểm làm mới. */
+export const SESSION_BOUNTIES_KEY = ['session-bounties'] as const;

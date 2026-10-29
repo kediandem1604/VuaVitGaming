@@ -5,8 +5,9 @@
  */
 
 import { queryOptions } from '@tanstack/react-query';
-import type { HeldRoleDto, RoleDto, SeasonDto } from '../../shared/api-types';
+import type { HeldRoleDto, RoleDto, SeasonDto, SessionBountiesDto } from '../../shared/api-types';
 import { apiGet } from '../api';
+import { SESSION_BOUNTIES_KEY } from './queryKeys';
 
 /** Danh sách mùa (mới nhất trước; mùa hiện tại luôn có) — Đại sảnh, Bảng xếp hạng. */
 export const seasonsQuery = queryOptions({ queryKey: ['seasons'] as const, queryFn: () => apiGet<SeasonDto[]>('/api/seasons') });
@@ -19,3 +20,7 @@ export const mvpDatesQuery = queryOptions({ queryKey: ['mvp', 'dates'] as const,
 
 /** Các role mình đang hoá thân mùa này — trang Hồ sơ (khoá `TITLES_QUERY_KEY` ở `queryKeys.ts`). */
 export const titlesQuery = queryOptions({ queryKey: ['me', 'titles'] as const, queryFn: () => apiGet<HeldRoleDto[]>('/api/me/titles') });
+
+/** Mục treo thưởng của một buổi kèm lần nhận của mình — thẻ "Treo thưởng" ở trang Hôm nay. */
+export const sessionBountiesQuery = (sessionId: number) =>
+  queryOptions({ queryKey: [...SESSION_BOUNTIES_KEY, sessionId] as const, queryFn: () => apiGet<SessionBountiesDto>(`/api/sessions/${sessionId}/bounties`) });

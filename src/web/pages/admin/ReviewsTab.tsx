@@ -27,6 +27,12 @@
  * bị báo cáo (`source = 'accusation'`) mang chip "Bị trừ điểm" và đọc "Bị báo cáo: bắn {tên}
  * ({phe}) − {điểm} điểm" (`lib/accusations.ts`), huỷ duyệt riêng được như mọi dòng.
  *
+ * Treo thưởng (spec treo thưởng §8): giữa hai mục trên là "Treo thưởng chờ duyệt ({n})" — mỗi dòng
+ * người nhận, `{icon} {mục}` `+{điểm}`, buổi + ngày, nguồn (Web/Discord), nút Duyệt / Từ chối (lý do,
+ * cùng `ReasonForm`). "Đã duyệt gần đây" trộn cả lần nhận treo thưởng đã duyệt (chip "Treo thưởng"),
+ * mới duyệt trước, mỗi dòng có Huỷ duyệt. Duyệt/huỷ một lần nhận làm mới cùng bộ cache điểm như huỷ
+ * duyệt lần khai, cộng "Treo thưởng của tôi" và thẻ treo thưởng ở trang Hôm nay.
+ *
  * Giao diện Sảnh đêm (spec §6 Quản trị): hai danh sách kiểu bảng (một panel, hàng kẻ
  * `night-700`, chữ 14px); Xác nhận từ chối / Xác nhận huỷ duyệt là `btn-danger` (xác nhận
  * duyệt-bỏ-báo-cáo vẫn là duyệt nên `btn-primary`). Lần khai có highlight kèm link "Xem
@@ -37,17 +43,28 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type ReactNode } from 'react';
-import type { AccusationDto, ReportDto, ReviewedReportDto } from '../../../shared/api-types';
+import type { AccusationDto, BountyClaimDto, ReportDto, ReviewedReportDto } from '../../../shared/api-types';
 import { formatReportValue } from '../../../shared/metric';
 import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { HighlightLink } from '../../components/HighlightLink';
 import { QueryState } from '../../components/QueryState';
 import { PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../../lib/accusations';
+import { CLAIM_SOURCE_LABEL, bountyIcon, sessionText } from '../../lib/bounties';
 import { cx } from '../../lib/cx';
 import { useStaggerOnce } from '../../lib/motion';
 import { formatDateLabel, formatTime } from '../../lib/format';
-import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY, TITLES_QUERY_KEY } from '../../lib/queryKeys';
+import {
+  APPROVED_BOUNTY_CLAIMS_KEY,
+  APPROVED_REPORTS_KEY,
+  LEADERBOARD_TOTALS_KEY,
+  MY_BOUNTY_CLAIMS_KEY,
+  MY_REPORTS_KEY,
+  PENDING_BOUNTY_CLAIMS_KEY,
+  PENDING_REPORTS_KEY,
+  SESSION_BOUNTIES_KEY,
+  TITLES_QUERY_KEY,
+} from '../../lib/queryKeys';
 
 /**
  * Cache đọc điểm đã duyệt — làm mới sau khi huỷ duyệt (khớp tiền tố: mọi role, mùa, thành viên),
@@ -55,6 +72,22 @@ import { APPROVED_REPORTS_KEY, LEADERBOARD_TOTALS_KEY, MY_REPORTS_KEY, PENDING_R
  * mod không tự huỷ được, `SELF_REVIEW`).
  */
 const SCORE_QUERY_KEYS = [['leaderboard'], ['leaderboard-factions'], LEADERBOARD_TOTALS_KEY, ['hall'], ['member'], TITLES_QUERY_KEY, MY_REPORTS_KEY] as const;
+/**
+ * Cache làm mới sau khi duyệt hoặc huỷ duyệt một lần nhận treo thưởng: cùng các bảng điểm (lần nhận
+ * có role vào điểm mùa, không role vào "Cả 3 phe"), cộng "Treo thưởng của tôi" và thẻ treo thưởng ở Hôm nay.
+ */
+const BOUNTY_SCORE_QUERY_KEYS = [
+  ['leaderboard'],
+  ['leaderboard-factions'],
+  LEADERBOARD_TOTALS_KEY,
+  ['hall'],
+  ['member'],
+  TITLES_QUERY_KEY,
+  MY_BOUNTY_CLAIMS_KEY,
+  SESSION_BOUNTIES_KEY,
+] as const;
+/** Mã lỗi cho biết hàng chờ treo thưởng đang xem đã cũ (người khác vừa xử lý, mùa vừa chốt). */
+const STALE_BOUNTY_PENDING_CODES = new Set(['NOT_PENDING', 'SEASON_CLOSED']);
 /** Mã 409 cho biết danh sách "Đã duyệt gần đây" đang xem đã cũ (người khác vừa huỷ, hoặc mùa vừa chốt). */
 const STALE_APPROVED_CODES = new Set(['NOT_APPROVED', 'SEASON_CLOSED']);
 /** Mã lỗi cho biết hàng chờ đang xem đã cũ (người khác vừa duyệt / người khai vừa sửa / khung báo cáo đã đổi). */
@@ -79,6 +112,7 @@ export function ReviewsTab() {
   return (
     <>
       <PendingQueue />
+      <BountyQueue />
       <RecentlyApproved />
     </>
   );
@@ -113,14 +147,62 @@ function PendingQueue() {
   );
 }
 
-function RecentlyApproved() {
+function BountyQueue() {
   const headingId = useId();
-  const approved = useQuery({ queryKey: APPROVED_REPORTS_KEY, queryFn: () => apiGet<ReviewedReportDto[]>('/api/admin/reports?status=approved') });
+  const queue = useQuery({ queryKey: PENDING_BOUNTY_CLAIMS_KEY, queryFn: () => apiGet<BountyClaimDto[]>('/api/admin/bounty-claims?status=pending') });
+  const stagger = useStaggerOnce((queue.data?.length ?? 0) > 0);
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <ListHeading id={headingId} title="Đã duyệt gần đây" query={approved} />
-      <QueryState query={approved}>
+      <ListHeading id={headingId} title="Treo thưởng chờ duyệt" query={queue} />
+      <QueryState query={queue}>
+        {(list) =>
+          list.length === 0 ? (
+            <EmptyState>
+              <p>Không có treo thưởng nào chờ duyệt</p>
+            </EmptyState>
+          ) : (
+            <ul className={cx('panel flex flex-col divide-y divide-night-700 p-0', stagger)}>
+              {list.map((claim) => (
+                <PendingBountyClaim key={claim.id} claim={claim} />
+              ))}
+            </ul>
+          )
+        }
+      </QueryState>
+    </section>
+  );
+}
+
+/** Một dòng "Đã duyệt gần đây": lần khai hoặc lần nhận treo thưởng. */
+type ApprovedItem = { kind: 'report'; at: string; report: ReviewedReportDto } | { kind: 'bounty'; at: string; claim: BountyClaimDto };
+
+/** Trộn hai danh sách đã duyệt, mới duyệt trước (sắp ổn định: cùng giờ thì lần khai trước). */
+function mergeApproved(reports: ReviewedReportDto[], claims: BountyClaimDto[]): ApprovedItem[] {
+  const items: ApprovedItem[] = [
+    ...reports.map((report): ApprovedItem => ({ kind: 'report', at: report.reviewedAt, report })),
+    ...claims.map((claim): ApprovedItem => ({ kind: 'bounty', at: claim.reviewedAt ?? claim.createdAt, claim })),
+  ];
+  return items.sort((x, y) => y.at.localeCompare(x.at));
+}
+
+function RecentlyApproved() {
+  const headingId = useId();
+  const reports = useQuery({ queryKey: APPROVED_REPORTS_KEY, queryFn: () => apiGet<ReviewedReportDto[]>('/api/admin/reports?status=approved') });
+  const claims = useQuery({ queryKey: APPROVED_BOUNTY_CLAIMS_KEY, queryFn: () => apiGet<BountyClaimDto[]>('/api/admin/bounty-claims?status=approved') });
+  // Một khối cho cả hai truy vấn: có dữ liệu khi cả hai đã về, lỗi khi một trong hai lỗi, Tải lại/Thử lại gọi cả hai.
+  const merged = {
+    data: reports.data && claims.data ? mergeApproved(reports.data, claims.data) : undefined,
+    isError: reports.isError || claims.isError,
+    error: reports.error ?? claims.error,
+    isFetching: reports.isFetching || claims.isFetching,
+    refetch: () => Promise.all([reports.refetch(), claims.refetch()]),
+  };
+
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <ListHeading id={headingId} title="Đã duyệt gần đây" query={merged} />
+      <QueryState query={merged}>
         {(list) =>
           list.length === 0 ? (
             <EmptyState>
@@ -128,9 +210,13 @@ function RecentlyApproved() {
             </EmptyState>
           ) : (
             <ul className="panel flex flex-col divide-y divide-night-700 p-0">
-              {list.map((report) => (
-                <ApprovedReport key={report.id} report={report} />
-              ))}
+              {list.map((item) =>
+                item.kind === 'report' ? (
+                  <ApprovedReport key={`report-${item.report.id}`} report={item.report} />
+                ) : (
+                  <ApprovedBountyClaim key={`bounty-${item.claim.id}`} claim={item.claim} />
+                ),
+              )}
             </ul>
           )
         }
@@ -319,6 +405,143 @@ function ApprovedReport({ report }: { report: ReviewedReportDto }) {
       )}
       <ReviewError message={error} />
     </li>
+  );
+}
+
+function PendingBountyClaim({ claim }: { claim: BountyClaimDto }) {
+  const queryClient = useQueryClient();
+  const [rejecting, setRejecting] = useState(false);
+  const reason = useReason('Cần ghi lý do từ chối');
+
+  const review = useMutation({
+    mutationFn: (body: { approve: true } | { approve: false; reason: string }) => apiSend<undefined>('POST', `/api/admin/bounty-claims/${claim.id}/review`, body),
+    onSuccess: (_, body) => {
+      queryClient.setQueryData<BountyClaimDto[]>(PENDING_BOUNTY_CLAIMS_KEY, (current) => current?.filter((item) => item.id !== claim.id));
+      // Người nhận thấy trạng thái mới ở thẻ Hôm nay và "Treo thưởng của tôi" dù duyệt hay từ chối.
+      void queryClient.invalidateQueries({ queryKey: MY_BOUNTY_CLAIMS_KEY });
+      void queryClient.invalidateQueries({ queryKey: SESSION_BOUNTIES_KEY });
+      if (body.approve) {
+        void queryClient.invalidateQueries({ queryKey: APPROVED_BOUNTY_CLAIMS_KEY });
+        for (const queryKey of BOUNTY_SCORE_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey });
+      }
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && STALE_BOUNTY_PENDING_CODES.has(error.code)) void queryClient.invalidateQueries({ queryKey: PENDING_BOUNTY_CLAIMS_KEY });
+    },
+  });
+
+  const error = (rejecting ? reason.localError : null) ?? (review.isError ? errorMessage(review.error) : null);
+
+  return (
+    <li className="flex flex-col gap-2 px-4 py-3 text-sm">
+      <BountyClaimSummary
+        claim={claim}
+        meta={
+          <>
+            Buổi {sessionText(claim.session)} · {CLAIM_SOURCE_LABEL[claim.source]}
+          </>
+        }
+      />
+      {rejecting ? (
+        <ReasonForm
+          reason={reason}
+          label="Lý do từ chối"
+          submitLabel="Xác nhận từ chối"
+          cancelLabel="Huỷ"
+          pending={review.isPending}
+          onSubmit={(trimmed) => review.mutate({ approve: false, reason: trimmed })}
+          onCancel={() => {
+            review.reset();
+            reason.clearError();
+            setRejecting(false);
+          }}
+        />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-primary" disabled={review.isPending} onClick={() => review.mutate({ approve: true })}>
+            {review.isPending ? 'Đang gửi…' : 'Duyệt'}
+          </button>
+          <button type="button" className="btn-secondary" disabled={review.isPending} onClick={() => setRejecting(true)}>
+            Từ chối
+          </button>
+        </div>
+      )}
+      <ReviewError message={error} />
+    </li>
+  );
+}
+
+function ApprovedBountyClaim({ claim }: { claim: BountyClaimDto }) {
+  const queryClient = useQueryClient();
+  const [revoking, setRevoking] = useState(false);
+  const reason = useReason('Cần ghi lý do huỷ duyệt');
+
+  const revoke = useMutation({
+    mutationFn: (trimmed: string) => apiSend<undefined>('POST', `/api/admin/bounty-claims/${claim.id}/revoke`, { reason: trimmed }),
+    onSuccess: () => {
+      queryClient.setQueryData<BountyClaimDto[]>(APPROVED_BOUNTY_CLAIMS_KEY, (current) => current?.filter((item) => item.id !== claim.id));
+      for (const queryKey of BOUNTY_SCORE_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && STALE_APPROVED_CODES.has(error.code)) void queryClient.invalidateQueries({ queryKey: APPROVED_BOUNTY_CLAIMS_KEY });
+    },
+  });
+
+  const error = reason.localError ?? (revoke.isError ? errorMessage(revoke.error) : null);
+  const reviewedAt = claim.reviewedAt ? ` lúc ${formatTime(claim.reviewedAt)} ${formatDateLabel(new Date(claim.reviewedAt))}` : '';
+
+  return (
+    <li className="flex flex-col gap-2 px-4 py-3 text-sm">
+      <BountyClaimSummary claim={claim} label meta={`Duyệt bởi ${claim.reviewedBy?.displayName ?? '—'}${reviewedAt} · Buổi ${sessionText(claim.session)}`} />
+      {revoking ? (
+        <ReasonForm
+          reason={reason}
+          label="Lý do huỷ duyệt"
+          submitLabel="Xác nhận huỷ duyệt"
+          cancelLabel="Thôi"
+          pending={revoke.isPending}
+          onSubmit={(trimmed) => revoke.mutate(trimmed)}
+          onCancel={() => {
+            revoke.reset();
+            reason.clearError();
+            setRevoking(false);
+          }}
+        />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-secondary" disabled={revoke.isPending} onClick={() => setRevoking(true)}>
+            Huỷ duyệt
+          </button>
+        </div>
+      )}
+      <ReviewError message={error} />
+    </li>
+  );
+}
+
+/**
+ * Phần chung của một dòng lần nhận treo thưởng: người nhận (kèm chip "Treo thưởng" khi `label` — dòng
+ * nằm lẫn với lần khai ở "Đã duyệt gần đây"), ngày chơi, `{icon} {mục}` `+{điểm}`, mô tả, dòng phụ `meta`.
+ */
+function BountyClaimSummary({ claim, meta, label = false }: { claim: BountyClaimDto; meta: ReactNode; label?: boolean }) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-base font-bold text-white">{claim.member.displayName}</span>
+        {label && <span className="chip bg-gold px-2.5 py-0.5 text-gold-ink">Treo thưởng</span>}
+        <time dateTime={claim.playedOn} className="ml-auto text-night-300 tabular-nums">
+          {formatDateLabel(claim.playedOn)}
+        </time>
+      </div>
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="min-w-0 text-lg leading-tight font-extrabold break-words text-white">
+          {bountyIcon(claim.role)} {claim.bounty.title}
+        </span>
+        <span className="chip bg-gold px-2.5 py-0.5 text-gold-ink tabular-nums">{`+${claim.points}`}</span>
+      </p>
+      {claim.bounty.description && <p className="break-words text-night-200">{claim.bounty.description}</p>}
+      <p className="text-night-300">{meta}</p>
+    </>
   );
 }
 
