@@ -4,7 +4,7 @@
  * Phe Vịt mặc đồ tối — đen, đỏ máu, thép súng — cầm hung khí, và mang mắt quỷ của thân
  * (`bodyLook` đặt `evil` cho cả phe), nên đồ không che mắt: mặt nạ nào cũng chừa lỗ mắt.
  *
- * Toạ độ như bộ của Ngỗng: khung `0 0 120 160`, đỉnh đầu y = 38, mắt (50|70, 69), lông mày
+ * Toạ độ như bộ của Ngỗng: khung `0 0 120 160`, đỉnh đầu y = 35, mắt (50|70, 69), lông mày
  * quỷ bắt đầu từ y ≈ 60 nên mũ giữ đáy ≤ y 58, mỏ y 74–95, ngực (60, 118), mút cánh cầm đồ
  * (94, 125), mọi phần giữ y ≥ 29 (vùng bảng tên). Vật cầm tay vẽ trong toạ độ riêng — chĩa lên
  * theo trục y âm — rồi xoay và đặt vào mút cánh như bộ `knife`.

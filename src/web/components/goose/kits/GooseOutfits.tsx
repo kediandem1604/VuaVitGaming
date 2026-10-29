@@ -4,8 +4,8 @@
  * một kiểu: Cảnh sát trưởng đội mũ cao bồi, Kỹ sư đội mũ bảo hộ, Thầy đồng quấn khăn ôm cầu
  * pha lê… Role không có ở đây (role admin thêm sau, role phe khác) mặc bộ chung.
  *
- * Toạ độ theo khung `0 0 120 160` của `GooseBody`: đỉnh đầu y = 38, mắt (50|70, 69) bán kính
- * 6.5, mỏ y 74–95, ngực quanh (60, 118), mút cánh cầm đồ ở (94, 125). Mũ giữ đáy ≤ y 58 để
+ * Toạ độ theo khung `0 0 120 160` của `GooseBody`: đỉnh đầu y = 35, mắt (50|70, 69) lòng trắng
+ * bán kính ≈ 9, mỏ y 74–95, ngực quanh (60, 118), mút cánh cầm đồ ở (94, 125). Mũ giữ đáy ≤ y 58 để
  * không che mắt và mọi phần giữ y ≥ 29 (vùng bảng tên).
  */
 
@@ -755,7 +755,7 @@ const lucidDreamer: Outfit = {
       <path d="M52 37.5 C56 42 58 48 58 54 M70 37 C74 42 76 48 76 54 M86 41 C90 44 92 48 94 52" fill="none" stroke="#9FC2FF" strokeWidth={3} />
       <circle cx={102} cy={60} r={5} fill={PALETTE.white} {...OUTLINE} strokeWidth={2.5} />
       <rect x={35} y={50} width={50} height={8} rx={4} fill={PALETTE.white} {...OUTLINE} />
-      <path d="M43.2 68.5 C43.2 60 56.8 60 56.8 68.5 Z M63.2 68.5 C63.2 60 76.8 60 76.8 68.5 Z" fill={PALETTE.white} stroke={PALETTE.ink} strokeWidth={2.2} strokeLinejoin="round" />
+      <path d="M41.4 68.5 C41.4 57.6 58.6 57.6 58.6 68.5 Z M61.4 68.5 C61.4 57.6 78.6 57.6 78.6 68.5 Z" fill={PALETTE.white} stroke={PALETTE.ink} strokeWidth={2.2} strokeLinejoin="round" />
       <g fill="none" stroke={PALETTE['goose-soft']} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
         <path className="aura-twinkle" d="M92 30 h6 l-6 7 h6" />
         <path className="aura-twinkle" style={{ animationDelay: '-0.9s' }} d="M104 38 h4 l-4 5 h4" />

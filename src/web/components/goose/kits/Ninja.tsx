@@ -11,11 +11,11 @@ import { OUTLINE } from './shapes';
 const CLOTH = PALETTE['night-700'];
 
 /**
- * Lớp ngoài bám theo viền đầu của `GooseBody` (đỉnh y 38, cổ ±26 ở y 74, rộng tới ±33 ở
- * y 92) và võng xuống y ≈ 96.5 để phủ hết mỏ; lỗ khe mắt x 40–80, y 59–79 (mắt tâm y 69).
+ * Lớp ngoài bám theo viền đầu tròn của `GooseBody` (đỉnh y 35, rộng ±29 ở y 63) rồi ôm cổ
+ * thẳng xuống, võng tới y ≈ 100 để phủ hết mỏ; lỗ khe mắt x 40–80, y 59–79 (mắt tâm y 69).
  */
 export const NINJA_MASK =
-  'M34 74 C34 56 41 38 60 38 C79 38 86 56 86 74 C86 80 89 86 92 92 Q60 101 28 92 C31 86 34 80 34 74 Z ' +
+  'M30 63 C30 46 43 34 60 34 C77 34 90 46 90 63 C90 76 90 86 91 96 Q60 104 29 96 C30 86 30 76 30 63 Z ' +
   'M44 59 L76 59 Q80 59 80 63 L80 75 Q80 79 76 79 L44 79 Q40 79 40 75 L40 63 Q40 59 44 59 Z';
 const TAIL_UPPER = 'M82 60 C92 53 100 55 110 50 C106 59 98 64 86 66 Z';
 const TAIL_LOWER = 'M83 64 C94 65 100 71 108 72 C100 76 92 74 85 70 Z';
