@@ -1,9 +1,17 @@
 /**
  * Vạch chỉ báo dưới dải tab (spec §5.3): một thanh 3px nằm tuyệt đối trong tablist (tablist phải
- * `relative`), trượt sang tab đang chọn bằng `transform` (`translateX` tới mép trái của tab và
- * `scaleX` theo bề rộng — không animate `left`/`width`), `--dur-base` `--ease-out` trong CSS
- * `.tab-indicator`; máy giảm chuyển động thì nhảy thẳng. Đo lại khi tab đổi và khi dải tab/tab đổi
- * cỡ (phông chữ về muộn, xoay màn hình). Chỉ trang trí: tab đang chọn đã có `aria-selected`.
+ * `relative`), trượt sang tab đang chọn bằng `transform` (`translate` tới mép dưới-trái của tab và
+ * `scaleX` theo bề rộng — không animate `left`/`top`/`width`), `--dur-base` `--ease-out` trong CSS
+ * `.tab-indicator`; máy giảm chuyển động thì nhảy thẳng. Chỉ trang trí: tab đang chọn đã có `aria-selected`.
+ *
+ * Đo bằng `getBoundingClientRect` của tab so với chính tablist (khối chứa của vạch), cộng phần đã
+ * cuộn và trừ viền tablist — không dùng `offsetLeft`/`offsetWidth` (làm tròn số nguyên nên vạch
+ * hụt nửa pixel ở màn hình phóng 125%, và chỉ có trục ngang). Vạch đặt ngay dưới tab chứ không dính
+ * đáy tablist, nên khi dải tab xuống hai dòng vạch vẫn theo tab sang dòng hai. Vạch thụt đều hai
+ * bên (`INDICATOR_INSET`) cho nằm giữa viên thuốc bo tròn thay vì lòi ra ở hai góc bo.
+ *
+ * Đo lại khi tab đổi, khi tablist hay bất kỳ tab nào đổi cỡ (tab trước co giãn làm tab chọn dời
+ * chỗ), khi cửa sổ đổi cỡ và khi phông chữ về muộn.
  *
  * Tìm tab theo `id` và tablist qua `closest('[role="tablist"]')` ngay trong layout effect — không
  * nhận ref của tablist vì ref của cha chỉ được gắn sau layout effect của con (lần đo đầu sẽ trượt).
@@ -15,20 +23,43 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { cx } from '../lib/cx';
 
+/** Thụt mỗi bên (px) so với mép tab, để vạch nằm giữa phần thẳng của viên thuốc bo tròn. */
+export const INDICATOR_INSET = 12;
+/** Khoảng hở (px) giữa mép dưới tab (gồm bóng đổ của chip) và vạch. */
+export const INDICATOR_GAP = 2;
+
 interface TabIndicatorProps {
-  /** `id` của tab đang chọn (nằm trong tablist `position: relative` là `offsetParent` của nó). */
+  /** `id` của tab đang chọn (nằm trong tablist `position: relative` — khối chứa của vạch). */
   selectedId: string;
   /** Màu vạch (mặc định vàng); vd màu phe ở "Tổng điểm theo phe". */
   className?: string;
 }
 
-interface Box {
+export interface IndicatorBox {
   x: number;
+  y: number;
   w: number;
 }
 
+type Rect = Pick<DOMRect, 'left' | 'right' | 'bottom'>;
+type Scroller = Pick<HTMLElement, 'scrollLeft' | 'scrollTop' | 'clientLeft' | 'clientTop'>;
+
+/**
+ * Vị trí vạch trong hệ toạ độ của tablist (gốc = góc trên-trái vùng đệm, cuộn cùng nội dung):
+ * lệch rect của tab so với rect tablist, trừ viền, cộng phần đã cuộn; thụt đều hai bên.
+ */
+export function indicatorBox(tab: Rect, list: Rect & { top: number }, scroller: Scroller): IndicatorBox {
+  const width = tab.right - tab.left;
+  const inset = Math.min(INDICATOR_INSET, width / 4);
+  return {
+    x: tab.left - list.left - scroller.clientLeft + scroller.scrollLeft + inset,
+    y: tab.bottom - list.top - scroller.clientTop + scroller.scrollTop + INDICATOR_GAP,
+    w: Math.max(0, width - inset * 2),
+  };
+}
+
 export function TabIndicator({ selectedId, className }: TabIndicatorProps) {
-  const [box, setBox] = useState<Box | null>(null);
+  const [box, setBox] = useState<IndicatorBox | null>(null);
   const [ready, setReady] = useState(false);
   const measured = box !== null;
 
@@ -46,13 +77,28 @@ export function TabIndicator({ selectedId, className }: TabIndicatorProps) {
       setBox(null);
       return;
     }
-    const measure = () => setBox({ x: tab.offsetLeft, w: tab.offsetWidth });
+    let alive = true;
+    const measure = () => {
+      if (!alive) return;
+      const next = indicatorBox(tab.getBoundingClientRect(), list.getBoundingClientRect(), list);
+      // Bỏ qua khi không đổi để ResizeObserver không gây render thừa.
+      setBox((prev) => (prev && prev.x === next.x && prev.y === next.y && prev.w === next.w ? prev : next));
+    };
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(list);
-    observer.observe(tab);
-    return () => observer.disconnect();
+    window.addEventListener('resize', measure);
+    // Phông chữ về muộn làm chữ trong tab rộng ra.
+    void document.fonts?.ready.then(measure);
+    let observer: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(measure);
+      observer.observe(list);
+      for (const el of list.querySelectorAll('[role="tab"]')) observer.observe(el);
+    }
+    return () => {
+      alive = false;
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
   }, [selectedId]);
 
   return (
@@ -61,9 +107,9 @@ export function TabIndicator({ selectedId, className }: TabIndicatorProps) {
       data-tab-indicator=""
       data-for={selectedId}
       data-ready={ready ? '' : undefined}
-      className={cx('tab-indicator pointer-events-none absolute bottom-0 left-0 h-[3px] w-px bg-gold', className)}
+      className={cx('tab-indicator pointer-events-none absolute top-0 left-0 h-[3px] w-px bg-gold', className)}
       // Chưa đo được (tab chưa có trong DOM) thì ẩn, không để vạch 1px nằm ở góc.
-      style={box ? { transform: `translateX(${box.x}px) scaleX(${box.w})` } : { opacity: 0 }}
+      style={box ? { transform: `translate(${box.x}px, ${box.y}px) scaleX(${box.w})` } : { opacity: 0 }}
     />
   );
 }

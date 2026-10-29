@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { Modal } from '../../src/web/components/Modal';
 import { Presence } from '../../src/web/components/Presence';
 import { Select } from '../../src/web/components/Select';
-import { TabIndicator } from '../../src/web/components/TabIndicator';
+import { INDICATOR_GAP, INDICATOR_INSET, TabIndicator, indicatorBox } from '../../src/web/components/TabIndicator';
 import { EXIT_BUFFER_MS, EXIT_FALLBACK_MS, STAGGER_ROWS, STAGGER_TOTAL_MS, prefersReducedMotion, usePresence, useStaggerOnce } from '../../src/web/lib/motion';
 
 /**
@@ -239,11 +239,31 @@ test('the tab indicator is decorative and follows the selected tab', () => {
   expect(bar).toHaveAttribute('data-for', 'tab-a');
   expect(bar).toHaveClass('tab-indicator');
   // Đo được ngay ở lần render đầu (không chờ bấm tab): có transform, không còn `opacity: 0` chờ đo.
-  expect((bar as HTMLElement).style.transform).toMatch(/^translateX\(\d+px\) scaleX\(\d+\)$/);
+  expect((bar as HTMLElement).style.transform).toMatch(/^translate\(-?[\d.]+px, -?[\d.]+px\) scaleX\([\d.]+\)$/);
   expect((bar as HTMLElement).style.opacity).toBe('');
   fireEvent.click(screen.getByRole('tab', { name: 'b' }));
   expect(bar).toHaveAttribute('data-for', 'tab-b');
-  expect((bar as HTMLElement).style.transform).toMatch(/^translateX\(\d+px\) scaleX\(\d+\)$/);
+  expect((bar as HTMLElement).style.transform).toMatch(/^translate\(-?[\d.]+px, -?[\d.]+px\) scaleX\([\d.]+\)$/);
+});
+
+test('indicatorBox measures the tab against the tablist box (subpixel, scroll, border, wrapped row)', () => {
+  const list = { left: 100, top: 50, right: 600, bottom: 130 };
+  const scroller = { scrollLeft: 0, scrollTop: 0, clientLeft: 0, clientTop: 0 };
+  // Tab ở dòng một, toạ độ lẻ (màn hình phóng 125%): không làm tròn, thụt đều hai bên.
+  const first = indicatorBox({ left: 136.4, right: 238.9, bottom: 86 }, list, scroller);
+  expect(first.x).toBeCloseTo(36.4 + INDICATOR_INSET);
+  expect(first.y).toBe(36 + INDICATOR_GAP);
+  expect(first.w).toBeCloseTo(102.5 - INDICATOR_INSET * 2);
+  // Dải tab xuống dòng: tab ở dòng hai → vạch theo xuống dòng hai (y lớn hơn), x tính lại từ đầu dòng.
+  expect(indicatorBox({ left: 116, right: 200, bottom: 124 }, list, scroller)).toMatchObject({ x: 16 + INDICATOR_INSET, y: 74 + INDICATOR_GAP });
+  // Dải đã cuộn ngang 40px và có viền 1px: vạch cuộn cùng nội dung, không lệch theo viền.
+  const scrolled = indicatorBox({ left: 136, right: 236, bottom: 86 }, list, { scrollLeft: 40, scrollTop: 0, clientLeft: 1, clientTop: 1 });
+  expect(scrolled.x).toBe(36 - 1 + 40 + INDICATOR_INSET);
+  expect(scrolled.y).toBe(36 - 1 + INDICATOR_GAP);
+  // Tab hẹp: thụt không quá 1/4 bề rộng mỗi bên, vạch vẫn nằm giữa tab.
+  const narrow = indicatorBox({ left: 100, right: 140, bottom: 86 }, list, scroller);
+  expect(narrow).toMatchObject({ x: 10, w: 20 });
+  expect(narrow.x + narrow.w / 2).toBe(20);
 });
 
 // ---------------------------------------------------------------------------
