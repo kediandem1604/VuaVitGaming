@@ -2,7 +2,8 @@
  * Các route quản trị nhỏ còn lại: danh sách thành viên (email chỉ admin thấy — spec §9) kèm
  * số ngày trong server và số buổi, admin đặt lại số buổi của một người (chỉ admin), nhắc giờ
  * gửi lỗi (spec §9: admin xem danh sách gửi lỗi; mod xem với email trong chữ lỗi đã che —
- * ruling R35), đợt vote đang mở (để đóng sớm — ruling R34a) và cài đặt chạy (chỉ admin).
+ * ruling R35), đợt vote đang mở (để đóng sớm — ruling R34a), cài đặt chạy (chỉ admin) và chủ
+ * đề giao diện chung (ai cũng đọc được, kể cả trang đăng nhập; chỉ admin đổi).
  * Chỉ kiểm tra DẠNG ở đây; khoảng giá trị của cài đặt và số buổi do service báo.
  */
 
@@ -14,6 +15,7 @@ import type {
   NotificationFailureDto,
   OpenVoteRoundDto,
   SettingsDto,
+  ThemeDto,
 } from '../../../shared/api-types.js';
 import { appError } from '../../lib/errors.js';
 import { maskEmails } from '../../lib/mask.js';
@@ -27,7 +29,7 @@ import {
 } from '../../modules/members/activity.js';
 import { listMembers } from '../../modules/members/service.js';
 import { sessionLabel } from '../../modules/mvp/votes.js';
-import { getSettings, updateSettings } from '../../modules/settings/service.js';
+import { getSettings, getTheme, setTheme, updateSettings } from '../../modules/settings/service.js';
 import { currentMember, requireAdmin, requireMod } from '../auth-plugin.js';
 import { idParams } from '../schemas.js';
 
@@ -50,6 +52,9 @@ const settingsPatchBody = z
     reminderLeadMinutes: z.number().int().optional(),
   })
   .strict();
+
+/** Body `PUT /api/admin/theme`: chỉ kiểm tra kiểu; tên chủ đề do service kiểm tra. */
+const themeBody = z.object({ theme: z.string() }).strict();
 
 /** Body `PUT /api/admin/members/:id/games`: chỉ một khoá `games`; dạng và khoảng đều báo cùng một câu. */
 const gamesBody = z.object({ games: z.number().int().min(GAMES_MIN).max(GAMES_MAX) }).strict();
@@ -153,5 +158,12 @@ export async function adminMiscRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/admin/settings', { preHandler: requireAdmin }, async (request): Promise<SettingsDto> => {
     const patch = settingsPatchBody.parse(request.body);
     return updateSettings(app.ctx, patch);
+  });
+
+  app.get('/api/theme', async (): Promise<ThemeDto> => ({ theme: await getTheme(app.ctx) }));
+
+  app.put('/api/admin/theme', { preHandler: requireAdmin }, async (request): Promise<ThemeDto> => {
+    const { theme } = themeBody.parse(request.body);
+    return { theme: await setTheme(app.ctx, theme as ThemeDto['theme']) };
   });
 }

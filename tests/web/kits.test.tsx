@@ -61,6 +61,21 @@ test('the crest colour differs between birds', () => {
   expect(raven).not.toBe(pigeon);
 });
 
+test('goose roles wear their own outfit inside their kit instead of the shared one', () => {
+  const markup = (key: string) => {
+    render(<Character role={roleFromSeed(key)} holderName="Kẹ" variant="current" />);
+    const html = document.querySelector(`[data-kit="${kitForRole(key)}"]`)!.innerHTML;
+    cleanup();
+    return html;
+  };
+  // Cùng bộ `police` mà mỗi role một kiểu; vai Ngỗng thường không còn huy hiệu emoji.
+  const police = ['vigilante', 'sheriff', 'bodyguard', 'avenger', 'soldier', 'demon_hunter'].map(markup);
+  expect(new Set(police).size).toBe(police.length);
+  render(<Character role={roleFromSeed('goose')} holderName="Kẹ" variant="current" />);
+  expect(document.querySelector('[data-kit="badge"]')!.childElementCount).toBeGreaterThan(0);
+  expect(screen.queryByText('🪿')).toBeNull();
+});
+
 test('kits never draw over an uploaded image or an empty slot', () => {
   const swordsman = roleFromSeed('swordsman');
   render(<Character role={{ ...swordsman, hasImage: true }} holderName="Kẹ" variant="current" />);

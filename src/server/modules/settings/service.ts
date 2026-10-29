@@ -5,9 +5,12 @@
  * Mỗi cài đặt là một dòng `app_settings` (`key` → chuỗi số thập phân). Thiếu dòng,
  * hoặc giá trị lưu không phải số nguyên trong khoảng cho phép, thì dùng mặc định —
  * để một dòng bị sửa tay sai không làm bộ hẹn giờ hay vote chạy với số vô lý.
+ *
+ * Chủ đề giao diện chung (`theme`) cũng là một dòng ở đây nhưng là chuỗi, nên có cặp hàm riêng.
  */
 
 import { z } from 'zod';
+import type { ThemeName } from '../../../shared/api-types.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 
@@ -89,4 +92,26 @@ export async function updateSettings(ctx: Ctx, patch: Partial<Settings>): Promis
 function parseDecimal(raw: string): number {
   const trimmed = raw.trim();
   return /^-?\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+}
+
+const THEME_KEY = 'theme';
+const themeSchema = z.enum(['night', 'halloween']);
+
+/** Chủ đề admin đã chọn cho mọi người; thiếu dòng hoặc giá trị lạ → `night`. */
+export async function getTheme(ctx: Ctx): Promise<ThemeName> {
+  const row = await ctx.db.appSetting.findUnique({ where: { key: THEME_KEY } });
+  const parsed = themeSchema.safeParse(row?.value);
+  return parsed.success ? parsed.data : 'night';
+}
+
+/** Đổi chủ đề chung; giá trị lạ → `VALIDATION`. */
+export async function setTheme(ctx: Ctx, theme: ThemeName): Promise<ThemeName> {
+  const parsed = themeSchema.safeParse(theme);
+  if (!parsed.success) throw appError('VALIDATION');
+  await ctx.db.appSetting.upsert({
+    where: { key: THEME_KEY },
+    create: { key: THEME_KEY, value: parsed.data },
+    update: { value: parsed.data },
+  });
+  return parsed.data;
 }

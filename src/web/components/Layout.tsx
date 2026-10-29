@@ -162,10 +162,10 @@ export function Layout({ me, children }: LayoutProps) {
                   {me.displayName}
                 </span>
               </span>
-              <ThemeToggle />
+              {me.accessLevel === 'admin' && <ThemeToggle />}
               {/*
                 Từ lg chỉ còn icon (chữ "Đăng xuất" vẫn là tên nút, `title` cho rê chuột): nhường chỗ
-                cho nút chủ đề mà hàng viên thuốc vẫn vừa như trước.
+                cho nút chủ đề (của admin) mà hàng viên thuốc vẫn vừa như trước.
               */}
               <button
                 type="button"

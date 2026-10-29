@@ -9,6 +9,7 @@ import type {
   NotificationFailureDto,
   OpenVoteRoundDto,
   SettingsDto,
+  ThemeDto,
 } from '../../../src/shared/api-types.js';
 import { buildApp } from '../../../src/server/web/app.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
@@ -288,6 +289,41 @@ test('settings are admin only', async () => {
   expect((await get('/api/admin/settings', adminSid)).json<SettingsDto>()).toMatchObject({ voteDurationHours: 6 });
   // Patch rỗng hợp lệ: không đổi gì.
   expect((await patch('/api/admin/settings', adminSid, {})).json<SettingsDto>()).toMatchObject({ voteDurationHours: 6 });
+});
+
+test('everyone reads the shared theme; only admins change it', async () => {
+  const { sid: memberSid } = await memberWithSid();
+  const { sid: modSid } = await memberWithSid({ accessLevel: 'mod' });
+  const { sid: adminSid } = await memberWithSid({ accessLevel: 'admin' });
+
+  // Công khai (trang đăng nhập cũng đọc): chưa ai chọn → Sảnh đêm.
+  const anonymous = await get('/api/theme');
+  expect(anonymous.statusCode).toBe(200);
+  expect(anonymous.json<ThemeDto>()).toEqual({ theme: 'night' });
+
+  for (const sid of [memberSid, modSid]) {
+    const write = await put('/api/admin/theme', sid, { theme: 'halloween' });
+    expect(write.statusCode).toBe(403);
+    expect(write.json()).toEqual(FORBIDDEN);
+  }
+  expect((await put('/api/admin/theme', undefined, { theme: 'halloween' })).statusCode).toBe(401);
+  expect((await get('/api/theme', memberSid)).json<ThemeDto>()).toEqual({ theme: 'night' });
+
+  const on = await put('/api/admin/theme', adminSid, { theme: 'halloween' });
+  expect(on.statusCode).toBe(200);
+  expect(on.json<ThemeDto>()).toEqual({ theme: 'halloween' });
+  expect((await get('/api/theme', memberSid)).json<ThemeDto>()).toEqual({ theme: 'halloween' });
+  expect((await get('/api/theme')).json<ThemeDto>()).toEqual({ theme: 'halloween' });
+
+  for (const body of [{ theme: 'christmas' }, { theme: 1 }, { theme: 'night', extra: 1 }, {}, undefined]) {
+    const bad = await put('/api/admin/theme', adminSid, body);
+    expect(bad.statusCode, JSON.stringify(body)).toBe(400);
+    expect(bad.json(), JSON.stringify(body)).toEqual(INVALID);
+  }
+  expect((await get('/api/theme')).json<ThemeDto>()).toEqual({ theme: 'halloween' });
+
+  expect((await put('/api/admin/theme', adminSid, { theme: 'night' })).json<ThemeDto>()).toEqual({ theme: 'night' });
+  expect((await get('/api/theme')).json<ThemeDto>()).toEqual({ theme: 'night' });
 });
 
 // ---------------------------------------------------------------------------

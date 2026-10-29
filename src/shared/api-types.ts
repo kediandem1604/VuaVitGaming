@@ -523,6 +523,14 @@ export interface SettingsDto {
   reminderLeadMinutes: number;
 }
 
+/** Chủ đề giao diện chung cho mọi người: `night` (Sảnh đêm, mặc định) hoặc `halloween`. */
+export type ThemeName = 'night' | 'halloween';
+
+/** Chủ đề hiện tại (`GET /api/theme`, công khai) — admin đổi bằng `PUT /api/admin/theme`. */
+export interface ThemeDto {
+  theme: ThemeName;
+}
+
 /** Thân phản hồi của mọi lỗi API. */
 export interface ApiErrorBody {
   error: { code: string; message: string };

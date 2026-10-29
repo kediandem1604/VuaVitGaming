@@ -160,7 +160,8 @@ test('medium-length names use the middle size and are not squeezed', () => {
 });
 
 test('default badge carries the role icon and size caps the width', () => {
-  render(<Character role={goose} holderName="Kẹ" variant="current" size={96} />);
+  // Role admin thêm sau (không có trong bảng bộ đồ, không có bộ đồ riêng) mặc huy hiệu emoji.
+  render(<Character role={{ ...goose, key: 'tan_binh' }} holderName="Kẹ" variant="current" size={96} />);
   expect(screen.getByText('🪿')).toBeInTheDocument();
   expect(document.querySelector('[data-kit="badge"]')).not.toBeNull();
   const root = screen.getByRole('img', { name: 'Ngỗng: Kẹ' });

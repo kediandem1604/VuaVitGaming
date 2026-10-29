@@ -134,7 +134,7 @@ function TotalsBoard({ scope, board }: TotalsBoardProps) {
       {/* Lần hiện đầu: 8 dòng đầu mờ + trượt so le (spec §5.4). */}
       <ol aria-label={`Tổng điểm ${TAB_LABEL[scope]}`} className={cx('divide-y divide-night-700', stagger)}>
         {top.map((row) => (
-          <TotalsRow key={row.memberId} row={row} isMe={me?.memberId === row.memberId} />
+          <TotalsRow key={row.memberId} row={row} isMe={me?.memberId === row.memberId} scope={scope} />
         ))}
       </ol>
       {meOutsideTop && (
@@ -151,7 +151,7 @@ function TotalsBoard({ scope, board }: TotalsBoardProps) {
  * xuống dòng, không tràn ở 320px), `{điểm} điểm` bên phải. Dòng của tôi: `aria-current`, nền
  * vàng nhạt, viền trái vàng (dòng khác viền trong suốt để chữ thẳng hàng) và chữ ẩn "(bạn)".
  */
-function TotalsRow({ row, isMe }: { row: FactionTotalRowDto; isMe: boolean }) {
+function TotalsRow({ row, isMe, scope }: { row: FactionTotalRowDto; isMe: boolean; scope: TotalsScope }) {
   return (
     <li
       aria-current={isMe ? 'true' : undefined}
@@ -159,7 +159,7 @@ function TotalsRow({ row, isMe }: { row: FactionTotalRowDto; isMe: boolean }) {
     >
       <RankMedal rank={row.rank} />
       {/* Avatar chỉ trang trí: tên viết ngay bên cạnh. */}
-      <RankAvatar rank={row.rank} name={row.displayName} url={row.avatarUrl} className="size-8 text-sm" pip={false} />
+      <RankAvatar rank={row.rank} name={row.displayName} url={row.avatarUrl} board={scope} className="size-8 text-sm" pip={false} />
       <span className="min-w-0 flex-1 leading-tight">
         <PrefetchLink to={memberPath(row.memberId)} className="font-bold break-words text-white hover:underline">
           {row.displayName}

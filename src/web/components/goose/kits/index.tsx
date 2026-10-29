@@ -6,6 +6,9 @@
  *
  * `role` chỉ cần `key`, `icon`, `faction` (`KitRole`): nhóm ngỗng trang đăng nhập vẽ bộ
  * đồ mà không có role thật. Chỉ `bird` (màu mào) và `badge` (emoji, màu phe) đọc `role`.
+ *
+ * Role phe Ngỗng có bộ đồ riêng (`GooseOutfits.tsx`) thì vẽ bộ đó thay lớp trước của kit, và
+ * thay lớp sau nếu bộ đó có — vẫn trong nhóm `data-kit` của kit để role giữ đúng bộ.
  */
 
 import type { ComponentType } from 'react';
@@ -18,6 +21,7 @@ import { Crown } from './Crown';
 import { Detective } from './Detective';
 import { Engineer } from './Engineer';
 import { Explorer, ExplorerPack } from './Explorer';
+import { gooseOutfit } from './GooseOutfits';
 import { Halo } from './Halo';
 import { Heart, HeartWings } from './Heart';
 import { Knife } from './Knife';
@@ -64,15 +68,16 @@ const BACK: Partial<Record<Kit, KitPart>> = {
 };
 
 export function KitArt({ kit, role, layer }: { kit: Kit; role: KitRole; layer: 'back' | 'front' }) {
+  const outfit = gooseOutfit(role);
   if (layer === 'back') {
-    const Back = BACK[kit];
+    const Back = outfit?.back ?? BACK[kit];
     return Back ? (
       <g data-kit-back={kit}>
         <Back role={role} />
       </g>
     ) : null;
   }
-  const Front = FRONT[kit];
+  const Front = outfit?.front ?? FRONT[kit];
   return (
     <g data-kit={kit}>
       <Front role={role} />

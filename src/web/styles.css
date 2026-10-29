@@ -96,6 +96,7 @@
     /* Hiệu ứng nền: sao lấp lánh, vòng khung hạng 1 quay, đốm sao phe thứ 3, dơi/ma mùa Halloween. */
     --dur-twinkle: 6s;
     --dur-ring: 3.2s;
+    --dur-orbit: 14s;
     --dur-aura: 2.4s;
     --dur-bat: 26s;
     --dur-float: 5s;
@@ -107,8 +108,8 @@
   }
 
   /*
-   * Chủ đề Halloween (nút bóng ma ở thanh trên, `lib/theme.ts` đặt `data-theme` lên `<html>`):
-   * đổi bộ màu đêm sang tím than + cam bí ngô. Mọi lớp Tailwind đọc `var(--color-…)` nên cả app
+   * Chủ đề Halloween (admin bật cho mọi người bằng nút bóng ma, `lib/theme.ts` đặt `data-theme`
+   * lên `<html>`): đổi bộ màu đêm sang tím than + cam bí ngô. Mọi lớp Tailwind đọc `var(--color-…)` nên cả app
    * đổi theo, không thêm lớp nào. Tương phản giữ như bản gốc: chữ `night-300` trên `night-800`
    * ≈ 8.6:1, `gold` (cam) trên `night-800` ≈ 6.9:1, `gold-ink` trên `gold` ≈ 8.1:1, viền
    * `night-600` trên `night-800`/`night-900` ≥ 3.6:1.
@@ -795,35 +796,41 @@
 }
 
 /*
- * Thẻ role (`RoleCard`): đèn sân khấu màu phe chiếu sau nhân vật (gradient tĩnh) và viền sáng
- * màu phe hiện khi rê chuột vào ô (lớp `::after` chỉ đổi `opacity`).
+ * Thẻ role (`RoleCard`): phông nền riêng của phe sau nhân vật — Ngỗng: hồ đêm, lau sậy, mây
+ * (xanh); Vịt: trăng máu, cành cây khô, vết cào (đỏ); phe thứ 3: tinh vân, chòm sao, vòng phép
+ * dưới chân (tím) — cùng đèn sân khấu màu phe. Tất cả là ảnh nền tĩnh của `::before` (mỗi phe
+ * một SVG nhúng, trình duyệt giải mã một lần cho cả lưới), không hoạt ảnh. Viền sáng màu phe
+ * hiện khi rê chuột vào ô (lớp `::after` chỉ đổi `opacity`). Ô trống thì phông mờ đi.
  */
 .role-card {
   position: relative;
   --spot: var(--color-goose);
+  --scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 220'%3E %3Cg fill='%23FFFFFF' opacity='0.15'%3E %3Cellipse cx='42' cy='46' rx='26' ry='9'/%3E%3Cellipse cx='60' cy='40' rx='18' ry='9'/%3E %3Cellipse cx='156' cy='70' rx='24' ry='8'/%3E%3Cellipse cx='142' cy='65' rx='14' ry='8'/%3E%3C/g%3E %3Cg fill='%23CFE4FF'%3E%3Ccircle cx='24' cy='20' r='1.2'/%3E%3Ccircle cx='176' cy='28' r='1.4'/%3E%3Ccircle cx='110' cy='14' r='1'/%3E%3Ccircle cx='186' cy='100' r='1'/%3E%3C/g%3E %3Cpath d='M0 146 C30 134 60 138 90 144 C120 150 160 134 200 140 L200 220 L0 220 Z' fill='%230E2A5C' opacity='0.55'/%3E %3Cellipse cx='100' cy='170' rx='94' ry='17' fill='%237CB8FF' opacity='0.2'/%3E %3Cg fill='none' stroke='%23BFDCFF' stroke-width='1.4' stroke-linecap='round' opacity='0.35'%3E %3Cpath d='M24 166 h22 M58 178 h22 M124 180 h24 M156 164 h22'/%3E%3C/g%3E %3Cg stroke='%231E3E78' stroke-width='2.2' stroke-linecap='round' opacity='0.9'%3E %3Cpath d='M10 180 C12 160 12 140 9 122 M20 182 C20 164 22 150 26 134 M186 180 C186 162 188 146 192 130 M176 182 C176 166 174 152 170 140'/%3E%3C/g%3E %3Cg fill='%231E3E78'%3E%3Crect x='6' y='120' width='6' height='16' rx='3'/%3E%3Crect x='23' y='130' width='6' height='14' rx='3'/%3E%3Crect x='189' y='126' width='6' height='15' rx='3'/%3E%3C/g%3E %3Cg fill='%23FFE27A' opacity='0.7'%3E%3Ccircle cx='38' cy='118' r='1.6'/%3E%3Ccircle cx='164' cy='104' r='1.4'/%3E%3Ccircle cx='150' cy='126' r='1.2'/%3E%3Ccircle cx='52' cy='136' r='1.2'/%3E%3C/g%3E %3Cpath d='M166 112 C172 104 182 104 186 98 C184 108 176 114 166 112 Z M20 92 C24 86 32 86 36 82 C34 90 28 94 20 92 Z' fill='%23FFFFFF' opacity='0.22'/%3E %3C/svg%3E");
 }
 
 .role-card[data-faction='duck'] {
   --spot: var(--color-duck);
+  --scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 220'%3E %3Ccircle cx='150' cy='52' r='40' fill='%23E5484D' opacity='0.10'/%3E %3Ccircle cx='150' cy='52' r='28' fill='%23E5484D' opacity='0.30'/%3E %3Cg fill='%238F2226' opacity='0.45'%3E%3Ccircle cx='140' cy='44' r='5'/%3E%3Ccircle cx='158' cy='60' r='7'/%3E%3Ccircle cx='160' cy='40' r='3'/%3E%3C/g%3E %3Cg fill='none' stroke='%232A0E14' stroke-width='3.2' stroke-linecap='round' opacity='0.85'%3E %3Cpath d='M0 120 C16 112 24 96 26 76 M26 76 C30 66 38 60 46 58 M26 90 C16 84 10 74 10 62 M18 104 C30 104 40 98 46 90'/%3E%3C/g%3E %3Cg fill='none' stroke='%23FF8A8F' stroke-width='1.6' stroke-linecap='round' opacity='0.22'%3E %3Cpath d='M168 108 L190 84 M174 116 L196 92 M180 124 L200 102'/%3E%3C/g%3E %3Cpath d='M0 158 C40 150 70 162 100 158 C130 154 170 146 200 156 L200 220 L0 220 Z' fill='%232A0E14' opacity='0.6'/%3E %3Cg fill='%232A0E14' opacity='0.8'%3E %3Cpath d='M150 158 l2 -14 l2 14 Z M158 156 l3 -22 l3 22 Z M40 160 l2 -12 l2 12 Z'/%3E%3C/g%3E %3Cg fill='%23FF8A8F' opacity='0.35'%3E%3Ccircle cx='30' cy='26' r='1.2'/%3E%3Ccircle cx='96' cy='18' r='1'/%3E%3Ccircle cx='70' cy='40' r='1'/%3E%3C/g%3E %3C/svg%3E");
 }
 
 .role-card[data-faction='neutral'] {
   --spot: var(--color-third);
+  --scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 220'%3E %3Cellipse cx='60' cy='60' rx='70' ry='34' fill='%238E4EC6' opacity='0.14' transform='rotate(-20 60 60)'/%3E %3Cellipse cx='160' cy='110' rx='50' ry='24' fill='%23C9A2F2' opacity='0.08' transform='rotate(25 160 110)'/%3E %3Cg fill='%23F2E8FF'%3E %3Ccircle cx='18' cy='22' r='1.4'/%3E%3Ccircle cx='52' cy='12' r='1'/%3E%3Ccircle cx='88' cy='30' r='1.2'/%3E%3Ccircle cx='140' cy='16' r='1.6'/%3E %3Ccircle cx='178' cy='40' r='1.1'/%3E%3Ccircle cx='190' cy='90' r='1.3'/%3E%3Ccircle cx='12' cy='100' r='1'/%3E%3Ccircle cx='30' cy='140' r='1.2'/%3E%3Ccircle cx='172' cy='140' r='1'/%3E%3C/g%3E %3Cg fill='none' stroke='%23C9A2F2' stroke-width='0.9' opacity='0.45'%3E%3Cpath d='M140 16 L162 30 L178 40 L170 62 M18 22 L36 40 L52 12'/%3E%3C/g%3E %3Cg fill='%23C9A2F2' opacity='0.6'%3E%3Ccircle cx='162' cy='30' r='1.6'/%3E%3Ccircle cx='170' cy='62' r='1.4'/%3E%3Ccircle cx='36' cy='40' r='1.4'/%3E%3C/g%3E %3Cg fill='none' stroke='%23C9A2F2' opacity='0.35'%3E %3Cellipse cx='100' cy='166' rx='74' ry='14' stroke-width='1.6'/%3E %3Cellipse cx='100' cy='166' rx='58' ry='10' stroke-width='1' stroke-dasharray='4 3'/%3E%3C/g%3E %3Cg stroke='%23C9A2F2' stroke-width='1.6' stroke-linecap='round' opacity='0.4'%3E %3Cpath d='M26 166 l6 0 M168 166 l6 0 M100 152 l0 -5 M100 180 l0 5 M46 155 l4 2 M150 155 l-4 2 M46 177 l4 -2 M150 177 l-4 -2'/%3E%3C/g%3E %3C/svg%3E");
 }
 
 .role-card::before {
   content: '';
   position: absolute;
-  inset: 1.5rem 0 auto;
-  height: 11rem;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--spot) 38%, transparent), transparent);
+  inset: 0;
+  background:
+    radial-gradient(9rem 8rem at 50% 6.5rem, color-mix(in srgb, var(--spot) 34%, transparent), transparent),
+    var(--scene) top center / 100% auto no-repeat,
+    linear-gradient(to bottom, color-mix(in srgb, var(--spot) 26%, transparent), transparent 75%);
   pointer-events: none;
 }
 
-.role-card[data-faction='neutral']::before {
-  background:
-    radial-gradient(closest-side, color-mix(in srgb, var(--spot) 55%, transparent), transparent),
-    conic-gradient(from 0deg at 50% 60%, transparent, color-mix(in srgb, var(--color-third-soft) 18%, transparent), transparent 30%);
+.role-card[data-empty]::before {
+  opacity: 0.45;
 }
 
 .role-card > * {
@@ -852,16 +859,58 @@
 
 /*
  * Khung avatar Top 1-2-3 (`RankAvatar`): vòng kim loại vàng/bạc/đồng quanh avatar, quầng sáng
- * cùng màu, vương miện trên hạng 1 và số hạng nhỏ góc dưới. Hạng 1 có vệt sáng quét vòng quanh
- * khung (`::before` xoay, bị cắt trong vòng) — chỉ khi không giảm chuyển động.
+ * cùng màu, vương miện trên hạng 1 và số hạng nhỏ góc dưới. Mỗi bảng (`data-board`) thêm quầng
+ * màu phe và hình trang trí riêng sau vòng (`.rank-deco`: nguyệt quế, dao găm, quỹ đạo, đôi
+ * cánh). Hạng 1 có vệt sáng quét vòng quanh khung (`::before` xoay, bị cắt trong vòng), quỹ đạo
+ * phe thứ 3 xoay chậm — chỉ khi không giảm chuyển động.
  */
 .rank-frame {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
+  margin-inline: 3px;
   border-radius: 9999px;
   padding: 3px;
   isolation: isolate;
+  --board-glow: rgb(255 210 63 / 0.3);
+}
+
+.rank-frame[data-board='goose'] {
+  --board-glow: rgb(124 184 255 / 0.5);
+}
+
+.rank-frame[data-board='duck'] {
+  --board-glow: rgb(229 72 77 / 0.55);
+}
+
+.rank-frame[data-board='neutral'] {
+  --board-glow: rgb(201 162 242 / 0.55);
+}
+
+.rank-deco {
+  position: absolute;
+  inset: -28%;
+  z-index: -2;
+  width: 156%;
+  height: 156%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Hạng 2 và 3: trang trí nhạt hơn, hạng 1 nổi nhất. */
+.rank-frame:not([data-rank='1']) .rank-deco {
+  opacity: 0.75;
+}
+
+.rank-orbit {
+  transform-box: view-box;
+  transform-origin: 50px 50px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rank-orbit {
+    animation: spin var(--dur-orbit) linear infinite;
+  }
 }
 
 .rank-frame[data-rank='1'] {
@@ -891,7 +940,8 @@
   background: var(--ring);
   box-shadow:
     0 0 0 2px var(--color-night-950),
-    0 0 14px var(--ring-glow);
+    0 0 12px var(--ring-glow),
+    0 0 20px 2px var(--board-glow);
 }
 
 .rank-ring::before {

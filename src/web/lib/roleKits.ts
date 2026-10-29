@@ -93,7 +93,7 @@ const BIRD_CREST: Record<Bird, string> = {
 };
 
 /**
- * Dáng thân riêng của từng loài (phe thứ 3 và vài chim của chế độ đặc biệt): màu thân, cánh,
+ * Dáng thân riêng của từng loài (phe thứ 3, vài chim của chế độ đặc biệt, ngỗng Canada): màu thân, cánh,
  * mỏ, chân, vòng mắt (mắt phát sáng trên thân tối) và đĩa mặt (cú). `GooseBody` tô theo đây;
  * role không có trong bảng giữ ngỗng trắng.
  */
@@ -123,6 +123,8 @@ const BODY_LOOK: Partial<Record<string, BodyLook>> = {
   crow: { body: '#17141F', wing: '#2A2340', beak: '#3A3448', feet: '#3A3448', eyeRing: '#FF5A5F', rim: '#FF5A5F' },
   owl: { body: '#C58A4A', wing: '#8B5E30', face: '#F2DDB4' },
   pelican: { body: '#F4F1EA', wing: '#D9D3C4' },
+  // Ngỗng Canada: thân nâu xám, mỏ và chân đen.
+  canadian: { body: '#D8CCB8', wing: '#7A6650', beak: '#3A3448', feet: '#3A3448' },
 };
 
 /** Dáng thân của role (`undefined` = ngỗng trắng mặc định). */

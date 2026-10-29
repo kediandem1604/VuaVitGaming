@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { Suspense } from 'react';
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router';
@@ -25,13 +26,16 @@ afterEach(() => {
   endNavigation();
 });
 
+// Nút chủ đề của admin gửi lên server qua TanStack Query.
 const renderLayout = (who: MeDto, path = '/') =>
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <Layout me={who}>
-        <p>nội dung</p>
-      </Layout>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[path]}>
+        <Layout me={who}>
+          <p>nội dung</p>
+        </Layout>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 
 test('Quản trị appears in both navs for mod/admin only', () => {
@@ -42,6 +46,16 @@ test('Quản trị appears in both navs for mod/admin only', () => {
 
   renderLayout({ ...me, accessLevel: 'admin' });
   expect(screen.getAllByRole('link', { name: /Quản trị/ })).toHaveLength(2);
+});
+
+test('only admins get the Halloween toggle (it changes the theme for everyone)', () => {
+  for (const accessLevel of ['member', 'mod'] as const) {
+    renderLayout({ ...me, accessLevel });
+    expect(screen.queryByRole('button', { name: 'Chủ đề Halloween' })).not.toBeInTheDocument();
+    cleanup();
+  }
+  renderLayout({ ...me, accessLevel: 'admin' });
+  expect(screen.getByRole('button', { name: 'Chủ đề Halloween' })).toBeInTheDocument();
 });
 
 test('the brand link shows the duck mark without changing its name', () => {

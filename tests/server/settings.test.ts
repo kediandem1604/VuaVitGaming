@@ -2,6 +2,8 @@ import { beforeEach, expect, test } from 'vitest';
 import {
   DEFAULT_SETTINGS,
   getSettings,
+  getTheme,
+  setTheme,
   updateSettings,
   type Settings,
 } from '../../src/server/modules/settings/service.js';
@@ -113,4 +115,19 @@ test('unparseable or invalid stored values fall back to the default', async () =
   // Khoá lạ trong bảng không ảnh hưởng.
   await testDb.appSetting.create({ data: { key: 'khoa_la', value: '1' } });
   expect(await getSettings(ctx)).toEqual(DEFAULT_SETTINGS);
+});
+
+test('the shared theme defaults to night and ignores unknown stored values', async () => {
+  const { ctx } = makeTestCtx();
+  expect(await getTheme(ctx)).toBe('night');
+  expect(await setTheme(ctx, 'halloween')).toBe('halloween');
+  expect(await getTheme(ctx)).toBe('halloween');
+  // Chủ đề không nằm trong cài đặt số.
+  expect(await getSettings(ctx)).toEqual(DEFAULT_SETTINGS);
+
+  await expect(setTheme(ctx, 'christmas' as 'night')).rejects.toMatchObject({ code: 'VALIDATION' });
+  expect(await getTheme(ctx)).toBe('halloween');
+
+  await testDb.appSetting.update({ where: { key: 'theme' }, data: { value: 'sửa tay' } });
+  expect(await getTheme(ctx)).toBe('night');
 });
