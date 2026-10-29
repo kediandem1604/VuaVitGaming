@@ -11,8 +11,9 @@
  * buổi (nếu có) bắt đầu cùng ngày VN với ngày chơi. Sửa lần khai của mình chạy lại
  * cùng bộ kiểm tra trên giá trị đã gộp, trừ giới hạn 30 lần/ngày.
  *
- * Điểm một lần khai = `value × points + extraValue × extraPoints − penaltyValue × penaltyPoints
- * + bonusPoints` (spec điểm role §3), tính lúc đọc theo điểm hiện tại của role — chỉ
+ * Điểm một lần khai = `(value × points + extraValue × extraPoints) × m − penaltyValue ×
+ * penaltyPoints + bonusPoints` (spec điểm role §3; `m` = hệ số ngày nhân điểm của ngày chơi, không
+ * có thì 1), tính lúc đọc theo điểm hiện tại của role và hệ số hiện tại — chỉ
  * `value`/`extraValue`/`penaltyValue` (và `bonusPoints` khi báo cáo được duyệt) được lưu.
  *
  * Duyệt: mod không tự duyệt lần khai của mình (admin thì được — server chỉ có một
@@ -64,6 +65,7 @@ import {
   vnDayRange,
 } from '../../lib/time.js';
 import { HOT_TX } from '../../lib/tx.js';
+import { multipliersByDay } from '../multipliers/service.js';
 import { ensureSeason, isSeasonClosed } from '../seasons/service.js';
 import {
   ACCUSATION_SELECT,
@@ -694,18 +696,28 @@ type ReportRow = Prisma.StatReportGetPayload<{ select: typeof REPORT_SELECT }>;
 /**
  * DTO của các dòng (`ReportDto` trong api-types giải thích từng trường); `guildId` để dựng link tới
  * tin Discord chứa highlight (hai cột phải cùng có). `points` tính lúc đọc theo điểm hiện tại của
- * role (`reportPoints`, spec điểm role §3). `queue`: hàng chờ duyệt — báo cáo trùng bị ẩn thì
- * `accusation = null`; ngoài hàng chờ người khai luôn thấy báo cáo của mình. Một truy vấn thêm để
- * xác định báo cáo trùng.
+ * role và hệ số hiện tại của ngày chơi (`reportPoints`, spec điểm role §3, ngày nhân điểm §3).
+ * `queue`: hàng chờ duyệt — báo cáo trùng bị ẩn thì `accusation = null`; ngoài hàng chờ người khai
+ * luôn thấy báo cáo của mình. Một truy vấn thêm để xác định báo cáo trùng và một để tra hệ số của
+ * các ngày chơi trong danh sách.
  */
 async function toReportDtos<R extends ReportRow>(ctx: Ctx, rows: R[], o: { queue: boolean } = { queue: false }): Promise<{ row: R; dto: ReportDto }[]> {
   const hidden = await hiddenAccusations(ctx.db, rows.flatMap((r) => (r.accusation ? [r.accusation] : [])));
-  return rows.map((row) => ({ row, dto: toReportDto(row, ctx.config.discord.guildId, hidden, o.queue) }));
+  const multipliers = await multipliersByDay(ctx.db, rows.map((r) => r.playedOn));
+  return rows.map((row) => ({ row, dto: toReportDto(row, ctx.config.discord.guildId, hidden, multipliers, o.queue) }));
 }
 
-function toReportDto(r: ReportRow, guildId: string, hidden: Map<number, HiddenAccusation>, queue: boolean): ReportDto {
+function toReportDto(
+  r: ReportRow,
+  guildId: string,
+  hidden: Map<number, HiddenAccusation>,
+  multipliers: Map<string, number>,
+  queue: boolean,
+): ReportDto {
   const hiddenAs = r.accusation ? hidden.get(r.accusation.id) : undefined;
   const duplicate = hiddenAs !== undefined;
+  // Mục trừ điểm do báo cáo không có phần cộng nào để nhân — luôn 1 (không hiện chip ×m).
+  const multiplier = r.source === 'self' ? (multipliers.get(dbToDateOnly(r.playedOn)) ?? 1) : 1;
   return {
     id: r.id,
     member: { id: r.member.id, displayName: r.member.displayName },
@@ -728,7 +740,8 @@ function toReportDto(r: ReportRow, guildId: string, hidden: Map<number, HiddenAc
     penaltyValue: r.penaltyValue,
     bonusPoints: r.bonusPoints,
     source: r.source,
-    points: reportPoints(r, r.role),
+    multiplier,
+    points: reportPoints(r, r.role, multiplier),
     playedOn: dbToDateOnly(r.playedOn),
     sessionId: r.sessionId,
     note: r.note,

@@ -3,9 +3,10 @@
  *
  * Điểm của một người ở một role trong một mùa = tổng điểm các lần khai đã duyệt có ngày
  * chơi thuộc mùa đó — theo `playedOn`, không theo ngày duyệt, nên trận cuối tháng duyệt
- * đầu tháng sau vẫn tính cho mùa cũ. Điểm một lần khai = `value × points + extraValue ×
- * extraPoints − penaltyValue × penaltyPoints + bonusPoints` (spec điểm role §3) theo điểm
- * HIỆN TẠI của role: admin đổi điểm là bảng của mùa chưa chốt đổi theo; mùa đã chốt giữ
+ * đầu tháng sau vẫn tính cho mùa cũ. Điểm một lần khai = `(value × points + extraValue ×
+ * extraPoints) × m − penaltyValue × penaltyPoints + bonusPoints` (spec điểm role §3; `m` = hệ số
+ * của ngày chơi nếu là ngày nhân điểm, không thì 1 — spec ngày nhân điểm §3) theo điểm và hệ số
+ * HIỆN TẠI: admin đổi điểm hay hệ số là bảng của mùa chưa chốt đổi theo; mùa đã chốt giữ
  * `role_titles.score`. `games` = số lần khai đã duyệt do chính người chơi khai (`source =
  * self`; mục trừ điểm do báo cáo không đếm). Xếp theo điểm giảm dần; hoà thì ai đạt mức
  * điểm đó trước (lần duyệt gần nhất sớm hơn) xếp trên; vẫn hoà thì theo id thành viên để
@@ -48,6 +49,7 @@ import type {
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dateOnlyToDb, seasonDateRange } from '../../lib/time.js';
+import { multiplierDaysInRange } from '../multipliers/service.js';
 import { listRoles } from '../roles/service.js';
 import { checkSeasonId, isSeasonClosed } from '../seasons/service.js';
 
@@ -107,7 +109,9 @@ interface Unassigned {
  * `self` mà vẫn một truy vấn. `roleId` để thu hẹp về một role. Điểm ô = Σ value × points +
  * Σ extraValue × extraPoints − Σ penaltyValue × penaltyPoints + Σ bonusPoints theo điểm hiện
  * tại của role — thêm đúng một truy vấn lấy điểm của các role có ô (không có ô nào thì không
- * truy vấn). Mặc định bỏ ô ≤ 0 điểm (chỉ người có điểm > 0 lên bảng); `keepNonPositive` giữ
+ * truy vấn). Ngày nhân điểm: `boostedPlus` cộng thêm (m − 1) × phần cộng (một truy vấn tra ngày nhân
+ * của mùa, thêm một truy vấn gộp khi mùa có ngày nhân). Mặc định bỏ ô ≤ 0 điểm (chỉ người có
+ * điểm > 0 lên bảng); `keepNonPositive` giữ
  * cả ô âm/0 cho nơi cần cộng dồn qua nhiều role rồi mới lọc (Tổng điểm theo phe — bị trừ ở
  * một role phải kéo tổng xuống). Trả về đã sắp theo thứ tự xếp hạng. Phần treo thưởng: xem
  * `aggregateSeasonCells`.
@@ -149,6 +153,7 @@ async function aggregateSeasonCells(
     _max: { reviewedAt: true },
   });
   const points = await pointsByRole(db, groups.map((g) => g.roleId));
+  const boosted = await boostedPlus(db, first, last, roleId);
 
   // Ghép hai nguồn (self, accusation) của cùng một ô.
   const cells = new Map<string, Agg>();
@@ -175,6 +180,15 @@ async function aggregateSeasonCells(
     }
   }
 
+  // Ngày nhân điểm: cộng thêm (m − 1) × phần cộng của các lần khai chơi ngày đó (điểm trừ, bonus không nhân).
+  for (const b of boosted) {
+    const p = points.get(b.roleId);
+    const cell = cells.get(`${b.roleId}:${b.memberId}`);
+    // Lần khai ngày nhân luôn nằm trong nhóm gộp ở trên (cùng điều kiện, hẹp hơn); phòng hờ.
+    if (!p || !cell) continue;
+    cell.score += (b.multiplier - 1) * (b.value * p.points + b.extraValue * (p.extraPoints ?? 0));
+  }
+
   // Lần nhận treo thưởng: có role → cộng vào ô (không thêm trận); không role → riêng theo người.
   const unassigned: Unassigned[] = [];
   for (const g of claimGroups) {
@@ -196,6 +210,39 @@ async function aggregateSeasonCells(
 
   const all = [...cells.values()];
   return { cells: (opts.keepNonPositive ? all : all.filter((g) => g.score > 0)).sort(compareAgg), unassigned };
+}
+
+/**
+ * Tổng chỉ số chính/phụ của các lần khai đã duyệt chơi đúng ngày nhân điểm trong mùa, theo (role,
+ * người, ngày), kèm hệ số HIỆN TẠI của ngày đó (spec ngày nhân điểm §3). Một truy vấn lấy các ngày
+ * nhân của mùa; mùa có ngày nhân thì thêm đúng MỘT truy vấn gộp (không có thì không). Ngày nhân thuộc
+ * mùa theo chính ngày đó, nên ngày 1 hay cuối tháng chỉ nhân lần khai của mùa chứa nó.
+ */
+async function boostedPlus(
+  db: DbClient,
+  first: string,
+  last: string,
+  roleId: number | undefined,
+): Promise<{ roleId: number; memberId: number; multiplier: number; value: number; extraValue: number }[]> {
+  const days = await multiplierDaysInRange(db, first, last);
+  if (days.length === 0) return [];
+  const byDay = new Map(days.map((d) => [d.day.getTime(), d.multiplier]));
+  const groups = await db.statReport.groupBy({
+    by: ['roleId', 'memberId', 'playedOn'],
+    where: {
+      status: 'approved',
+      ...(roleId === undefined ? {} : { roleId }),
+      playedOn: { in: days.map((d) => d.day) },
+    },
+    _sum: { value: true, extraValue: true },
+  });
+  return groups.map((g) => ({
+    roleId: g.roleId,
+    memberId: g.memberId,
+    multiplier: byDay.get(g.playedOn.getTime()) ?? 1,
+    value: g._sum.value ?? 0,
+    extraValue: g._sum.extraValue ?? 0,
+  }));
 }
 
 /** Điểm hiện tại của một role: điểm mỗi đơn vị chính, phụ (null nếu không có), phạt (null nếu không có). */

@@ -368,6 +368,7 @@ test('listRecentlyApproved: approved reports of open seasons, newest review firs
     penaltyValue: 0,
     bonusPoints: 0,
     source: 'self',
+    multiplier: 1,
     points: 3,
     playedOn: '2026-10-09',
     sessionId: null,

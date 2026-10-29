@@ -148,6 +148,7 @@ model Member {
   bountyClaims         BountyClaim[] @relation("BountyClaimMember")
   bountyClaimsReviewed BountyClaim[] @relation("BountyClaimReviewer")
   bountyClaimsRevoked  BountyClaim[] @relation("BountyClaimRevoker")
+  multiplierDays       ScoreMultiplierDay[]
 
   @@map("members")
 }
@@ -500,6 +501,25 @@ model BountyClaim {
   @@index([status, playedOn])
   @@index([memberId, playedOn])
   @@map("bounty_claims")
+}
+
+/// Ngày nhân điểm (spec ngày nhân điểm §2): điểm cộng của lần khai có `playedOn = day` được nhân
+/// `multiplier` lúc tính (đọc hệ số hiện tại). CHECK: hệ số 2–5, lời nhắn ≤ 100 ký tự.
+/// `announcedAt` null → bộ hẹn giờ đăng bù tin tạo; `remindedAt` = đã nhắc 9:00 đúng ngày.
+model ScoreMultiplierDay {
+  id          Int       @id @default(autoincrement())
+  day         DateTime  @unique @db.Date
+  multiplier  Int
+  message     String?
+  createdById Int       @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  announcedAt DateTime? @map("announced_at") @db.Timestamptz(3)
+  remindedAt  DateTime? @map("reminded_at") @db.Timestamptz(3)
+
+  createdBy Member @relation(fields: [createdById], references: [id])
+
+  @@map("score_multiplier_days")
 }
 
 model Season {

@@ -36,7 +36,10 @@ export type ErrorCode =
   | 'BOUNTY_HAS_CLAIMS'
   | 'BOUNTY_NOT_APPLICABLE'
   | 'BOUNTY_CLAIM_EXPIRED'
-  | 'BOUNTY_ALREADY_CLAIMED';
+  | 'BOUNTY_ALREADY_CLAIMED'
+  | 'MULTIPLIER_DAY_TAKEN'
+  | 'MULTIPLIER_DAY_PAST'
+  | 'MULTIPLIER_DAY_LOCKED';
 
 const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   NOT_FOUND: { status: 404, message: 'Không tìm thấy' },
@@ -80,6 +83,10 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   BOUNTY_NOT_APPLICABLE: { status: 400, message: 'Mục treo thưởng không áp dụng cho buổi này' },
   BOUNTY_CLAIM_EXPIRED: { status: 400, message: 'Đã quá hạn nhận (3 ngày sau buổi chơi)' },
   BOUNTY_ALREADY_CLAIMED: { status: 409, message: 'Bạn đã nhận mục này ở buổi này rồi' },
+  // Ngày nhân điểm (spec ngày nhân điểm §4) — câu đúng nguyên văn spec.
+  MULTIPLIER_DAY_TAKEN: { status: 409, message: 'Ngày này đã có hệ số nhân' },
+  MULTIPLIER_DAY_PAST: { status: 400, message: 'Chỉ đặt được cho hôm nay hoặc sau này' },
+  MULTIPLIER_DAY_LOCKED: { status: 409, message: 'Ngày đã qua không sửa/xoá được' },
 };
 
 export class AppError extends Error {

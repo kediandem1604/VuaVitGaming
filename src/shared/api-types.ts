@@ -187,8 +187,9 @@ export interface ReportRoleDto {
  * `highlightUrl` là link tới tin Discord chứa highlight (mở tab mới), `null` khi chưa kèm.
  * `extraValue` là chỉ số phụ, `penaltyValue` chỉ số phạt (0 với role không có); `bonusPoints` là
  * +1 khi báo cáo kèm theo được duyệt đúng; `source` cho biết lần khai do người chơi khai hay là mục
- * trừ điểm do báo cáo. `points = value × points + extraValue × extraPoints − penaltyValue ×
- * penaltyPoints + bonusPoints` theo điểm hiện tại của role (spec điểm role §3), có thể âm.
+ * trừ điểm do báo cáo. `points = (value × points + extraValue × extraPoints) × multiplier −
+ * penaltyValue × penaltyPoints + bonusPoints` theo điểm hiện tại của role (spec điểm role §3) và hệ
+ * số hiện tại của ngày chơi (spec ngày nhân điểm §3), có thể âm.
  */
 export interface ReportDto {
   id: number;
@@ -199,6 +200,11 @@ export interface ReportDto {
   penaltyValue: number;
   bonusPoints: number;
   source: ReportSource;
+  /**
+   * Hệ số nhân điểm của ngày chơi (×2–×5), 1 khi ngày đó không nhân. Mục trừ điểm do báo cáo
+   * (`source = 'accusation'`) luôn 1 — điểm trừ không bao giờ được nhân.
+   */
+  multiplier: number;
   points: number;
   playedOn: string;
   sessionId: number | null;
@@ -620,3 +626,36 @@ export interface SessionBountiesDto {
   bounties: BountyDto[];
   myClaims: BountyClaimDto[];
 }
+
+// ---------------------------------------------------------------------------
+// Ngày nhân điểm (spec ngày nhân điểm §2, §4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Một ngày nhân điểm (`GET /api/multiplier-days/upcoming`): `day` là ngày VN `YYYY-MM-DD`,
+ * `multiplier` 2–5, `message` lời nhắn (≤ 100 ký tự) hoặc `null`.
+ */
+export interface MultiplierDayDto {
+  id: number;
+  day: string;
+  multiplier: number;
+  message: string | null;
+}
+
+/**
+ * Một dòng của `GET /api/admin/multiplier-days` (và kết quả POST/PATCH): `past` = ngày đã qua theo giờ
+ * VN (trước hôm nay) — mờ, không sửa/xoá được.
+ */
+export interface AdminMultiplierDayDto extends MultiplierDayDto {
+  past: boolean;
+}
+
+/** Body `POST /api/admin/multiplier-days`: `day` ≥ hôm nay VN, hệ số 2–5, lời nhắn ≤ 100 (rỗng → null). */
+export interface MultiplierDayInput {
+  day: string;
+  multiplier: number;
+  message?: string | null;
+}
+
+/** Body `PATCH /api/admin/multiplier-days/:id`: chỉ các trường được gửi. */
+export type MultiplierDayPatch = Partial<MultiplierDayInput>;

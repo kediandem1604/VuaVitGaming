@@ -55,12 +55,14 @@ export function hasPenaltyMetric(role: Pick<MetricRole, 'penaltyMetricLabel'>): 
 }
 
 /**
- * Điểm của một lần khai = `value × points + extraValue × extraPoints − penaltyValue × penaltyPoints
- * + bonusPoints`, đọc điểm HIỆN TẠI của role (spec điểm role §3). Role không có chỉ số phụ/phạt
- * (hay đã tắt mà lần khai còn giá trị): phần đó tính 0. Có thể âm.
+ * Điểm của một lần khai = `(value × points + extraValue × extraPoints) × multiplier − penaltyValue ×
+ * penaltyPoints + bonusPoints`, đọc điểm HIỆN TẠI của role (spec điểm role §3). `multiplier` là hệ số
+ * của ngày chơi (spec ngày nhân điểm §3; mặc định 1) — chỉ nhân phần cộng, không nhân điểm trừ hay
+ * bonus. Role không có chỉ số phụ/phạt (hay đã tắt mà lần khai còn giá trị): phần đó tính 0. Có thể âm.
  */
-export function reportPoints(r: ReportValues, role: MetricRole): number {
-  return r.value * role.points + r.extraValue * (role.extraPoints ?? 0) - r.penaltyValue * (role.penaltyPoints ?? 0) + r.bonusPoints;
+export function reportPoints(r: ReportValues, role: MetricRole, multiplier = 1): number {
+  const plus = r.value * role.points + r.extraValue * (role.extraPoints ?? 0);
+  return plus * multiplier - r.penaltyValue * (role.penaltyPoints ?? 0) + r.bonusPoints;
 }
 
 /**

@@ -176,6 +176,14 @@ export function formatVnDay(d: Date | string): string {
   return `${pad2(day)}/${pad2(m)}`;
 }
 
+const WEEKDAYS_VI = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'] as const;
+
+/** Thứ của một ngày VN `YYYY-MM-DD`: "Thứ Hai" … "Thứ Bảy", "Chủ Nhật" (cùng chữ với web). */
+export function formatVnWeekday(vnDate: string): string {
+  const { y, m, d } = parseVnDate(vnDate);
+  return WEEKDAYS_VI[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] as string;
+}
+
 /** `MM/YYYY` của một mã mùa — tên mùa hiện cho người dùng (vd `2026-10` → `10/2026`). */
 export function formatSeasonLabel(seasonId: string): string {
   const { y, m } = parseSeasonId(seasonId);
