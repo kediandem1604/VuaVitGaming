@@ -78,7 +78,7 @@ export function Character({ role, holderName, variant, size = 120, nameplate = t
       {drawn && (
         <g data-part="pose" className={dressed ? 'goose-idle' : undefined} style={dressed ? idleStyle : undefined}>
           {dressed && <KitArt kit={kit} role={role} layer="back" />}
-          <GooseBody silhouette={empty} look={dressed ? bodyLook(role.key) : undefined} />
+          <GooseBody silhouette={empty} look={dressed ? bodyLook(role.key, role.faction) : undefined} />
           {dressed && <KitArt kit={kit} role={role} layer="front" />}
         </g>
       )}

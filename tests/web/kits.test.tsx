@@ -76,6 +76,29 @@ test('goose roles wear their own outfit inside their kit instead of the shared o
   expect(screen.queryByText('🪿')).toBeNull();
 });
 
+test('duck roles wear their own outfit and look evil', () => {
+  const markup = (key: string) => {
+    render(<Character role={roleFromSeed(key)} holderName="Kẹ" variant="current" />);
+    const html = document.querySelector(`[data-kit="${kitForRole(key)}"]`)!.innerHTML;
+    cleanup();
+    return html;
+  };
+  // Cùng bộ `knife` mà mỗi role Vịt một kiểu.
+  const knives = ['duck', 'cannibal', 'professional', 'assassin', 'hitman', 'undertaker', 'serial_killer'].map(markup);
+  expect(new Set(knives).size).toBe(knives.length);
+
+  render(<Character role={roleFromSeed('duck')} holderName="Kẹ" variant="current" />);
+  expect(document.querySelector('.goose-eyes')).toHaveAttribute('data-eyes', 'evil');
+  expect(screen.queryByText('🦆')).toBeNull();
+  cleanup();
+  // Ngỗng và phe thứ 3 giữ mắt tròn.
+  for (const key of ['goose', 'raven']) {
+    render(<Character role={roleFromSeed(key)} holderName="Kẹ" variant="current" />);
+    expect(document.querySelector('.goose-eyes')).not.toHaveAttribute('data-eyes');
+    cleanup();
+  }
+});
+
 test('kits never draw over an uploaded image or an empty slot', () => {
   const swordsman = roleFromSeed('swordsman');
   render(<Character role={{ ...swordsman, hasImage: true }} holderName="Kẹ" variant="current" />);

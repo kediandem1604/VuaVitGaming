@@ -2,7 +2,7 @@
  * In ra một trang HTML tĩnh để xem bằng mắt 18 bộ đồ của nhân vật (spec §4.2): mỗi bộ
  * một con ngỗng mẫu mặc bộ đó, kèm tên bộ và role mẫu, ở cỡ 120 (ô Đại sảnh) và 72 (trang
  * Hồ sơ); rồi mọi loài chim (bộ `bird`) cùng Bồ nông ở cỡ 200 — gần như cả phe thứ 3; mọi role
- * phe Ngỗng (mỗi role một bộ đồ riêng) ở cỡ 160; cuối trang là cỡ 200 để soi nét viền và vị trí.
+ * phe Ngỗng rồi mọi role phe Vịt (mỗi role một bộ đồ riêng, Vịt mang mắt quỷ) ở cỡ 160; cuối trang là cỡ 200 để soi nét viền và vị trí.
  * Không chạm database.
  *
  *   npx tsx --tsconfig tsconfig.web.json scripts/kit-gallery.tsx > kits.html
@@ -41,6 +41,9 @@ const BIRDS = ROLES.filter((r) => kitForRole(r.key) === 'bird' || r.key === 'pel
 
 /** Mọi role phe Ngỗng (trừ chim đã có ở trên). */
 const GEESE = ROLES.filter((r) => r.faction === 'goose' && kitForRole(r.key) !== 'bird').map((r) => r.key);
+
+/** Mọi role phe Vịt. */
+const DUCKS = ROLES.filter((r) => r.faction === 'duck').map((r) => r.key);
 
 function Card({ role, label, size }: { role: RoleDto; label: string; size: number }) {
   return (
@@ -84,6 +87,12 @@ function Gallery() {
         <h1>Phe Ngỗng — mỗi role một bộ đồ riêng</h1>
         <section className="grid large">
           {GEESE.map((key) => (
+            <Card key={key} role={roleFromSeed(key)} label={key} size={160} />
+          ))}
+        </section>
+        <h1>Phe Vịt — mỗi role một bộ đồ riêng</h1>
+        <section className="grid large">
+          {DUCKS.map((key) => (
             <Card key={key} role={roleFromSeed(key)} label={key} size={160} />
           ))}
         </section>

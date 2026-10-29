@@ -6,8 +6,8 @@
  * có chiều sâu; thứ tự vẽ là thứ tự chồng: hai con ngoài cùng nằm sau, vua nằm trên cùng.
  *
  * Bộ đồ không có role thật (`KitArt` chỉ cần `KitRole`), nên mỗi con mang một role mẫu
- * lấy từ seed đúng với kit — chỉ `bird` và `badge` đọc tới `role`, nhưng giữ key thật để
- * sau này đổi kit vẫn đúng.
+ * lấy từ seed đúng với kit: role có bộ đồ riêng (`GooseOutfits`, `DuckOutfits`) thì mặc bộ đó,
+ * và con phe Vịt mang mắt quỷ như ở Đại sảnh (`bodyLook`).
  *
  * Chỉ để trang trí: cả khối `aria-hidden`. Hoạt ảnh nằm trong styles.css (tự tắt khi máy
  * bật giảm chuyển động): cả nhóm nhún lệch nhịp (`goose-idle`, `--goose-delay`), rê chuột
@@ -18,7 +18,7 @@
 import { useState, type CSSProperties } from 'react';
 import { cx } from '../lib/cx';
 import { PALETTE } from '../lib/palette';
-import type { Kit, KitRole } from '../lib/roleKits';
+import { bodyLook, type Kit, type KitRole } from '../lib/roleKits';
 import { GooseBody } from './goose/GooseBody';
 import { KitArt } from './goose/kits';
 
@@ -86,7 +86,7 @@ function SquadMember({ member }: { member: Member }) {
       >
         <g className="goose-idle">
           <KitArt kit={kit} role={role} layer="back" />
-          <GooseBody />
+          <GooseBody look={bodyLook(role.key, role.faction)} />
           <KitArt kit={kit} role={role} layer="front" />
         </g>
       </g>

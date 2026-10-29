@@ -108,6 +108,8 @@ export interface BodyLook {
   face?: string;
   /** Quầng sáng mảnh quanh thân — thân gần đen thì vẫn tách khỏi nền đêm. */
   rim?: string;
+  /** Mắt quỷ, mày cau, mỏ nhếch lộ nanh — mọi role phe Vịt. */
+  evil?: boolean;
 }
 
 const BODY_LOOK: Partial<Record<string, BodyLook>> = {
@@ -127,8 +129,12 @@ const BODY_LOOK: Partial<Record<string, BodyLook>> = {
   canadian: { body: '#D8CCB8', wing: '#7A6650', beak: '#3A3448', feet: '#3A3448' },
 };
 
-/** Dáng thân của role (`undefined` = ngỗng trắng mặc định). */
-export function bodyLook(key: string): BodyLook | undefined {
+/** Phe Vịt: thân trắng như Ngỗng (trong game không phân biệt được) nhưng ánh mắt và quầng đỏ lộ bản chất. */
+const DUCK_LOOK: BodyLook = { body: PALETTE.white, wing: PALETTE.wing, rim: PALETTE.duck, evil: true };
+
+/** Dáng thân của role (`undefined` = ngỗng trắng mặc định); phe Vịt luôn mang mắt quỷ. */
+export function bodyLook(key: string, faction?: Faction): BodyLook | undefined {
+  if (faction === 'duck') return { ...DUCK_LOOK, ...BODY_LOOK[key] };
   return BODY_LOOK[key];
 }
 
