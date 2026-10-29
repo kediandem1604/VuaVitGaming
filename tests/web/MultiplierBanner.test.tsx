@@ -96,6 +96,22 @@ test('nothing is drawn when there is no upcoming day (or the list fails to load)
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
+test('days from the report window (yesterday and before) are skipped: the banner shows today or later only', async () => {
+  setClock('2026-10-30T05:00:00Z');
+  stubUpcoming(() => [day({ id: 1, day: '2026-10-28', multiplier: 5 }), day({ id: 2, day: '2026-10-29', multiplier: 4 }), day({ id: 3, day: '2026-10-31', multiplier: 2 })]);
+  renderBanner();
+  const banner = await screen.findByRole('region', { name: 'Thông báo ngày nhân điểm' });
+  expect(banner).toHaveTextContent('🔥 Ngày mai (31/10) điểm cộng ×2!');
+  cleanup();
+
+  // Chỉ có ngày hôm qua → không vẽ gì.
+  stubUpcoming(() => [day({ day: '2026-10-29', multiplier: 3 })]);
+  renderBanner();
+  await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+  await act(async () => {});
+  expect(screen.queryByRole('region', { name: 'Thông báo ngày nhân điểm' })).not.toBeInTheDocument();
+});
+
 test('a day already gone (stale list) is not announced', async () => {
   setClock('2026-10-31T05:00:00Z');
   stubUpcoming(() => [day({ day: '2026-10-30' })]);

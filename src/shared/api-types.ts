@@ -632,7 +632,8 @@ export interface SessionBountiesDto {
 // ---------------------------------------------------------------------------
 
 /**
- * Một ngày nhân điểm (`GET /api/multiplier-days/upcoming`): `day` là ngày VN `YYYY-MM-DD`,
+ * Một ngày nhân điểm (`GET /api/multiplier-days/upcoming` — từ hôm nay VN − 3 trở đi, tức gồm cả 3
+ * ngày vừa qua của cửa sổ khai điểm): `day` là ngày VN `YYYY-MM-DD`,
  * `multiplier` 2–5, `message` lời nhắn (≤ 100 ký tự) hoặc `null`.
  */
 export interface MultiplierDayDto {

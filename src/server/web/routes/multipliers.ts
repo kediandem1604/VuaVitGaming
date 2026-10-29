@@ -1,5 +1,5 @@
 /**
- * Ngày nhân điểm (spec ngày nhân điểm §4): quản trị chỉ cho admin; danh sách ngày sắp tới (banner) cho
+ * Ngày nhân điểm (spec ngày nhân điểm §4): quản trị chỉ cho admin; danh sách ngày từ hôm nay − 3 (banner, gợi ý form khai) cho
  * mọi thành viên. Chỉ kiểm tra DẠNG body ở đây (strict — khoá lạ bị từ chối); ngày, hệ số (cả kiểu lẫn
  * khoảng) và độ dài lời nhắn do service báo lỗi tiếng Việt.
  */

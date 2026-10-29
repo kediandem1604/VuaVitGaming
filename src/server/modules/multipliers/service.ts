@@ -29,6 +29,7 @@ import { escapeDiscordMarkdown } from '../../lib/discord-text.js';
 import { appError } from '../../lib/errors.js';
 import { HOT_TX } from '../../lib/tx.js';
 import {
+  addDaysVn,
   dateOnlyToDb,
   dbToDateOnly,
   formatVnDay,
@@ -48,8 +49,10 @@ export const MULTIPLIER_MAX = 5;
 export const MESSAGE_MAX = 100;
 /** Giờ VN đăng nhắc trong ngày nhân điểm. */
 export const REMINDER_TIME = '09:00';
-/** Số ngày sắp tới tối đa trả cho banner (thực tế chỉ vài ngày). */
+/** Số ngày tối đa trả cho banner/gợi ý form khai điểm (thực tế chỉ vài ngày). */
 const UPCOMING_MAX = 30;
+/** Cửa sổ khai điểm lùi 3 ngày (như `stats/reports.ts`): gợi ý ×m phải phủ cả các ngày này. */
+const REPORT_WINDOW_DAYS = 3;
 
 // ---------------------------------------------------------------------------
 // Tra hệ số (dùng khi tính điểm)
@@ -87,11 +90,14 @@ function toAdminDto(r: ScoreMultiplierDay, today: string): AdminMultiplierDayDto
   return { ...dto, past: dto.day < today };
 }
 
-/** Các ngày `day ≥ hôm nay VN`, gần nhất trước — cho banner (mọi thành viên). */
+/**
+ * Các ngày `day ≥ hôm nay VN − 3`, cũ nhất trước (mọi thành viên): gồm cả 3 ngày vừa qua để form
+ * Khai điểm gợi ý "×m" cho trận trong cửa sổ khai; banner tự lọc chỉ lấy ngày ≥ hôm nay.
+ */
 export async function listUpcomingMultiplierDays(ctx: Ctx): Promise<MultiplierDayDto[]> {
-  const today = toVnDate(ctx.now());
+  const first = addDaysVn(toVnDate(ctx.now()), -REPORT_WINDOW_DAYS);
   const rows = await ctx.db.scoreMultiplierDay.findMany({
-    where: { day: { gte: dateOnlyToDb(today) } },
+    where: { day: { gte: dateOnlyToDb(first) } },
     orderBy: { day: 'asc' },
     take: UPCOMING_MAX,
   });

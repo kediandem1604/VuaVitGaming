@@ -26,8 +26,9 @@ export const sessionBountiesQuery = (sessionId: number) =>
   queryOptions({ queryKey: [...SESSION_BOUNTIES_KEY, sessionId] as const, queryFn: () => apiGet<SessionBountiesDto>(`/api/sessions/${sessionId}/bounties`) });
 
 /**
- * Ngày nhân điểm từ hôm nay (giờ VN) trở đi, gần nhất trước — banner dưới thanh điều hướng và gợi ý
- * "Ngày này điểm cộng ×m" ở form Khai điểm (spec ngày nhân điểm §5).
+ * Ngày nhân điểm từ hôm nay (giờ VN) − 3 trở đi, cũ nhất trước — gồm cả 3 ngày vừa qua của cửa sổ
+ * khai điểm. Dùng cho gợi ý "Ngày này điểm cộng ×m" ở form Khai điểm và banner dưới thanh điều
+ * hướng (banner tự lọc chỉ lấy ngày ≥ hôm nay) (spec ngày nhân điểm §5).
  */
 export const upcomingMultipliersQuery = queryOptions({
   queryKey: MULTIPLIER_UPCOMING_KEY,

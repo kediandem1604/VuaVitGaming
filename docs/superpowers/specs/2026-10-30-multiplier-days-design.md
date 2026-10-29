@@ -25,7 +25,7 @@ Bảng mới `score_multiplier_days`: `id`, `day DATE UNIQUE` (ngày VN), `multi
 - Quản trị → Cài đặt → mục **"Ngày nhân điểm"**: danh sách các ngày từ hôm nay trở đi (gần nhất trước) và các ngày đã qua của mùa đang mở (mờ, khoá). Mỗi dòng: `{thứ}, {dd/mm}` · `×{m}` · lời nhắn · nút **Sửa**/**Xoá** (chỉ ngày ≥ hôm nay VN).
 - Form: "Ngày" (date, ≥ hôm nay), "Hệ số" (chọn ×2/×3/×4/×5), "Lời nhắn" (tuỳ chọn, ≤ 100). Lỗi: "Ngày này đã có hệ số nhân" (trùng), "Chỉ đặt được cho hôm nay hoặc sau này", "Ngày đã qua không sửa/xoá được", "Hệ số phải từ ×2 đến ×5", "Lời nhắn tối đa 100 ký tự".
 - API (`requireAdmin`): `GET /api/admin/multiplier-days`, `POST`, `PATCH /:id`, `DELETE /:id`.
-- Công khai (`requireMember`): `GET /api/multiplier-days/upcoming` → các ngày `day ≥ hôm nay VN`, gần nhất trước: `{ id, day, multiplier, message }[]`.
+- Công khai (`requireMember`): `GET /api/multiplier-days/upcoming` → các ngày `day ≥ hôm nay VN − 3` (gồm 3 ngày vừa qua của cửa sổ khai điểm, để form gợi ý ×m; banner tự lọc `day ≥ hôm nay`), cũ nhất trước: `{ id, day, multiplier, message }[]`.
 
 ## 5. Hiển thị (web)
 

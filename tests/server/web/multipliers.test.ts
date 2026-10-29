@@ -119,13 +119,14 @@ test('admins create, list, edit and delete multiplier days; errors carry the spe
   expect(locked.json().error.message).toBe('Ngày đã qua không sửa/xoá được');
 });
 
-test('members read upcoming multiplier days nearest first', async () => {
+test('members read multiplier days from today − 3 (report window) onward, nearest first', async () => {
   expect((await send('GET', '/api/multiplier-days/upcoming')).statusCode).toBe(401);
   const admin = await createMember(testDb, { accessLevel: 'admin' });
   const memberSid = await sidFor(await createMember(testDb));
   for (const [day, multiplier] of [
     ['2026-10-30', 4],
     ['2026-10-20', 2],
+    ['2026-10-18', 5],
     ['2026-10-22', 3],
   ] as const) {
     await testDb.scoreMultiplierDay.create({ data: { day: dateOnlyToDb(day), multiplier, createdById: admin.id } });
@@ -133,6 +134,7 @@ test('members read upcoming multiplier days nearest first', async () => {
   const res = await send('GET', '/api/multiplier-days/upcoming', memberSid);
   expect(res.statusCode).toBe(200);
   expect(res.json<MultiplierDayDto[]>()).toEqual([
+    { id: expect.any(Number), day: '2026-10-20', multiplier: 2, message: null },
     { id: expect.any(Number), day: '2026-10-22', multiplier: 3, message: null },
     { id: expect.any(Number), day: '2026-10-30', multiplier: 4, message: null },
   ]);

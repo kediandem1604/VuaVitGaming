@@ -392,7 +392,7 @@ test('deleting an announced day posts a cancellation; past days cannot be edited
   expect(await testDb.scoreMultiplierDay.findUniqueOrThrow({ where: { id: past } })).toMatchObject({ multiplier: 3 });
 });
 
-test('the admin list shows upcoming days nearest first, then past days of the open season; upcoming lists from today', async () => {
+test('the admin list shows upcoming days nearest first, then past days of the open season; upcoming lists from today − 3', async () => {
   await ensureSeason(ctx, '2026-09');
   await testDb.season.update({ where: { id: '2026-09' }, data: { closedAt: new Date('2026-10-03T17:05:00Z') } });
   await rawDay('2026-09-30', 2);
@@ -409,6 +409,7 @@ test('the admin list shows upcoming days nearest first, then past days of the op
     ['2026-10-05', true],
   ]);
   expect(await listUpcomingMultiplierDays(ctx)).toEqual([
+    { id: expect.any(Number), day: '2026-10-20', multiplier: 3, message: null },
     { id: expect.any(Number), day: '2026-10-22', multiplier: 5, message: null },
     { id: expect.any(Number), day: '2026-10-30', multiplier: 4, message: 'Cuối tháng' },
     { id: expect.any(Number), day: '2026-11-02', multiplier: 2, message: null },
@@ -423,6 +424,16 @@ test('the admin list shows upcoming days nearest first, then past days of the op
     ['2026-10-22', true],
     ['2026-10-20', true],
     ['2026-10-05', true],
+  ]);
+});
+
+test('upcoming covers the 3-day report window: today − 3 is in, today − 4 is out', async () => {
+  await rawDay('2026-10-18', 2);
+  await rawDay('2026-10-19', 3);
+  await rawDay('2026-10-21', 4);
+  expect((await listUpcomingMultiplierDays(ctx)).map((d) => [d.day, d.multiplier])).toEqual([
+    ['2026-10-19', 3],
+    ['2026-10-21', 4],
   ]);
 });
 

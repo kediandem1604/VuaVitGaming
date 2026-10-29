@@ -43,7 +43,7 @@
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { AccusationDto, AccusationInputDto, BountyClaimDto, Faction, HighlightConfigDto, ReportDto, ReportRoleDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
+import type { AccusationDto, AccusationInputDto, BountyClaimDto, Faction, HighlightConfigDto, MultiplierDayDto, ReportDto, ReportRoleDto, ReportStatus, RoleDto, SessionDto } from '../../shared/api-types';
 import { formatReportValue, hasExtraMetric, hasPenaltyMetric } from '../../shared/metric';
 import { normalizeText } from '../../shared/text';
 import { apiGet, apiSend, errorMessage } from '../api';
@@ -978,6 +978,17 @@ function sameAccusationDraft(d: AccusationDraft, original: AccusationDraft | nul
   );
 }
 
+/**
+ * Hệ số gợi ý ở form sửa cho ngày `date`. Danh sách đã tải phủ cửa sổ khai [hôm nay − 3, …] nên là nguồn
+ * đúng cho các ngày đó (admin hạ/xoá hệ số thì gợi ý theo); chỉ khi danh sách chưa tải hoặc ngày cũ hơn
+ * cửa sổ mới lấy hệ số server đã tính cho chính lần khai (nếu đúng ngày của nó).
+ */
+function editMultiplier(days: readonly MultiplierDayDto[] | undefined, date: string, today: string, report: ReportDto): number {
+  if (days?.some((item) => item.day === date)) return multiplierOn(days, date);
+  if (days !== undefined && date >= addDaysIso(today, -WINDOW_DAYS)) return 1;
+  return date === report.playedOn ? report.multiplier : 1;
+}
+
 function EditForm({ report, roles, onDone }: { report: ReportDto; roles: RoleDto[]; onDone: () => void }) {
   const queryClient = useQueryClient();
   const ids = useFieldIds();
@@ -1094,8 +1105,7 @@ function EditForm({ report, roles, onDone }: { report: ReportDto; roles: RoleDto
         id={ids.date}
         today={today}
         value={playedOn}
-        // Ngày cũ của lần khai có thể đã qua (không còn trong "sắp tới"): dùng hệ số server tính cho chính nó.
-        multiplier={playedOn === report.playedOn ? Math.max(report.multiplier, multiplierOn(multipliers.data, playedOn)) : multiplierOn(multipliers.data, playedOn)}
+        multiplier={editMultiplier(multipliers.data, playedOn, today, report)}
         onChange={setPlayedOn}
       />
       <NoteField id={ids.note} value={note} onChange={setNote} />

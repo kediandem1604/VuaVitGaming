@@ -1276,6 +1276,19 @@ test('the form hints "Ngày này điểm cộng ×m" while the chosen date is a 
   expect(within(form).queryByText(/Ngày này điểm cộng/)).not.toBeInTheDocument();
 });
 
+test('the morning after a multiplier night: picking yesterday shows its hint (list covers the 3-day window)', async () => {
+  const [y = 0, m = 0, d = 0] = today.split('-').map(Number);
+  const yesterday = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  stubFetch({ ...baseRoutes, [UPCOMING_MULTIPLIERS_ROUTE]: () => json(200, [{ id: 1, day: yesterday, multiplier: 3, message: null }]) });
+  renderPage();
+
+  const form = (await screen.findByRole('heading', { name: 'Khai một trận' })).closest('section') as HTMLElement;
+  await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/multiplier-days/upcoming', expect.anything()));
+  expect(within(form).queryByText(/Ngày này điểm cộng/)).not.toBeInTheDocument();
+  fireEvent.change(within(form).getByLabelText('Ngày chơi'), { target: { value: yesterday } });
+  expect(await within(form).findByText('Ngày này điểm cộng ×3')).toBeInTheDocument();
+});
+
 test('no hint when today is not a multiplier day', async () => {
   const fetchMock = stubFetch(baseRoutes);
   renderPage();
@@ -1289,6 +1302,7 @@ test('"Lần khai của tôi" shows a gold ×m chip on multiplied reports; the e
   const yesterday = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
   stubFetch({
     ...baseRoutes,
+    [UPCOMING_MULTIPLIERS_ROUTE]: () => json(200, [{ id: 1, day: yesterday, multiplier: 2, message: null }]),
     'GET /api/reports/mine': () =>
       json(200, [report({ id: 3, status: 'pending', value: 4, playedOn: yesterday, multiplier: 2, points: 8 }), report({ id: 2, status: 'approved', value: 6, multiplier: 1 })]),
   });
@@ -1300,9 +1314,46 @@ test('"Lần khai của tôi" shows a gold ×m chip on multiplied reports; the e
   expect(chip).toHaveAttribute('title', 'Điểm cộng ×2 (ngày nhân điểm)');
   expect(within(items[1] as HTMLElement).queryByText(/^×\d$/)).not.toBeInTheDocument();
 
-  // Ngày đã qua không có trong danh sách "sắp tới": hệ số lấy từ chính lần khai.
   fireEvent.click(within(items[0] as HTMLElement).getByRole('button', { name: 'Sửa' }));
-  expect(within(items[0] as HTMLElement).getByText('Ngày này điểm cộng ×2')).toBeInTheDocument();
+  expect(await within(items[0] as HTMLElement).findByText('Ngày này điểm cộng ×2')).toBeInTheDocument();
   fireEvent.change(within(items[0] as HTMLElement).getByLabelText('Ngày chơi'), { target: { value: today } });
   expect(within(items[0] as HTMLElement).queryByText(/Ngày này điểm cộng/)).not.toBeInTheDocument();
+});
+
+test('edit form: the fetched list wins for the chosen date — a lowered or removed multiplier shows up', async () => {
+  const [y = 0, m = 0, d = 0] = today.split('-').map(Number);
+  const shift = (n: number) => new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+  let list = [{ id: 1, day: shift(-1), multiplier: 2, message: null }];
+  stubFetch({
+    ...baseRoutes,
+    [UPCOMING_MULTIPLIERS_ROUTE]: () => json(200, list),
+    'GET /api/reports/mine': () => json(200, [report({ id: 3, status: 'pending', value: 4, playedOn: shift(-1), multiplier: 3, points: 12 })]),
+  });
+  renderPage();
+
+  const item = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  fireEvent.click(within(item).getByRole('button', { name: 'Sửa' }));
+  // Admin hạ ×3 → ×2: gợi ý theo danh sách, không theo hệ số cũ của lần khai.
+  expect(await within(item).findByText('Ngày này điểm cộng ×2')).toBeInTheDocument();
+  expect(within(item).queryByText('Ngày này điểm cộng ×3')).not.toBeInTheDocument();
+  cleanup();
+
+  // Admin xoá ngày (danh sách đã tải, ngày trong cửa sổ 3 ngày mà không có) → hết gợi ý.
+  list = [];
+  renderPage();
+  const again = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  fireEvent.click(within(again).getByRole('button', { name: 'Sửa' }));
+  await waitFor(() => expect(within(again).queryByText(/Ngày này điểm cộng/)).not.toBeInTheDocument());
+  cleanup();
+
+  // Lần khai cũ hơn cửa sổ (ngoài danh sách): giữ hệ số server đã tính cho chính nó.
+  stubFetch({
+    ...baseRoutes,
+    [UPCOMING_MULTIPLIERS_ROUTE]: () => json(200, []),
+    'GET /api/reports/mine': () => json(200, [report({ id: 4, status: 'pending', value: 4, playedOn: shift(-5), multiplier: 3, points: 12 })]),
+  });
+  renderPage();
+  const old = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
+  fireEvent.click(within(old).getByRole('button', { name: 'Sửa' }));
+  expect(await within(old).findByText('Ngày này điểm cộng ×3')).toBeInTheDocument();
 });
