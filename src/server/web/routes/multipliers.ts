@@ -1,7 +1,7 @@
 /**
  * Ngày nhân điểm (spec ngày nhân điểm §4): quản trị chỉ cho admin; danh sách ngày sắp tới (banner) cho
- * mọi thành viên. Chỉ kiểm tra DẠNG body ở đây (strict — khoá lạ bị từ chối); ngày, khoảng hệ số và độ
- * dài lời nhắn do service báo lỗi tiếng Việt.
+ * mọi thành viên. Chỉ kiểm tra DẠNG body ở đây (strict — khoá lạ bị từ chối); ngày, hệ số (cả kiểu lẫn
+ * khoảng) và độ dài lời nhắn do service báo lỗi tiếng Việt.
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -18,10 +18,12 @@ import {
 import { currentMember, requireAdmin, requireMember } from '../auth-plugin.js';
 import { idParams } from '../schemas.js';
 
-// Hệ số chỉ kiểm tra là số — khoảng 2–5 do service báo ("Hệ số phải từ ×2 đến ×5").
-const createBody = z.object({ day: z.string(), multiplier: z.number(), message: z.string().nullish() }).strict();
+// Hệ số không kiểm tra ở đây: mọi giá trị sai (thiếu, chữ, "3", ngoài 2–5) do service báo cùng một câu
+// "Hệ số phải từ ×2 đến ×5" thay vì câu chung "Dữ liệu không hợp lệ" của ZodError.
+const anyMultiplier = z.custom<number>(() => true);
+const createBody = z.object({ day: z.string(), multiplier: anyMultiplier, message: z.string().nullish() }).strict();
 const patchBody = z
-  .object({ day: z.string().optional(), multiplier: z.number().optional(), message: z.string().nullish() })
+  .object({ day: z.string().optional(), multiplier: anyMultiplier.optional(), message: z.string().nullish() })
   .strict();
 
 /** `:id` lạ (chữ, 0) là một ngày không tồn tại — 404 như id không có trong DB. */

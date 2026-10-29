@@ -4,6 +4,7 @@ import type { Ctx } from '../../src/server/ctx.js';
 import { dateOnlyToDb, dbToDateOnly } from '../../src/server/lib/time.js';
 import { runMultiplierJobs } from '../../src/server/modules/multipliers/jobs.js';
 import {
+  announceCreated,
   createMultiplierDay,
   deleteMultiplierDay,
   listMultiplierDaysAdmin,
@@ -331,6 +332,49 @@ test('moving an announced day to another date cancels the old one and announces 
   await expect(updateMultiplierDay(ctx, id, { day: '2026-10-01' })).rejects.toMatchObject({ code: 'MULTIPLIER_DAY_PAST' });
   expect(await updateMultiplierDay(ctx, id, { day: '2026-10-27' })).toMatchObject({ day: '2026-10-27', multiplier: 3 });
   expect(notifier.announcements).toEqual(['❌ Huỷ ngày nhân điểm 24/10', '🔥 Thứ Ba 27/10: điểm cộng ×3!']);
+});
+
+/**
+ * Bộ hẹn giờ đăng bù tin tạo đúng lúc admin sửa/xoá: chạy `announceCreated` ngay sau lần đọc đầu tiên
+ * của service (trước lệnh ghi) — quyết định đăng "✏️"/"❌" phải theo trạng thái lúc ghi, không theo lần đọc.
+ */
+async function withBackfillAfterFirstRead<T>(id: number, act: () => Promise<T>): Promise<T> {
+  let fired = false;
+  const restore = patchDelegate(testDb.scoreMultiplierDay, 'findUnique', (orig) => (async (args: never) => {
+    const result = await orig(args);
+    if (!fired) {
+      fired = true;
+      await announceCreated(ctx, id);
+    }
+    return result;
+  }) as typeof orig);
+  try {
+    return await act();
+  } finally {
+    restore();
+  }
+}
+
+test('a backfilled creation post landing mid-edit still gets the update post', async () => {
+  const id = await rawDay('2026-10-24', 3, { announced: false });
+  await withBackfillAfterFirstRead(id, () => updateMultiplierDay(ctx, id, { multiplier: 4 }));
+  expect(notifier.announcements).toEqual(['🔥 Thứ Bảy 24/10: điểm cộng ×3!', '✏️ Cập nhật 24/10: điểm cộng ×4']);
+});
+
+test('a backfilled creation post landing mid-move still cancels the old date', async () => {
+  const id = await rawDay('2026-10-24', 3, { announced: false });
+  await withBackfillAfterFirstRead(id, () => updateMultiplierDay(ctx, id, { day: '2026-10-27' }));
+  expect(notifier.announcements).toEqual([
+    '🔥 Thứ Bảy 24/10: điểm cộng ×3!',
+    '❌ Huỷ ngày nhân điểm 24/10',
+    '🔥 Thứ Ba 27/10: điểm cộng ×3!',
+  ]);
+});
+
+test('a backfilled creation post landing mid-delete still gets the cancellation', async () => {
+  const id = await rawDay('2026-10-24', 3, { announced: false });
+  await withBackfillAfterFirstRead(id, () => deleteMultiplierDay(ctx, id));
+  expect(notifier.announcements).toEqual(['🔥 Thứ Bảy 24/10: điểm cộng ×3!', '❌ Huỷ ngày nhân điểm 24/10']);
 });
 
 test('deleting an announced day posts a cancellation; past days cannot be edited or deleted', async () => {

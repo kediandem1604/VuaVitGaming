@@ -86,6 +86,12 @@ test('admins create, list, edit and delete multiplier days; errors carry the spe
   const range = await send('POST', '/api/admin/multiplier-days', sid, { day: '2026-10-25', multiplier: 6 });
   expect(range.statusCode).toBe(400);
   expect(range.json().error.message).toBe('Hệ số phải từ ×2 đến ×5');
+  // Hệ số không phải số (chuỗi, null, thiếu) cũng báo đúng câu của hệ số.
+  for (const body of [{ day: '2026-10-25', multiplier: '3' }, { day: '2026-10-25', multiplier: null }, { day: '2026-10-25' }]) {
+    const bad = await send('POST', '/api/admin/multiplier-days', sid, body);
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error.message).toBe('Hệ số phải từ ×2 đến ×5');
+  }
   const long = await send('POST', '/api/admin/multiplier-days', sid, { day: '2026-10-25', multiplier: 2, message: 'x'.repeat(101) });
   expect(long.json().error.message).toBe('Lời nhắn tối đa 100 ký tự');
   // Body strict: khoá lạ → 400.
@@ -94,6 +100,9 @@ test('admins create, list, edit and delete multiplier days; errors carry the spe
   const edited = await send('PATCH', `/api/admin/multiplier-days/${dto.id}`, sid, { multiplier: 5 });
   expect(edited.statusCode).toBe(200);
   expect(edited.json<AdminMultiplierDayDto>()).toMatchObject({ multiplier: 5, message: 'Vui' });
+  const badPatch = await send('PATCH', `/api/admin/multiplier-days/${dto.id}`, sid, { multiplier: '3' });
+  expect(badPatch.statusCode).toBe(400);
+  expect(badPatch.json().error.message).toBe('Hệ số phải từ ×2 đến ×5');
 
   const list = await send('GET', '/api/admin/multiplier-days', sid);
   expect(list.statusCode).toBe(200);

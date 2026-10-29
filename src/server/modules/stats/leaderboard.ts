@@ -231,6 +231,9 @@ async function boostedPlus(
     by: ['roleId', 'memberId', 'playedOn'],
     where: {
       status: 'approved',
+      // Chỉ lần khai của chính người chơi — mục trừ điểm do báo cáo không có phần cộng để nhân
+      // (khớp `toReportDto`).
+      source: 'self',
       ...(roleId === undefined ? {} : { roleId }),
       playedOn: { in: days.map((d) => d.day) },
     },

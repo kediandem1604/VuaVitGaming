@@ -27,6 +27,7 @@ import type { AdminMultiplierDayDto, MultiplierDayDto, MultiplierDayInput, Multi
 import type { Ctx } from '../../ctx.js';
 import { escapeDiscordMarkdown } from '../../lib/discord-text.js';
 import { appError } from '../../lib/errors.js';
+import { HOT_TX } from '../../lib/tx.js';
 import {
   dateOnlyToDb,
   dbToDateOnly,
@@ -199,61 +200,85 @@ export async function createMultiplierDay(ctx: Ctx, createdById: number, input: 
 }
 
 /** Ngày nhân điểm còn sửa/xoá được: có (`NOT_FOUND`) và chưa qua (`MULTIPLIER_DAY_LOCKED`). */
-async function loadEditable(ctx: Ctx, id: number, today: string): Promise<ScoreMultiplierDay> {
-  const row = await ctx.db.scoreMultiplierDay.findUnique({ where: { id } });
+function checkEditable(row: ScoreMultiplierDay | null, today: string): ScoreMultiplierDay {
   if (!row) throw appError('NOT_FOUND');
   if (dbToDateOnly(row.day) < today) throw appError('MULTIPLIER_DAY_LOCKED');
   return row;
 }
 
+async function loadEditable(ctx: Ctx, id: number, today: string): Promise<ScoreMultiplierDay> {
+  return checkEditable(await ctx.db.scoreMultiplierDay.findUnique({ where: { id } }), today);
+}
+
+/**
+ * Trong giao dịch: khoá dòng (`FOR UPDATE`) rồi đọc lại. Bộ hẹn giờ đăng bù giành `announcedAt` bằng
+ * một lệnh ghi có điều kiện trên chính dòng này, nên lệnh đó hoặc xong trước (ta thấy cờ đã đặt) hoặc
+ * chờ tới khi ta commit — `announcedAt` đọc được ở đây đúng là trạng thái lúc ta ghi.
+ */
+async function lockEditable(tx: Prisma.TransactionClient, id: number, today: string): Promise<ScoreMultiplierDay> {
+  await tx.$queryRaw`SELECT id FROM score_multiplier_days WHERE id = ${id} FOR UPDATE`;
+  return checkEditable(await tx.scoreMultiplierDay.findUnique({ where: { id } }), today);
+}
+
 /**
  * Sửa các trường được gửi (vắng mặt giữ nguyên). Đổi hệ số/lời nhắn của ngày đã đăng → tin "✏️ Cập
  * nhật". Đổi sang ngày khác (≥ hôm nay, chưa có hệ số): ngày cũ đã đăng → "❌ Huỷ", rồi đăng như ngày
- * mới tạo (cờ đăng/nhắc đặt lại).
+ * mới tạo (cờ đăng/nhắc đặt lại). "Đã đăng" xét theo dòng đã khoá lúc ghi (`lockEditable`), không theo
+ * lần đọc đầu: tin tạo được đăng bù xen giữa vẫn kéo theo tin sửa/huỷ, Discord không giữ ×m cũ.
  */
 export async function updateMultiplierDay(ctx: Ctx, id: number, patch: MultiplierDayPatch): Promise<AdminMultiplierDayDto> {
   const p = parse(patchSchema, patch);
   const now = ctx.now();
   const today = toVnDate(now);
-  const existing = await loadEditable(ctx, id, today);
-  const oldDay = dbToDateOnly(existing.day);
-  const newDay = p.day === undefined ? oldDay : checkFutureDay(p.day, today);
-  const dayChanged = newDay !== oldDay;
+  // Đọc trước (ngoài giao dịch) để báo lỗi sớm: không có / đã qua / ngày mới sai.
+  const first = await loadEditable(ctx, id, today);
+  const newDay = p.day === undefined ? dbToDateOnly(first.day) : checkFutureDay(p.day, today);
 
-  const data: Prisma.ScoreMultiplierDayUpdateInput = {};
-  if (p.multiplier !== undefined) data.multiplier = p.multiplier;
-  if (p.message !== undefined) data.message = emptyToNull(p.message);
-  if (dayChanged) {
-    data.day = dateOnlyToDb(newDay);
-    data.announcedAt = null;
-    data.remindedAt = initialRemindedAt(newDay, now);
-  }
-
+  let before: ScoreMultiplierDay;
   let row: ScoreMultiplierDay;
   try {
-    row = await ctx.db.scoreMultiplierDay.update({ where: { id }, data });
+    ({ before, row } = await ctx.db.$transaction(async (tx) => {
+      const locked = await lockEditable(tx, id, today);
+      const data: Prisma.ScoreMultiplierDayUpdateInput = {};
+      if (p.multiplier !== undefined) data.multiplier = p.multiplier;
+      if (p.message !== undefined) data.message = emptyToNull(p.message);
+      if (newDay !== dbToDateOnly(locked.day)) {
+        data.day = dateOnlyToDb(newDay);
+        data.announcedAt = null;
+        data.remindedAt = initialRemindedAt(newDay, now);
+      }
+      return { before: locked, row: await tx.scoreMultiplierDay.update({ where: { id }, data }) };
+    }, HOT_TX));
   } catch (err) {
     if (isDayTaken(err)) throw appError('MULTIPLIER_DAY_TAKEN');
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') throw appError('NOT_FOUND');
     throw err;
   }
 
-  if (dayChanged) {
-    if (existing.announcedAt !== null) await post(ctx, cancelledText(oldDay), `huỷ ${oldDay}`);
+  const oldDay = dbToDateOnly(before.day);
+  if (newDay !== oldDay) {
+    if (before.announcedAt !== null) await post(ctx, cancelledText(oldDay), `huỷ ${oldDay}`);
     await announceCreated(ctx, row.id);
-  } else if (existing.announcedAt !== null && (row.multiplier !== existing.multiplier || row.message !== existing.message)) {
+  } else if (before.announcedAt !== null && (row.multiplier !== before.multiplier || row.message !== before.message)) {
     await post(ctx, updatedText(row), `cập nhật ${newDay}`);
   }
   return toAdminDto(row, today);
 }
 
-/** Xoá ngày chưa qua; đã đăng tin tạo → "❌ Huỷ ngày nhân điểm {dd/mm}". */
+/**
+ * Xoá ngày chưa qua; đã đăng tin tạo (xét trên dòng đã khoá lúc xoá, như khi sửa) → "❌ Huỷ ngày nhân
+ * điểm {dd/mm}".
+ */
 export async function deleteMultiplierDay(ctx: Ctx, id: number): Promise<void> {
-  const existing = await loadEditable(ctx, id, toVnDate(ctx.now()));
-  const { count } = await ctx.db.scoreMultiplierDay.deleteMany({ where: { id } });
-  if (count === 0) throw appError('NOT_FOUND');
-  if (existing.announcedAt !== null) {
-    const day = dbToDateOnly(existing.day);
+  const today = toVnDate(ctx.now());
+  await loadEditable(ctx, id, today);
+  const deleted = await ctx.db.$transaction(async (tx) => {
+    const locked = await lockEditable(tx, id, today);
+    await tx.scoreMultiplierDay.delete({ where: { id } });
+    return locked;
+  }, HOT_TX);
+  if (deleted.announcedAt !== null) {
+    const day = dbToDateOnly(deleted.day);
     await post(ctx, cancelledText(day), `huỷ ${day}`);
   }
 }
