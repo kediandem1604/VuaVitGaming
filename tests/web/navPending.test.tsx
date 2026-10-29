@@ -1,4 +1,6 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState, type ReactNode } from 'react';
 import { Link, MemoryRouter, Outlet, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { MeDto } from '../../src/shared/api-types';
@@ -22,6 +24,15 @@ const me: MeDto = {
   notifyDm: true,
   accessLevel: 'member',
 };
+
+/**
+ * `Layout` có banner ngày nhân điểm (đọc qua TanStack Query) nên cần `QueryClientProvider`; test
+ * không giả fetch nên danh sách tải lỗi và banner không vẽ gì.
+ */
+function QueryWrapper({ children }: { children: ReactNode }) {
+  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
 
 type StartVT = (cb: () => void) => { finished: Promise<void> };
 const doc = document as Document & { startViewTransition?: StartVT };
@@ -73,6 +84,7 @@ test('a navigation superseded by one back to the current page leaves no bar, no 
     <MemoryRouter initialEntries={['/']}>
       <Harness />
     </MemoryRouter>,
+    { wrapper: QueryWrapper },
   );
 
   act(() => {
@@ -107,6 +119,7 @@ test('Back right after a click ends pending even when the committed router locat
     <MemoryRouter initialEntries={['/']}>
       <Harness />
     </MemoryRouter>,
+    { wrapper: QueryWrapper },
   );
   act(() => beginNavigation('/huy-hieu'));
   expect(busy()).toBe('true');
@@ -122,6 +135,7 @@ test('clicking the nav item of the page being shown never starts pending', () =>
     <MemoryRouter initialEntries={['/huy-hieu']}>
       <Harness />
     </MemoryRouter>,
+    { wrapper: QueryWrapper },
   );
   act(() => {
     fireEvent.click(headerLink(/Huy hiệu/));
@@ -140,6 +154,7 @@ test('A then B rapidly: pending follows B and only ends when B is shown', async 
     <MemoryRouter initialEntries={['/']}>
       <Harness />
     </MemoryRouter>,
+    { wrapper: QueryWrapper },
   );
 
   act(() => {
@@ -174,6 +189,7 @@ test('Layout: showing another page does not end the pending navigation to a diff
         <Link to="/huy-hieu">tới B</Link>
       </Layout>
     </MemoryRouter>,
+    { wrapper: QueryWrapper },
   );
   act(() => beginNavigation('/huy-hieu'));
   act(() => {

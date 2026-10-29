@@ -23,6 +23,8 @@
  * Đang chuyển sang trang lười (`lib/navPending.ts`): mục đích được tô ngay lúc bấm (React Router giữ
  * trang cũ trong transition tới khi chunk về), `main` mang `aria-busy`, và sau 150ms hiện vạch tiến
  * trình vàng mảnh trên cùng (`.nav-progress`) cùng dòng `role="status"` "Đang tải…" cho trình đọc màn hình.
+ *
+ * Giữa thanh trên và nội dung là banner ngày nhân điểm (`MultiplierBanner`) — chỉ hiện khi có ngày nhân.
  */
 
 import { Award, ChartColumn, Crown, House, LogOut, PenLine, Trophy, User, Wrench, type LucideIcon } from 'lucide-react';
@@ -34,6 +36,7 @@ import { cx } from '../lib/cx';
 import { arriveNavigation, usePendingNavigation } from '../lib/navPending';
 import { Avatar } from './Avatar';
 import { DuckMark } from './DuckMark';
+import { MultiplierBanner } from './MultiplierBanner';
 import { ThemeToggle } from './HalloweenDecor';
 import { PrefetchNavLink } from './PrefetchLink';
 import { Delayed } from './Skeleton';
@@ -188,6 +191,9 @@ export function Layout({ me, children }: LayoutProps) {
           )}
         </div>
       </header>
+
+      {/* Banner ngày nhân điểm (spec ngày nhân điểm §5): ngoài header dính để không chiếm chỗ khi cuộn. */}
+      <MultiplierBanner />
 
       {/* Chừa chỗ cho thanh dock khi nó còn hiện (< lg). */}
       <main aria-busy={pending !== null ? true : undefined} className="vt-page mx-auto w-full max-w-5xl flex-1 px-4 py-4 pb-24 lg:pb-8">{children}</main>

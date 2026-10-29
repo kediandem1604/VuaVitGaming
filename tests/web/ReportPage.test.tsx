@@ -159,8 +159,8 @@ function stubFetch(routes: Record<string, Handler>) {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const path = url.split('?')[0] ?? url;
     const key = `${init?.method ?? 'GET'} ${path}`;
-    // "Treo thưởng của tôi": test không tả gì thì chưa nhận mục nào.
-    const handler = routes[key] ?? (key === MY_BOUNTIES_ROUTE ? () => json(200, []) : undefined);
+    // "Treo thưởng của tôi" và ngày nhân điểm sắp tới: test không tả gì thì rỗng.
+    const handler = routes[key] ?? (key === MY_BOUNTIES_ROUTE || key === UPCOMING_MULTIPLIERS_ROUTE ? () => json(200, []) : undefined);
     if (!handler) throw new Error(`Không có tuyến giả cho ${key}`);
     return Promise.resolve(handler(init, url));
   });
@@ -169,6 +169,7 @@ function stubFetch(routes: Record<string, Handler>) {
 }
 
 const MY_BOUNTIES_ROUTE = 'GET /api/bounty-claims/mine';
+const UPCOMING_MULTIPLIERS_ROUTE = 'GET /api/multiplier-days/upcoming';
 
 /** Người đang đăng nhập (id 9) và danh sách chọn người cho ô báo cáo (có cả tôi — web tự loại). */
 const me: MeDto = { id: 9, memberCode: 'GGD-0009', displayName: 'Tôi', avatarUrl: null, email: null, notifyEmail: true, notifyDm: true, accessLevel: 'member' };
@@ -1256,4 +1257,52 @@ test('"Treo thưởng của tôi" says so when I have no claims', async () => {
   renderPage();
   const section = await screen.findByRole('region', { name: 'Treo thưởng của tôi' });
   expect(await within(section).findByText('Bạn chưa nhận treo thưởng nào')).toBeInTheDocument();
+});
+
+// ---------------------------------------------------------------------------
+// Ngày nhân điểm (spec ngày nhân điểm §5)
+// ---------------------------------------------------------------------------
+
+test('the form hints "Ngày này điểm cộng ×m" while the chosen date is a multiplier day', async () => {
+  stubFetch({ ...baseRoutes, [UPCOMING_MULTIPLIERS_ROUTE]: () => json(200, [{ id: 1, day: today, multiplier: 3, message: null }]) });
+  renderPage();
+
+  const form = (await screen.findByRole('heading', { name: 'Khai một trận' })).closest('section') as HTMLElement;
+  expect(await within(form).findByText('Ngày này điểm cộng ×3')).toBeInTheDocument();
+
+  const [y = 0, m = 0, d = 0] = today.split('-').map(Number);
+  const yesterday = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  fireEvent.change(within(form).getByLabelText('Ngày chơi'), { target: { value: yesterday } });
+  expect(within(form).queryByText(/Ngày này điểm cộng/)).not.toBeInTheDocument();
+});
+
+test('no hint when today is not a multiplier day', async () => {
+  const fetchMock = stubFetch(baseRoutes);
+  renderPage();
+  await screen.findByLabelText('Ngày chơi');
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/multiplier-days/upcoming', expect.anything()));
+  expect(screen.queryByText(/Ngày này điểm cộng/)).not.toBeInTheDocument();
+});
+
+test('"Lần khai của tôi" shows a gold ×m chip on multiplied reports; the edit form keeps the hint for that day', async () => {
+  const [y = 0, m = 0, d = 0] = today.split('-').map(Number);
+  const yesterday = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  stubFetch({
+    ...baseRoutes,
+    'GET /api/reports/mine': () =>
+      json(200, [report({ id: 3, status: 'pending', value: 4, playedOn: yesterday, multiplier: 2, points: 8 }), report({ id: 2, status: 'approved', value: 6, multiplier: 1 })]),
+  });
+  renderPage();
+
+  const items = await screen.findAllByRole('listitem');
+  const chip = within(items[0] as HTMLElement).getByText('×2');
+  expect(chip).toHaveClass('bg-gold');
+  expect(chip).toHaveAttribute('title', 'Điểm cộng ×2 (ngày nhân điểm)');
+  expect(within(items[1] as HTMLElement).queryByText(/^×\d$/)).not.toBeInTheDocument();
+
+  // Ngày đã qua không có trong danh sách "sắp tới": hệ số lấy từ chính lần khai.
+  fireEvent.click(within(items[0] as HTMLElement).getByRole('button', { name: 'Sửa' }));
+  expect(within(items[0] as HTMLElement).getByText('Ngày này điểm cộng ×2')).toBeInTheDocument();
+  fireEvent.change(within(items[0] as HTMLElement).getByLabelText('Ngày chơi'), { target: { value: today } });
+  expect(within(items[0] as HTMLElement).queryByText(/Ngày này điểm cộng/)).not.toBeInTheDocument();
 });

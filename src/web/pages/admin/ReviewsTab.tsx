@@ -48,6 +48,7 @@ import { formatReportValue } from '../../../shared/metric';
 import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { HighlightLink } from '../../components/HighlightLink';
+import { MultiplierChip } from '../../components/MultiplierChip';
 import { QueryState } from '../../components/QueryState';
 import { PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../../lib/accusations';
 import { CLAIM_SOURCE_LABEL, bountyIcon, sessionText } from '../../lib/bounties';
@@ -561,6 +562,8 @@ function ReportSummary({ report, meta }: { report: ReportDto; meta: ReactNode })
           {report.role.icon} {report.role.nameVi}
         </span>
         {report.source === 'accusation' && <span className="chip bg-duck-soft text-night-950">{PENALISED_CHIP}</span>}
+        {/* Ngày chơi là ngày nhân điểm (spec ngày nhân điểm §5). */}
+        <MultiplierChip multiplier={report.multiplier} />
         <time dateTime={report.playedOn} className="ml-auto text-night-300 tabular-nums">
           {formatDateLabel(report.playedOn)}
         </time>

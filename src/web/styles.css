@@ -430,6 +430,18 @@
 }
 
 /*
+ * Banner ngày nhân điểm (`MultiplierBanner`, dưới thanh điều hướng): nền vàng → cam bí ngô, viền
+ * mực mờ, chữ `gold-ink` (≥ 6.9:1 trên cả hai đầu dải màu, ở cả chủ đề thường lẫn Halloween); mờ
+ * vào `--dur-base` khi hiện.
+ */
+.multiplier-banner {
+  background: linear-gradient(100deg, var(--color-gold), color-mix(in srgb, var(--color-gold) 45%, #ff8a1f));
+  border: 2px solid color-mix(in srgb, var(--color-gold-ink) 25%, transparent);
+  box-shadow: 0 6px 22px -8px color-mix(in srgb, var(--color-gold) 70%, transparent);
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
+}
+
+/*
  * Khối bọc dữ liệu của `QueryState`: `display: contents` để không chen vào bố cục (gap/grid) của
  * cha. Khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc (`data-busy="true"`; `aria-busy` nằm ở khung thật), các con mờ
  * còn 60% trong `--dur-fast` (spec §4.4) — bố cục đứng yên, không nháy trống. Hoạt ảnh danh sách

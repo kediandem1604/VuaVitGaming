@@ -180,6 +180,7 @@ test('clicking a nav link to a lazy page gives feedback until the chunk arrives'
   vi.useFakeTimers();
   let resolve: (mod: { default: () => JSX.Element }) => void = () => undefined;
   const Badges = lazyPage(() => new Promise<{ default: () => JSX.Element }>((r) => (resolve = r)));
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <MemoryRouter initialEntries={['/']}>
       <Routes>
@@ -197,6 +198,8 @@ test('clicking a nav link to a lazy page gives feedback until the chunk arrives'
         </Route>
       </Routes>
     </MemoryRouter>,
+    // Banner ngày nhân điểm trong `Layout` đọc qua TanStack Query.
+    { wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider> },
   );
 
   const [headerBadges, dockBadges] = screen.getAllByRole('link', { name: /Huy hiệu/ });

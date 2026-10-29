@@ -31,6 +31,11 @@
  * điểm do bị báo cáo (`source = 'accusation'`) mang chip "Bị trừ điểm" và đọc "Bị báo cáo: bắn
  * {tên} ({phe}) − {điểm} điểm" (`lib/accusations.ts`).
  *
+ * Ngày nhân điểm (spec ngày nhân điểm §5): ngày chơi đang chọn là ngày nhân thì dưới ô ngày có
+ * dòng "Ngày này điểm cộng ×m" — hệ số lấy từ danh sách "sắp tới" (hôm nay trở đi); form sửa giữ
+ * ngày cũ thì dùng hệ số của chính lần khai (ngày đã qua không còn trong danh sách đó). Lần khai
+ * có `multiplier > 1` mang chip vàng `×m` cạnh chip trạng thái.
+ *
  * Highlight (spec highlight §3): ô file không bắt buộc, chỉ hiện khi tính năng dùng được;
  * gửi = tạo lần khai rồi mới tải file, lỗi tải file không huỷ lần khai. Danh sách có link
  * "Xem highlight" và nút Thêm/Đổi trên lần khai còn chờ duyệt (`ReportHighlight.tsx`).
@@ -46,6 +51,7 @@ import { AccusationFields, EMPTY_ACCUSATION_DRAFT, draftFromAccusation, parseAcc
 import { Character } from '../components/Character';
 import { EmptyState } from '../components/EmptyState';
 import { HighlightLink } from '../components/HighlightLink';
+import { MultiplierChip } from '../components/MultiplierChip';
 import { QueryState } from '../components/QueryState';
 import { DUPLICATE_NOTE, PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../lib/accusations';
 import { CLAIM_CHIP_CLASS, bountyIcon, claimStatusText, sessionText } from '../lib/bounties';
@@ -53,7 +59,7 @@ import { cx } from '../lib/cx';
 import { FACTION_LABEL } from '../lib/factions';
 import { usePresence } from '../lib/motion';
 import { addDaysIso, formatDateLabel, formatTime, vnTodayIso } from '../lib/format';
-import { rolesQuery } from '../lib/queries';
+import { multiplierOn, rolesQuery, upcomingMultipliersQuery } from '../lib/queries';
 import { MY_BOUNTY_CLAIMS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
 import { HighlightButton, HighlightField, checkHighlight, uploadHighlight, type HighlightUpload } from './ReportHighlight';
 
@@ -245,6 +251,7 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
   const queryClient = useQueryClient();
   const ids = useFieldIds();
   const today = vnTodayIso();
+  const multipliers = useQuery(upcomingMultipliersQuery);
 
   const [role, setRole] = useState<RoleDto | null>(null);
   const [value, setValue] = useState('');
@@ -428,6 +435,7 @@ function ReportForm({ roles, highlight }: ReportFormProps) {
         id={ids.date}
         today={today}
         value={playedOn}
+        multiplier={multiplierOn(multipliers.data, playedOn)}
         onChange={(next) => {
           setPlayedOn(next);
           setSessionId(''); // buổi thuộc ngày cũ không còn hợp lệ
@@ -719,11 +727,13 @@ interface DateFieldProps {
   id: string;
   today: string;
   value: string;
+  /** Hệ số nhân điểm của ngày đang chọn (1 = không nhân, không có dòng gợi ý). */
+  multiplier: number;
   onChange: (value: string) => void;
 }
 
-/** Ngày chơi, giới hạn [hôm nay − 3, hôm nay] giờ VN (server vẫn kiểm tra lại). */
-function DateField({ id, today, value, onChange }: DateFieldProps) {
+/** Ngày chơi, giới hạn [hôm nay − 3, hôm nay] giờ VN (server vẫn kiểm tra lại); ngày nhân điểm thì kèm dòng gợi ý. */
+function DateField({ id, today, value, multiplier, onChange }: DateFieldProps) {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className={LABEL_CLASS}>
@@ -738,6 +748,7 @@ function DateField({ id, today, value, onChange }: DateFieldProps) {
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
+      {multiplier > 1 && <p className="text-sm font-bold text-gold">{`Ngày này điểm cộng ×${multiplier}`}</p>}
     </div>
   );
 }
@@ -888,6 +899,7 @@ function ReportItem({ report, roles, highlight }: ReportItemProps) {
         </span>
         <span className={cx('chip', chip.className)}>{chip.text}</span>
         {report.source === 'accusation' && <span className="chip bg-duck-soft text-night-950">{PENALISED_CHIP}</span>}
+        <MultiplierChip multiplier={report.multiplier} />
         <time dateTime={report.playedOn} className="ml-auto text-sm text-night-300 tabular-nums">
           {formatDateLabel(report.playedOn)}
         </time>
@@ -970,6 +982,7 @@ function EditForm({ report, roles, onDone }: { report: ReportDto; roles: RoleDto
   const queryClient = useQueryClient();
   const ids = useFieldIds();
   const today = vnTodayIso();
+  const multipliers = useQuery(upcomingMultipliersQuery);
   const [value, setValue] = useState(String(report.value));
   const [extraValue, setExtraValue] = useState(String(report.extraValue));
   const [penaltyValue, setPenaltyValue] = useState(String(report.penaltyValue));
@@ -1077,7 +1090,14 @@ function EditForm({ report, roles, onDone }: { report: ReportDto; roles: RoleDto
           }}
         />
       )}
-      <DateField id={ids.date} today={today} value={playedOn} onChange={setPlayedOn} />
+      <DateField
+        id={ids.date}
+        today={today}
+        value={playedOn}
+        // Ngày cũ của lần khai có thể đã qua (không còn trong "sắp tới"): dùng hệ số server tính cho chính nó.
+        multiplier={playedOn === report.playedOn ? Math.max(report.multiplier, multiplierOn(multipliers.data, playedOn)) : multiplierOn(multipliers.data, playedOn)}
+        onChange={setPlayedOn}
+      />
       <NoteField id={ids.note} value={note} onChange={setNote} />
       <AccusationFields
         id={ids.accusation}

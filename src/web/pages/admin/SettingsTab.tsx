@@ -11,7 +11,9 @@
  * tắt không hiện trong form tạo buổi / hạng mục / role). Lưu xong thì danh sách chế độ
  * công khai (`['modes']`, các form đó dùng) được tải lại.
  *
- * Giao diện Sảnh đêm (spec §6 Quản trị): hai `panel`; mỗi chế độ một dòng `panel-inset`
+ * Giữa hai mục là "Ngày nhân điểm" (`MultiplierDaysSection.tsx`, spec ngày nhân điểm §4).
+ *
+ * Giao diện Sảnh đêm (spec §6 Quản trị): ba `panel`; mỗi chế độ một dòng `panel-inset`
  * với công tắc `Switch`.
  */
 
@@ -22,6 +24,7 @@ import { apiGet, apiSend, errorMessage } from '../../api';
 import { QueryState } from '../../components/QueryState';
 import { Chip } from './Chip';
 import { Switch } from './Controls';
+import { MultiplierDaysSection } from './MultiplierDaysSection';
 
 const SETTINGS_KEY = ['admin', 'settings'] as const;
 const ADMIN_MODES_KEY = ['admin', 'modes'] as const;
@@ -78,6 +81,7 @@ export function SettingsTab() {
           )}
         </QueryState>
       </section>
+      <MultiplierDaysSection />
       <ModesSection />
     </>
   );

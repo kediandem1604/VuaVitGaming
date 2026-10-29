@@ -551,6 +551,10 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 4. **Duyệt**: **Quản trị → Duyệt điểm → Treo thưởng chờ duyệt** → **Duyệt** hoặc **Từ chối** (ghi lý do; người nhận được DM). Duyệt xong bot đăng `✅ <tên> hoàn thành <mục> +<điểm>` vào `#treo-thưởng`. Duyệt nhầm thì **Huỷ duyệt** ở **Đã duyệt gần đây** (ghi lý do; người nhận được DM). Luật như duyệt lần khai: mod không tự duyệt phần của mình, mùa đã chốt thì không đổi được nữa; lúc chốt mùa, lần nhận còn chờ bị từ chối.
 5. **Điểm**: mục gắn role cộng điểm vào điểm mùa của role đó (bảng xếp hạng, hoá thân, Top 3 mỗi phe, tổng theo phe) nhưng **không** tăng số trận; mục không gắn role chỉ cộng vào **Tổng điểm theo phe**, tab **Cả 3 phe**.
 
+### Ngày nhân điểm
+
+Admin đặt ở **Quản trị → Cài đặt → Ngày nhân điểm**: chọn ngày (hôm nay hoặc sau này), hệ số **×2–×5** và lời nhắn (không bắt buộc, tối đa 100 ký tự); ngày chưa qua sửa/xoá được, ngày đã qua của mùa hiện ra mờ và bị khoá. Lần khai có **ngày chơi** là ngày đó được nhân **chỉ phần điểm cộng** — điểm trừ (chỉ số phạt, bị báo cáo), +1 báo cáo đúng và treo thưởng giữ nguyên — ở mọi bảng điểm mùa; đổi hệ số thì điểm tính lại theo. Mọi người thấy **banner** vàng cam dưới thanh điều hướng (hôm nay / ngày mai / ngày xa hơn, bấm ✕ để ẩn trên máy mình), dòng gợi ý ở form Khai điểm và chip `×m` cạnh lần khai; bot đăng tin vào `#thông-báo` khi tạo, sửa, xoá và nhắc lại lúc **9:00** đúng ngày.
+
 ### Cài đặt (admin)
 
 - **Quản trị → Cài đặt**: thời gian mở vote (1–72 giờ, mặc định 12), tự kết thúc buổi sau (1–24 giờ, mặc định 4), nhắc trước (5–120 phút, mặc định 15). Cuối tab là mục **Chế độ chơi**: sửa tên tiếng Việt của từng chế độ (tên Việt của dữ liệu mẫu chưa được xác minh hết) và bật/tắt — chế độ tắt không còn trong form tạo buổi, hạng mục và role; buổi cũ giữ nguyên.

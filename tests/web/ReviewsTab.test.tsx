@@ -863,3 +863,23 @@ test('revoking a bounty claim posts the reason, removes the row and refreshes sc
   expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_BOUNTY_CLAIMS_KEY });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: SESSION_BOUNTIES_KEY });
 });
+
+// ---------------------------------------------------------------------------
+// Ngày nhân điểm (spec ngày nhân điểm §5)
+// ---------------------------------------------------------------------------
+
+test('a gold ×m chip marks multiplied reports in the queue and in "Đã duyệt gần đây"', async () => {
+  stubFetch({
+    [PENDING_ROUTE]: () => json(200, [report({ id: 1, multiplier: 3, points: 12 }), report({ id: 2, multiplier: 1 })]),
+    [APPROVED_ROUTE]: () => json(200, [approvedReport({ id: 21, multiplier: 2, points: 8 })]),
+  });
+  renderTab();
+
+  const queue = within(await screen.findByRole('region', { name: /^Hàng chờ duyệt/ }));
+  const [first, second] = await queue.findAllByRole('listitem');
+  expect(within(first as HTMLElement).getByText('×3')).toHaveClass('bg-gold');
+  expect(within(second as HTMLElement).queryByText(/^×\d$/)).not.toBeInTheDocument();
+
+  const [recent] = await approvedItems();
+  expect(within(recent as HTMLElement).getByText('×2')).toHaveClass('bg-gold');
+});

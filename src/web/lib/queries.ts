@@ -5,9 +5,9 @@
  */
 
 import { queryOptions } from '@tanstack/react-query';
-import type { HeldRoleDto, RoleDto, SeasonDto, SessionBountiesDto } from '../../shared/api-types';
+import type { HeldRoleDto, MultiplierDayDto, RoleDto, SeasonDto, SessionBountiesDto } from '../../shared/api-types';
 import { apiGet } from '../api';
-import { SESSION_BOUNTIES_KEY } from './queryKeys';
+import { MULTIPLIER_UPCOMING_KEY, SESSION_BOUNTIES_KEY } from './queryKeys';
 
 /** Danh sách mùa (mới nhất trước; mùa hiện tại luôn có) — Đại sảnh, Bảng xếp hạng. */
 export const seasonsQuery = queryOptions({ queryKey: ['seasons'] as const, queryFn: () => apiGet<SeasonDto[]>('/api/seasons') });
@@ -24,3 +24,17 @@ export const titlesQuery = queryOptions({ queryKey: ['me', 'titles'] as const, q
 /** Mục treo thưởng của một buổi kèm lần nhận của mình — thẻ "Treo thưởng" ở trang Hôm nay. */
 export const sessionBountiesQuery = (sessionId: number) =>
   queryOptions({ queryKey: [...SESSION_BOUNTIES_KEY, sessionId] as const, queryFn: () => apiGet<SessionBountiesDto>(`/api/sessions/${sessionId}/bounties`) });
+
+/**
+ * Ngày nhân điểm từ hôm nay (giờ VN) trở đi, gần nhất trước — banner dưới thanh điều hướng và gợi ý
+ * "Ngày này điểm cộng ×m" ở form Khai điểm (spec ngày nhân điểm §5).
+ */
+export const upcomingMultipliersQuery = queryOptions({
+  queryKey: MULTIPLIER_UPCOMING_KEY,
+  queryFn: () => apiGet<MultiplierDayDto[]>('/api/multiplier-days/upcoming'),
+});
+
+/** Hệ số của ngày `date` trong danh sách ngày nhân điểm (1 khi không có). */
+export function multiplierOn(days: readonly MultiplierDayDto[] | undefined, date: string): number {
+  return days?.find((item) => item.day === date)?.multiplier ?? 1;
+}

@@ -26,3 +26,7 @@ export const APPROVED_BOUNTY_CLAIMS_KEY = ['admin', 'bounty-claims', 'approved']
 export const MY_BOUNTY_CLAIMS_KEY = ['bounty-claims', 'mine'] as const;
 /** Tiền tố khoá thẻ treo thưởng của từng buổi (`['session-bounties', id]`) — tab Treo thưởng và Duyệt điểm làm mới. */
 export const SESSION_BOUNTIES_KEY = ['session-bounties'] as const;
+/** Ngày nhân điểm từ hôm nay trở đi — banner ở mọi trang và gợi ý ở form Khai điểm; tab Cài đặt làm mới sau khi thêm/sửa/xoá. */
+export const MULTIPLIER_UPCOMING_KEY = ['multiplier-days', 'upcoming'] as const;
+/** Danh sách ngày nhân điểm của tab Quản trị → Cài đặt (kèm ngày đã qua của mùa đang mở). */
+export const ADMIN_MULTIPLIER_DAYS_KEY = ['admin', 'multiplier-days'] as const;
