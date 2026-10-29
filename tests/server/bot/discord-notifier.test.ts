@@ -2,10 +2,10 @@ import { DiscordAPIError, GuildPremiumTier, RESTJSONErrorCodes } from 'discord.j
 import type { APIEmbed, Client } from 'discord.js';
 import { expect, test } from 'vitest';
 import { DiscordJsNotifier } from '../../../src/server/bot/discord-notifier.js';
-import { buildSessionMessage, buildVoteMessage } from '../../../src/server/bot/embeds.js';
+import { buildBountyBoardMessage, buildSessionMessage, buildVoteMessage } from '../../../src/server/bot/embeds.js';
 import type { Config } from '../../../src/server/config.js';
 import { HighlightChannelError, HighlightRejectedTooLargeError, MessageGoneError } from '../../../src/server/ports.js';
-import type { HighlightPost, SessionView, VotePrompt } from '../../../src/server/ports.js';
+import type { BountyBoardView, HighlightPost, SessionView, VotePrompt } from '../../../src/server/ports.js';
 import { testConfig } from '../../helpers/ctx.js';
 
 const view: SessionView = {
@@ -416,4 +416,84 @@ test('deleteMessage deletes in the given channel, treats a vanished message as d
     throw discordError(RESTJSONErrorCodes.UnknownChannel, 404, 'Unknown Channel');
   }) as never;
   await expect(n.deleteMessage('ch-gone', 'm-3')).resolves.toBeUndefined();
+});
+
+// ---------------------------------------------------------------------------
+// Treo thưởng
+// ---------------------------------------------------------------------------
+
+const board: BountyBoardView = {
+  sessionId: 5,
+  startsAt: new Date('2026-10-22T14:00:00Z'),
+  modeName: 'Cổ điển (Classic)',
+  status: 'scheduled',
+  bounties: [{ id: 1, title: 'Sống sót', description: null, points: 3, icon: '🎯' }],
+};
+
+function withBounty(channelId: string | null): Config {
+  const config = testConfig();
+  config.discord.bountyChannelId = channelId;
+  return config;
+}
+
+test('postBountyCompleted posts the escaped line to the bounty channel without pinging anyone', async () => {
+  const f = fakeClient({});
+  f.client.channels.fetch = (async (id: string) => (id === 'ch-bounty' ? f.sendable(id) : null)) as never;
+  const n = new DiscordJsNotifier(f.client, withBounty('ch-bounty'));
+
+  await n.postBountyCompleted({ memberName: 'An *Vịt* @everyone', bountyTitle: 'Giết_3_ngỗng', points: 5 });
+  expect(f.sent).toEqual([
+    {
+      channelId: 'ch-bounty',
+      payload: { content: '✅ An \\*Vịt\\* @everyone hoàn thành **Giết\\_3\\_ngỗng** +5', allowedMentions: { parse: [] } },
+    },
+  ]);
+});
+
+test('postBountyCompleted does nothing without DISCORD_BOUNTY_CHANNEL_ID; a broken channel is an error', async () => {
+  const f = fakeClient({});
+  const off = new DiscordJsNotifier(f.client, withBounty(null));
+  await off.postBountyCompleted({ memberName: 'An', bountyTitle: 'X', points: 1 });
+  expect(f.sent).toEqual([]);
+
+  const missing = new DiscordJsNotifier(fakeClient({}).client, withBounty('ch-bounty'));
+  await expect(missing.postBountyCompleted({ memberName: 'An', bountyTitle: 'X', points: 1 })).rejects.toThrow('ch-bounty');
+});
+
+test('publishBountyBoard posts the built board in the given channel; updateBountyBoard edits it there', async () => {
+  const f = fakeClient({});
+  f.client.channels.fetch = (async (id: string) => (id === 'ch-b' ? f.sendable(id) : null)) as never;
+  const n = new DiscordJsNotifier(f.client, withBounty('ch-bounty'));
+
+  expect(await n.publishBountyBoard('ch-b', board)).toBe('m-1');
+  expect(f.sent).toEqual([{ channelId: 'ch-b', payload: buildBountyBoardMessage(board) }]);
+
+  const cancelled: BountyBoardView = { ...board, status: 'cancelled', bounties: [] };
+  await n.updateBountyBoard('ch-b', 'm-1', cancelled);
+  expect(f.edited).toEqual([{ channelId: 'ch-b', messageId: 'm-1', payload: buildBountyBoardMessage(cancelled) }]);
+});
+
+test('updateBountyBoard maps a vanished message or channel to MessageGoneError and passes other errors through', async () => {
+  const f = fakeClient({});
+  const n = new DiscordJsNotifier(f.client, withBounty('ch-bounty'));
+  let failure: unknown;
+  const channel = {
+    isSendable: () => true,
+    messages: {
+      edit: async () => {
+        throw failure;
+      },
+    },
+  };
+  f.client.channels.fetch = (async (id: string) => (id === 'ch-b' ? channel : null)) as never;
+
+  failure = discordError(RESTJSONErrorCodes.UnknownMessage, 404, 'Unknown Message');
+  await expect(n.updateBountyBoard('ch-b', 'm-1', board)).rejects.toBeInstanceOf(MessageGoneError);
+  failure = discordError(RESTJSONErrorCodes.MissingPermissions, 403, 'Missing Permissions');
+  await expect(n.updateBountyBoard('ch-b', 'm-1', board)).rejects.toBe(failure);
+
+  f.client.channels.fetch = (async () => {
+    throw discordError(RESTJSONErrorCodes.UnknownChannel, 404, 'Unknown Channel');
+  }) as never;
+  await expect(n.updateBountyBoard('ch-b', 'm-1', board)).rejects.toBeInstanceOf(MessageGoneError);
 });

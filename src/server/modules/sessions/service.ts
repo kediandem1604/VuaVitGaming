@@ -9,6 +9,9 @@
  *
  * Tin Discord không bao giờ chặn nghiệp vụ: Discord sập thì dữ liệu vẫn lưu, buổi
  * được đánh dấu `discordDirty` để bộ hẹn giờ (Task 11) đăng bù / sửa bù sau.
+ *
+ * Tin treo thưởng của buổi (`#treo-thưởng`) chỉ do bộ hẹn giờ đăng/sửa: tạo buổi, đổi giờ và huỷ
+ * buổi bật `bountyDirty` trong cùng câu ghi (buổi không có mục nào thì lượt đồng bộ chỉ xoá cờ).
  */
 
 import type { Prisma } from '@prisma/client';
@@ -155,6 +158,8 @@ export async function createSession(ctx: Ctx, actorId: number, input: CreateSess
       status: 'scheduled',
       createdById: actorId,
       discordDirty: true,
+      // Mục "mọi buổi" (nếu có) áp dụng ngay cho buổi mới.
+      bountyDirty: true,
     },
     select: { id: true },
   });
@@ -256,7 +261,8 @@ export async function updateSession(
     const fields = Object.keys(data);
     if (fields.length === 0) return fields;
 
-    await tx.gameSession.update({ where: { id: sessionId }, data: { ...data, discordDirty: true } });
+    // Đổi giờ → tiêu đề tin treo thưởng đổi theo.
+    await tx.gameSession.update({ where: { id: sessionId }, data: { ...data, discordDirty: true, ...(newStart ? { bountyDirty: true } : {}) } });
     if (newStart && lead !== null) {
       const kinds = reminderKindsNotYetDue(newStart, ctx.now(), lead);
       if (kinds.length > 0) await tx.notificationLog.deleteMany({ where: { sessionId, kind: { in: kinds } } });
@@ -341,7 +347,7 @@ export async function cancelSession(ctx: Ctx, sessionId: number): Promise<void> 
   // `discordDirty` bật cùng lúc: chết trước khi kịp sửa tin thì bộ hẹn giờ sửa bù.
   const { count } = await ctx.db.gameSession.updateMany({
     where: { id: sessionId, status: 'scheduled' },
-    data: { status: 'cancelled', discordDirty: true },
+    data: { status: 'cancelled', discordDirty: true, bountyDirty: true },
   });
   if (count === 0) {
     const exists = await ctx.db.gameSession.findUnique({ where: { id: sessionId }, select: { id: true } });

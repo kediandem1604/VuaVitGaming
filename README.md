@@ -66,7 +66,7 @@ Chỉ khi muốn **chạy ở máy** (mục 7) hoặc **chạy test** (mục 8) 
 
 1. Tab **OAuth2** → kéo xuống **OAuth2 URL Generator**.
 2. **Scopes**: tick `bot` và `applications.commands` (lệnh slash `/baocao`, `/bxh`, `/hoso`).
-3. **Bot Permissions**: tick **View Channels**, **Send Messages**, **Embed Links**, **Attach Files** (để bot đăng highlight), **Read Message History** (để bot sửa lại tin đã đăng). Muốn bot **gắn role top 3 mỗi phe** (mục 10) thì tick thêm **Manage Roles**. Muốn bot **tự tạo bốn kênh** (máy chủ riêng, mục 6C.3) thì tick thêm **Manage Channels** — tạo kênh xong có thể tắt quyền này trong Server Settings → Roles → role của bot. Không cần quyền Administrator.
+3. **Bot Permissions**: tick **View Channels**, **Send Messages**, **Embed Links**, **Attach Files** (để bot đăng highlight), **Read Message History** (để bot sửa lại tin đã đăng). Muốn bot **gắn role top 3 mỗi phe** (mục 10) thì tick thêm **Manage Roles**. Muốn bot **tự tạo năm kênh** (máy chủ riêng, mục 6C.3) thì tick thêm **Manage Channels** — tạo kênh xong có thể tắt quyền này trong Server Settings → Roles → role của bot. Không cần quyền Administrator.
 4. Chép **Generated URL** ở dưới cùng, mở trong trình duyệt → chọn server của hội → **Authorize**.
 
 Link mời tương đương (thay `APPLICATION_ID`; link thứ hai có thêm Manage Channels):
@@ -76,7 +76,7 @@ https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot%20applic
 https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot%20applications.commands&permissions=117776
 ```
 
-5. Trong Discord, kiểm tra bot **thấy và gửi được** vào các kênh sẽ dùng (lịch chơi, vote, thông báo, và highlight nếu dùng — ở kênh này bot còn cần **Attach Files**). Kênh riêng tư thì thêm role của bot vào quyền kênh.
+5. Trong Discord, kiểm tra bot **thấy và gửi được** vào các kênh sẽ dùng (lịch chơi, vote, thông báo, và highlight / treo thưởng nếu dùng — ở kênh highlight bot còn cần **Attach Files**). Kênh riêng tư thì thêm role của bot vào quyền kênh.
 
 Bot cần có trong server **trước** lần khởi động đầu: mỗi lần nối Discord, bot quét toàn bộ server để tạo hồ sơ cho người chưa có.
 
@@ -90,7 +90,7 @@ Discord ẩn ID; bật chế độ nhà phát triển để thấy nút chép ID
 
 1. Discord → **User Settings** (bánh răng) → **Advanced** → bật **Developer Mode**.
 2. **ID server**: chuột phải vào tên server (góc trên trái) → **Copy Server ID** → `DISCORD_GUILD_ID`.
-3. **ID kênh**: chuột phải vào kênh → **Copy Channel ID**. Cần ba kênh, và một kênh thứ tư không bắt buộc:
+3. **ID kênh**: chuột phải vào kênh → **Copy Channel ID**. Cần ba kênh, và hai kênh không bắt buộc:
 
    | Biến | Kênh | Bot đăng gì |
    |---|---|---|
@@ -98,6 +98,7 @@ Discord ẩn ID; bật chế độ nhà phát triển để thấy nút chép ID
    | `DISCORD_VOTE_CHANNEL_ID` | Vote | Mỗi hạng mục MVP một tin có menu chọn |
    | `DISCORD_ANNOUNCE_CHANNEL_ID` | Thông báo | Kết quả tri ân, 👑 đổi người hoá thân, tổng kết mùa, nhắc mod |
    | `DISCORD_HIGHLIGHT_CHANNEL_ID` | Highlight *(không bắt buộc)* | Video/ảnh highlight thành viên kèm khi khai điểm (mục 10). Để trống thì form khai điểm không có ô highlight. Bot cần thêm **Attach Files** ở kênh này |
+   | `DISCORD_BOUNTY_CHANNEL_ID` | Treo thưởng *(không bắt buộc)* | Mỗi buổi chơi có mục treo thưởng một tin kèm menu **Tôi đã hoàn thành…**, và dòng `✅ … hoàn thành …` khi mod duyệt (mục 10). Để trống thì treo thưởng chỉ có trên web. Quyền như kênh lịch chơi |
 
    Server nhỏ có thể dùng chung một kênh cho cả ba kênh bắt buộc (điền cùng một ID), nhưng tách riêng dễ theo dõi hơn.
 
@@ -227,6 +228,7 @@ DISCORD_SCHEDULE_CHANNEL_ID=...
 DISCORD_VOTE_CHANNEL_ID=...
 DISCORD_ANNOUNCE_CHANNEL_ID=...
 DISCORD_HIGHLIGHT_CHANNEL_ID=
+DISCORD_BOUNTY_CHANNEL_ID=
 DISCORD_ADMIN_ROLE_IDS=...
 DISCORD_MOD_ROLE_IDS=...
 
@@ -235,6 +237,7 @@ MAIL_FROM=GGD Hub <...@gmail.com>
 ```
 
 - `DISCORD_HIGHLIGHT_CHANNEL_ID` **không bắt buộc**: ID kênh `#highlight` (mục 3). Để trống hoặc bỏ dòng này thì tắt tính năng kèm highlight khi khai điểm.
+- `DISCORD_BOUNTY_CHANNEL_ID` **không bắt buộc**: ID kênh `#treo-thưởng` (mục 3). Để trống hoặc bỏ dòng này thì bot không đăng gì về treo thưởng; treo thưởng vẫn dùng được trên web.
 - `BREVO_API_KEY` và `MAIL_FROM`: mục 4.1. **Không** dùng SMTP (Gmail) trên Railway gói Hobby: Railway chặn SMTP ra ngoài, mọi email nhắc giờ sẽ lỗi (hết giờ chờ kết nối).
 - `SESSION_SECRET` là khoá ký cookie đăng nhập: chuỗi ngẫu nhiên bất kỳ, **ít nhất 32 ký tự**, không ai cần nhớ. Tạo nhanh nếu máy có Node.js: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Đổi khoá này sẽ đăng xuất mọi người.
 - `DATABASE_URL=${{Postgres.DATABASE_URL}}`: gõ **nguyên văn** như vậy (tham chiếu tới dịch vụ `Postgres` ở mục 5.1). Dùng Neon (mục 5.2) thì thay bằng chuỗi direct `…?sslmode=require` của Neon.
@@ -285,7 +288,7 @@ Các bước:
 
 1. Đẩy repo lên GitHub (nhánh có file `render.yaml`).
 2. Mở <https://dashboard.render.com/blueprint/new> → chọn repo → chọn **nhánh** muốn deploy → Render đọc `render.yaml` và liệt kê dịch vụ `ggd-hub` + database `ggd-db`.
-3. Render hỏi giá trị cho các biến đánh dấu `sync: false` — điền như mục 6.3: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, 4 ID kênh (trong đó `DISCORD_HIGHLIGHT_CHANNEL_ID` không bắt buộc — để trống nếu không dùng highlight), `DISCORD_ADMIN_ROLE_IDS`, `DISCORD_MOD_ROLE_IDS`, `BREVO_API_KEY`, `MAIL_FROM`. **Không** cần điền:
+3. Render hỏi giá trị cho các biến đánh dấu `sync: false` — điền như mục 6.3: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, 5 ID kênh (trong đó `DISCORD_HIGHLIGHT_CHANNEL_ID` và `DISCORD_BOUNTY_CHANNEL_ID` không bắt buộc — để trống nếu không dùng highlight / treo thưởng trên Discord), `DISCORD_ADMIN_ROLE_IDS`, `DISCORD_MOD_ROLE_IDS`, `BREVO_API_KEY`, `MAIL_FROM`. **Không** cần điền:
    - `DATABASE_URL` — Render tự nối tới `ggd-db`;
    - `SESSION_SECRET` — Render tự sinh chuỗi ngẫu nhiên;
    - `PUBLIC_URL` — ứng dụng tự dùng địa chỉ `https://….onrender.com` mà Render cấp (biến `RENDER_EXTERNAL_URL`). Gắn tên miền riêng thì thêm `PUBLIC_URL` trong tab **Environment** của dịch vụ.
@@ -370,7 +373,7 @@ Tiếp theo: mục 6C.3.
    nano deploy/server/.env
    ```
 
-   Điền `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID` (mục 2–3), `BREVO_API_KEY` và `MAIL_FROM` (mục 4.1). Đã có sẵn kênh thì điền luôn ID kênh (ba kênh bắt buộc, `#highlight` nếu dùng) và ID role admin/mod (mục 3) rồi sang bước 4. Không sửa `SITE_ADDRESS`, `POSTGRES_PASSWORD`, `SESSION_SECRET`. Lưu: `Ctrl+O`, `Enter`; thoát: `Ctrl+X`.
+   Điền `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID` (mục 2–3), `BREVO_API_KEY` và `MAIL_FROM` (mục 4.1). Đã có sẵn kênh thì điền luôn ID kênh (ba kênh bắt buộc, `#highlight` và `#treo-thưởng` nếu dùng) và ID role admin/mod (mục 3) rồi sang bước 4. Không sửa `SITE_ADDRESS`, `POSTGRES_PASSWORD`, `SESSION_SECRET`. Lưu: `Ctrl+O`, `Enter`; thoát: `Ctrl+X`.
 
 3. **Để bot tự tạo kênh** (bỏ qua nếu đã điền ID kênh). Bot phải có quyền **Manage Channels** và **Attach Files** (mục 2.2):
 
@@ -378,7 +381,7 @@ Tiếp theo: mục 6C.3.
    bash deploy/server/discord-setup.sh
    ```
 
-   Script tải ảnh ứng dụng do GitHub build sẵn (`update.sh` dùng lại), rồi bot tạo nhóm kênh **GGD Hub** gồm `#lịch-chơi`, `#vote-mvp`, `#thông-báo`, `#highlight` — thành viên xem được nhưng không nhắn, chỉ bot đăng tin (nút Tham gia và menu vote vẫn bấm được; `#highlight` nhận video/ảnh thành viên kèm khi khai điểm) — và **tự ghi bốn ID kênh vào `.env`**. Chạy lại không tạo trùng: kênh đã có ID trong `.env` được giữ nguyên, kênh cùng tên được dùng lại; đổi tên kênh hay nhóm trong Discord sau đó không ảnh hưởng gì. Cuối cùng script in danh sách role của server kèm ID: chép ID role admin/mod vào `DISCORD_ADMIN_ROLE_IDS` và `DISCORD_MOD_ROLE_IDS` (`nano deploy/server/.env`).
+   Script tải ảnh ứng dụng do GitHub build sẵn (`update.sh` dùng lại), rồi bot tạo nhóm kênh **GGD Hub** gồm `#lịch-chơi`, `#vote-mvp`, `#thông-báo`, `#highlight`, `#treo-thưởng` — thành viên xem được nhưng không nhắn, chỉ bot đăng tin (nút Tham gia, menu vote và menu treo thưởng vẫn bấm được; `#highlight` nhận video/ảnh thành viên kèm khi khai điểm) — và **tự ghi năm ID kênh vào `.env`**. Chạy lại không tạo trùng: kênh đã có ID trong `.env` được giữ nguyên, kênh cùng tên được dùng lại; đổi tên kênh hay nhóm trong Discord sau đó không ảnh hưởng gì. Cuối cùng script in danh sách role của server kèm ID: chép ID role admin/mod vào `DISCORD_ADMIN_ROLE_IDS` và `DISCORD_MOD_ROLE_IDS` (`nano deploy/server/.env`).
 
 4. **Chạy:**
 
@@ -405,6 +408,7 @@ Mọi lệnh chạy trong terminal SSH của máy, từ thư mục `~/ggd-hub`.
   Muốn giữ package riêng tư thì máy chủ phải đăng nhập một lần: GitHub → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)** → **Generate new token (classic)** → chỉ tick **`read:packages`** → **Generate** → copy token. Rồi trên máy chạy `sudo docker login ghcr.io -u <tên GitHub của bạn>` và dán token khi được hỏi *Password*. Token chỉ dán vào terminal của máy — không gửi qua chat, không ghi vào repo hay `.env`.
 - **Quay về một bản cũ:** ghi `APP_TAG=<mã commit đầy đủ 40 ký tự>` vào `deploy/server/.env` rồi chạy `update.sh` (mã commit lấy ở trang commit trên GitHub). Xoá dòng đó để quay lại theo code mới nhất. Lưu ý: migration database đã chạy không tự lùi lại.
 - **Thêm kênh `#highlight` cho máy đã chạy bản cũ** (chỉ có ba kênh): trước khi chạy lại script, Server Settings → Roles → role của bot → bật **Manage Channels** (nếu đã tắt sau lần tạo kênh đầu — chạy xong lại tắt được) và **Attach Files** (hoặc mời lại bot bằng link thứ hai ở mục 2.2). Rồi chạy lần lượt `git pull`, `bash deploy/server/discord-setup.sh`, `bash deploy/server/update.sh`. Script giữ nguyên ID ba kênh đang có trong `.env` (kể cả khi đã đổi tên kênh hay nhóm, hoặc ID tự điền tay), chỉ tạo thêm `#highlight` và ghi ID của nó vào `.env`. Không muốn dùng highlight thì chỉ cần `update.sh` như thường — biến `DISCORD_HIGHLIGHT_CHANNEL_ID` không bắt buộc.
+- **Thêm kênh `#treo-thưởng` cho máy đã chạy bản cũ** (bản có tính năng treo thưởng): sau khi cập nhật code, chủ máy chạy **một lần** `bash deploy/server/discord-setup.sh` để bot tạo kênh `#treo-thưởng` và ghi `DISCORD_BOUNTY_CHANNEL_ID` vào `.env`. Thứ tự: chờ ✓ xanh của commit mới (ý **Cập nhật** ở trên), rồi `git pull`, `bash deploy/server/discord-setup.sh`, `bash deploy/server/update.sh` (khởi động lại để ứng dụng đọc biến mới). Bot cần **Manage Channels** lúc chạy script (bật tạm như khi thêm `#highlight`, chạy xong lại tắt được) và vẫn cần **Attach Files** (script kiểm tra cho `#highlight`). Script giữ nguyên ID bốn kênh đang có trong `.env`, chỉ tạo `#treo-thưởng` trong cùng nhóm, quyền giống `#lịch-chơi`. Không chạy script thì mọi thứ vẫn chạy — treo thưởng chỉ có trên web, `update.sh` không đòi biến mới.
 - **Xem log ứng dụng:** `cd deploy/server && sudo docker compose logs -f app` (`Ctrl+C` để thoát).
 - **Trạng thái:** `cd deploy/server && sudo docker compose ps`.
 - **Dung lượng ổ đĩa:** `df -h /` — ảnh Docker cũ được dọn sau mỗi lần cập nhật; log mỗi dịch vụ giới hạn 30 MB.
@@ -498,6 +502,7 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 | `DISCORD_VOTE_CHANNEL_ID` | Kênh bot đăng tin vote MVP | |
 | `DISCORD_ANNOUNCE_CHANNEL_ID` | Kênh bot đăng kết quả, 👑, tổng kết mùa | |
 | `DISCORD_HIGHLIGHT_CHANNEL_ID` | Kênh bot đăng highlight thành viên kèm khi khai điểm — *không bắt buộc*; trống hoặc không đặt = tắt highlight (form khai điểm không có ô highlight) | để trống |
+| `DISCORD_BOUNTY_CHANNEL_ID` | Kênh `#treo-thưởng`: tin treo thưởng của từng buổi (menu **Tôi đã hoàn thành…**) và thông báo khi duyệt — *không bắt buộc*; trống hoặc không đặt = bot không đăng gì về treo thưởng (web vẫn chạy) | để trống |
 | `DISCORD_ADMIN_ROLE_IDS` | ID các role được coi là admin, ngăn bằng dấu phẩy | có thể để trống (không ai là admin) |
 | `DISCORD_MOD_ROLE_IDS` | ID các role được coi là mod, ngăn bằng dấu phẩy | có thể để trống |
 | `BREVO_API_KEY` | Khoá API Brevo (mục 4.1). Có thì gửi email qua Brevo và không cần các biến `SMTP_*` | `xkeysib-…`; bắt buộc trên Railway gói Free/Hobby |
@@ -537,6 +542,14 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 5. Điểm chỉ tính khi đã duyệt. Ai dẫn đầu một role trong tháng thì **hoá thân** role đó: nhân vật của role trên **Đại sảnh hoá thân** mang tên người ấy. Đổi người dẫn đầu → bot đăng `👑 <tên> đã hoá thân <role> mùa YYYY-MM!` vào kênh thông báo.
 6. **Mùa** = một tháng theo giờ Việt Nam. **09:00 ngày 3** tháng sau, bot nhắc mod duyệt nốt hàng chờ của mùa cũ. **00:05 ngày 4**, mùa tự **chốt**: lần khai còn chờ của mùa đó bị từ chối ("mùa đã chốt"), người giữ mỗi role được lưu lại, bot đăng bảng tổng kết. Không phải làm gì bằng tay. Trận chơi cuối tháng mà duyệt đầu tháng sau vẫn tính cho mùa cũ (theo ngày chơi).
 7. **Role Discord top phe**: bot tự tạo 9 role `🪿 Top 1–3 Ngỗng`, `🦆 Top 1–3 Vịt`, `🐦 Top 1–3 Phe thứ 3` và mỗi phút gắn cho 3 người đứng đầu bảng **Tổng điểm theo phe** của mùa đang diễn ra (gỡ khỏi người rớt hạng, kể cả ai tự gắn tay). Mỗi người chỉ mang **một** role — thành tích tốt nhất (hạng cao hơn; cùng hạng ở hai phe thì lấy phe nhiều điểm hơn); chỗ họ nhường ở phe kia, và chỗ của người đã rời server, được đôn người kế tiếp lên. Sang tháng mới các role chuyển theo bảng mùa mới. Cần bật **Manage Roles** cho role của bot (Server Settings → Roles) và kéo role của bot **lên trên** chín role này; thiếu thì log chỉ cảnh báo một lần, mọi thứ khác vẫn chạy. Đổi tên, màu hay vị trí các role tuỳ ý — bot nhớ theo ID; xoá role thì bot tạo lại.
+
+### Treo thưởng
+
+1. **Đặt mục treo thưởng** (mod/admin): **Quản trị → Treo thưởng** → tên, mô tả (không bắt buộc), điểm (1–50), role (hoặc *Không gắn role*), áp dụng cho **mọi buổi** hoặc **một buổi** chưa kết thúc. Mục đã có người nhận không xoá được, chỉ **Tắt**; sửa điểm sau đó không đổi điểm của lần nhận đã có.
+2. **Người chơi nhận thưởng** sau khi làm được: web **Hôm nay** → thẻ **Treo thưởng** cạnh buổi chơi → **Tôi đã hoàn thành**, hoặc trong Discord kênh `#treo-thưởng` (khi đã đặt `DISCORD_BOUNTY_CHANNEL_ID`) → menu **Tôi đã hoàn thành…** dưới tin của buổi, chọn được nhiều mục một lần; bot trả lời riêng từng mục ("Đã gửi, chờ mod duyệt" hoặc lý do không nhận được). Chỉ người đã **tham gia** buổi mới nhận được, từ ngày chơi tới 3 ngày sau, mỗi mục một lần mỗi buổi.
+3. **Tin trong `#treo-thưởng`**: mỗi buổi chưa kết thúc có ít nhất một mục áp dụng thì bot đăng một tin (🎯 Treo thưởng — chế độ, giờ, ngày; danh sách mục kèm điểm). Mục thay đổi, buổi đổi giờ hay bị huỷ thì bot sửa tin trong vòng khoảng một phút (buổi huỷ: tin ghi *Buổi đã huỷ*, bỏ menu). Menu Discord có tối đa 25 mục — hơn thế thì tin ghi rõ, các mục còn lại nhận trên web.
+4. **Duyệt**: **Quản trị → Duyệt điểm → Treo thưởng chờ duyệt** → **Duyệt** hoặc **Từ chối** (ghi lý do; người nhận được DM). Duyệt xong bot đăng `✅ <tên> hoàn thành <mục> +<điểm>` vào `#treo-thưởng`. Duyệt nhầm thì **Huỷ duyệt** ở **Đã duyệt gần đây** (ghi lý do; người nhận được DM). Luật như duyệt lần khai: mod không tự duyệt phần của mình, mùa đã chốt thì không đổi được nữa; lúc chốt mùa, lần nhận còn chờ bị từ chối.
+5. **Điểm**: mục gắn role cộng điểm vào điểm mùa của role đó (bảng xếp hạng, hoá thân, Top 3 mỗi phe, tổng theo phe) nhưng **không** tăng số trận; mục không gắn role chỉ cộng vào **Tổng điểm theo phe**, tab **Cả 3 phe**.
 
 ### Cài đặt (admin)
 

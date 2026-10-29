@@ -1,7 +1,8 @@
 /**
  * `DiscordNotifier` thật trên discord.js: DM, kênh thông báo, tin buổi chơi (embed +
  * nút, dựng bởi `buildSessionMessage`), tin vote (embed + menu, dựng bởi
- * `buildVoteMessage`) và highlight (file kèm một dòng chú thích trong kênh `#highlight`).
+ * `buildVoteMessage`), highlight (file kèm một dòng chú thích trong kênh `#highlight`) và treo
+ * thưởng (tin của từng buổi dựng bởi `buildBountyBoardMessage`, thông báo duyệt trong `#treo-thưởng`).
  * Mọi lỗi Discord được ném ra — service coi đó là "đăng bù sau" (cờ `discordDirty`,
  * `resultPending`) hay "thử lại sau" (highlight); riêng "Unknown Message" khi sửa tin
  * thành `MessageGoneError` để service đăng lại (tin buổi) hay bỏ qua (tin vote) thay vì
@@ -14,8 +15,9 @@ import { DiscordAPIError, GuildPremiumTier, RESTJSONErrorCodes, escapeMarkdown }
 import type { APIEmbed, Client, SendableChannels } from 'discord.js';
 import type { Config } from '../config.js';
 import { HighlightChannelError, HighlightRejectedTooLargeError, MessageGoneError } from '../ports.js';
-import type { BountyCompletedPost, DiscordNotifier, HighlightPost, SessionView, VotePrompt } from '../ports.js';
-import { buildSessionMessage, buildVoteMessage } from './embeds.js';
+import type { BountyBoardView, BountyCompletedPost, DiscordNotifier, HighlightPost, SessionView, VotePrompt } from '../ports.js';
+import { escapeDiscordMarkdown } from '../lib/discord-text.js';
+import { buildBountyBoardMessage, buildSessionMessage, buildVoteMessage } from './embeds.js';
 
 /** Giới hạn tải lên của Discord theo cấp boost (spec §5): chưa boost / cấp 1 → 10 MiB; cấp 2–3 → 50 MiB (trần của app). */
 const UPLOAD_LIMIT_BASE = 10 * 1024 * 1024;
@@ -144,12 +146,37 @@ export class DiscordJsNotifier implements DiscordNotifier {
   }
 
   /**
-   * TẠM (Task 3 cài thật): kênh `#treo-thưởng` (`DISCORD_BOUNTY_CHANNEL_ID`) chưa có trong cấu hình nên
-   * chưa đăng gì — chỉ ghi log để biết lần duyệt đã tới đây. Bản thật đăng
-   * `✅ {tên} hoàn thành **{mục}** +{điểm}` (escape Markdown, không ping) như mô tả ở `BountyCompletedPost`.
+   * Đăng `✅ {tên} hoàn thành **{mục}** +{điểm}` vào `#treo-thưởng` (escape Markdown tên người và tên
+   * mục, không ping ai). Chưa cấu hình `DISCORD_BOUNTY_CHANNEL_ID` → không làm gì; lỗi Discord ném ra
+   * (nơi gọi chỉ ghi log).
    */
   async postBountyCompleted(post: BountyCompletedPost): Promise<void> {
-    console.info(`[bot] Chưa cấu hình kênh treo thưởng — bỏ qua thông báo: ${post.memberName} hoàn thành ${post.bountyTitle} +${post.points}`);
+    const channelId = this.config.discord.bountyChannelId;
+    if (channelId === null) return;
+    const channel = await this.sendableChannel(channelId, 'treo thưởng');
+    const content = `✅ ${escapeDiscordMarkdown(post.memberName)} hoàn thành **${escapeDiscordMarkdown(post.bountyTitle)}** +${post.points}`;
+    await channel.send({ content, allowedMentions: { parse: [] } });
+  }
+
+  /** Đăng tin treo thưởng của buổi vào kênh `channelId`; trả về id tin. */
+  async publishBountyBoard(channelId: string, view: BountyBoardView): Promise<string> {
+    const channel = await this.sendableChannel(channelId, 'treo thưởng');
+    const message = await channel.send(buildBountyBoardMessage(view));
+    return message.id;
+  }
+
+  /**
+   * Sửa tin treo thưởng đã đăng (kể cả thành "Buổi đã huỷ", bỏ menu). Tin đã bị xoá (10008) hay kênh
+   * đã bị xoá (10003) → `MessageGoneError` để service đăng tin mới; lỗi khác giữ nguyên.
+   */
+  async updateBountyBoard(channelId: string, messageId: string, view: BountyBoardView): Promise<void> {
+    try {
+      const channel = await this.sendableChannel(channelId, 'treo thưởng');
+      await channel.messages.edit(messageId, buildBountyBoardMessage(view));
+    } catch (err) {
+      if (isUnknownChannel(err)) throw new MessageGoneError(`Kênh treo thưởng ${channelId} không còn tồn tại`, { cause: err });
+      throw asMessageGone(err, messageId);
+    }
   }
 
   private scheduleChannel(): Promise<SendableChannels> {

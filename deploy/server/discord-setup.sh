@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Để bot tự tạo nhóm kênh "GGD Hub" (lịch-chơi, vote-mvp, thông-báo, highlight) trên server
-# Discord và ghi ID bốn kênh vào deploy/server/.env (README mục 6C.3). Chạy lại an toàn: ID
+# Để bot tự tạo nhóm kênh "GGD Hub" (lịch-chơi, vote-mvp, thông-báo, highlight, treo-thưởng) trên
+# server Discord và ghi ID năm kênh vào deploy/server/.env (README mục 6C.3). Chạy lại an toàn: ID
 # kênh đã có trong .env được giữ nguyên (kể cả khi kênh/nhóm đã đổi tên), kênh cùng tên được
-# dùng lại (máy đã có ba kênh đầu chỉ được thêm #highlight). Cuối cùng in danh sách role của
+# dùng lại (máy đã có các kênh cũ chỉ được thêm kênh còn thiếu, vd #treo-thưởng). Cuối cùng in danh sách role của
 # server kèm ID để điền role admin/mod.
 #
 #   bash deploy/server/discord-setup.sh            # tải ảnh build sẵn từ GitHub
@@ -52,7 +52,7 @@ out="$("${compose[@]}" run --rm --no-deps -T app node dist/server/tools/setup-di
 written=0
 while IFS= read -r line; do
   case "$line" in
-    DISCORD_SCHEDULE_CHANNEL_ID=* | DISCORD_VOTE_CHANNEL_ID=* | DISCORD_ANNOUNCE_CHANNEL_ID=* | DISCORD_HIGHLIGHT_CHANNEL_ID=*)
+    DISCORD_SCHEDULE_CHANNEL_ID=* | DISCORD_VOTE_CHANNEL_ID=* | DISCORD_ANNOUNCE_CHANNEL_ID=* | DISCORD_HIGHLIGHT_CHANNEL_ID=* | DISCORD_BOUNTY_CHANNEL_ID=*)
       key="${line%%=*}"
       if grep -qE "^${key}=" "$env_file"; then
         sed -i "s|^${key}=.*|${line}|" "$env_file"
@@ -64,14 +64,14 @@ while IFS= read -r line; do
   esac
 done <<<"$out"
 
-if [ "$written" -ne 4 ]; then
+if [ "$written" -ne 5 ]; then
   echo "Không nhận đủ ID kênh từ bot — xem thông báo phía trên." >&2
   exit 1
 fi
 
 cat <<EOF
 
-Đã ghi ID 4 kênh vào deploy/server/.env.
+Đã ghi ID 5 kênh vào deploy/server/.env.
 Tiếp theo:
   1. Chép ID role admin/mod ở danh sách trên vào DISCORD_ADMIN_ROLE_IDS và DISCORD_MOD_ROLE_IDS:
        nano deploy/server/.env

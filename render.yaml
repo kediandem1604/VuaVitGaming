@@ -45,6 +45,9 @@ services:
       # Không bắt buộc: để trống = tắt kèm highlight khi khai điểm.
       - key: DISCORD_HIGHLIGHT_CHANNEL_ID
         sync: false
+      # Không bắt buộc: để trống = tắt phần Discord của treo thưởng (kênh #treo-thưởng).
+      - key: DISCORD_BOUNTY_CHANNEL_ID
+        sync: false
       - key: DISCORD_ADMIN_ROLE_IDS
         sync: false
       - key: DISCORD_MOD_ROLE_IDS

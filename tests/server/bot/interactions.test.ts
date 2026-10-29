@@ -10,6 +10,7 @@ import type {
   SelectMenuInteractionLike,
 } from '../../../src/server/bot/interactions.js';
 import type { Ctx } from '../../../src/server/ctx.js';
+import { createBounty } from '../../../src/server/modules/bounties/admin.js';
 import { closeVoteRound } from '../../../src/server/modules/mvp/votes.js';
 import { endSession } from '../../../src/server/modules/sessions/end.js';
 import { cancelSession, createSession, getSessionView } from '../../../src/server/modules/sessions/service.js';
@@ -407,4 +408,99 @@ test('unexpected errors while voting are logged and answered generically', async
   expect(errors).toHaveBeenCalledTimes(1);
   expect(String(errors.mock.calls[0]?.[0])).toContain(`vote:${roundId}:${kills.id}`);
   expect(String(errors.mock.calls[0]?.[1] ?? '')).not.toBe(''); // lỗi gốc đi kèm trong log
+});
+
+// ---------------------------------------------------------------------------
+// Menu treo thưởng
+// ---------------------------------------------------------------------------
+
+async function bountyOf(title: string, sessionId: number | null = null): Promise<number> {
+  const mod = await testDb.member.findFirstOrThrow({ where: { accessLevel: 'admin' } });
+  return (await createBounty(ctx, mod.id, { title, description: null, points: 5, roleId: null, sessionId })).id;
+}
+
+test('bounty menu defers, upserts the presser and claims each chosen bounty with one line per item', async () => {
+  const sessionId = await openSession();
+  const kills = await bountyOf('Giết *3* ngỗng', sessionId);
+  const survive = await bountyOf('Sống sót');
+  await handleInteraction(ctx, new FakeInteraction(`att:join:${sessionId}`));
+
+  const i = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(kills), String(survive)], sessionId });
+  await handleInteraction(ctx, i);
+  expect(i.steps).toEqual([
+    { step: 'defer', going: 1 },
+    {
+      step: 'edit',
+      content: '✅ **Giết \\*3\\* ngỗng** — Đã gửi, chờ mod duyệt\n✅ **Sống sót** — Đã gửi, chờ mod duyệt',
+      going: 1,
+    },
+  ]);
+  const presser = await testDb.member.findUniqueOrThrow({ where: { discordId: 'u1' } });
+  const claims = await testDb.bountyClaim.findMany({ orderBy: { bountyId: 'asc' } });
+  expect(claims.map((c) => ({ bountyId: c.bountyId, memberId: c.memberId, sessionId: c.sessionId, status: c.status, source: c.source }))).toEqual([
+    { bountyId: kills, memberId: presser.id, sessionId, status: 'pending', source: 'discord' },
+    { bountyId: survive, memberId: presser.id, sessionId, status: 'pending', source: 'discord' },
+  ]);
+
+  // Chọn lại: một mục đã nhận, mục kia vẫn báo riêng.
+  const again = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(survive)] });
+  await handleInteraction(ctx, again);
+  expect(again.steps.at(-1)).toMatchObject({ step: 'edit', content: '❌ **Sống sót** — Bạn đã nhận mục này ở buổi này rồi' });
+  expect(errors).not.toHaveBeenCalled();
+});
+
+test('a new Discord user gets a profile but is told they did not attend; bad values are reported per item', async () => {
+  const sessionId = await openSession();
+  const survive = await bountyOf('Sống sót');
+  const other = await openSession();
+  const elsewhere = await bountyOf('Chỉ buổi khác', other);
+
+  const i = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(survive)], member: guildMember('new-1', 'Người mới') });
+  await handleInteraction(ctx, i);
+  expect(await testDb.member.findUnique({ where: { discordId: 'new-1' } })).toMatchObject({ displayName: 'Người mới' });
+  expect(i.steps.at(-1)).toMatchObject({ content: '❌ **Sống sót** — Bạn chưa tham gia buổi này' });
+
+  await handleInteraction(ctx, new FakeInteraction(`att:join:${sessionId}`));
+  const mixed = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(elsewhere), 'abc', String(survive), String(survive)] });
+  await handleInteraction(ctx, mixed);
+  expect(mixed.steps.at(-1)).toMatchObject({
+    content: [
+      '❌ **Chỉ buổi khác** — Mục treo thưởng không áp dụng cho buổi này',
+      '❌ **Mục không rõ** — Mục treo thưởng không áp dụng cho buổi này',
+      '✅ **Sống sót** — Đã gửi, chờ mod duyệt',
+    ].join('\n'),
+  });
+  expect(await testDb.bountyClaim.count()).toBe(1);
+});
+
+test('unexpected errors on one bounty are logged and answered generically without blocking the others', async () => {
+  const sessionId = await openSession();
+  const a = await bountyOf('A');
+  const b = await bountyOf('B');
+  await handleInteraction(ctx, new FakeInteraction(`att:join:${sessionId}`));
+
+  // Giao dịch ghi lần nhận đầu tiên hỏng (DB chập chờn); lần sau chạy thật.
+  let failNext = true;
+  const flaky = new Proxy(testDb, {
+    get(target, prop) {
+      if (prop === '$transaction' && failNext) {
+        failNext = false;
+        return async () => {
+          throw new Error('DB chập chờn');
+        };
+      }
+      const value: unknown = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const i = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(a), String(b)] });
+  await handleInteraction({ ...ctx, db: flaky }, i);
+  expect(i.steps.at(-1)?.content).toBe('❌ **A** — Có lỗi xảy ra, thử lại sau\n✅ **B** — Đã gửi, chờ mod duyệt');
+  expect(errors).toHaveBeenCalledWith(expect.stringContaining('Lỗi nhận treo thưởng'), expect.any(Error));
+});
+
+test('bounty menu outside the main guild is refused', async () => {
+  const i = new FakeInteraction('bounty:claim:1', { kind: 'select', values: ['1'], guildId: 'other' });
+  await handleInteraction(ctx, i);
+  expect(i.steps).toEqual([{ step: 'reply', content: 'Bot chỉ dùng trong server chính', going: 0 }]);
 });

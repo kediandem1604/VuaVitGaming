@@ -1,6 +1,6 @@
 /**
  * Kế hoạch tạo kênh Discord cho GGD Hub (dùng bởi `setup-discord.ts`): một nhóm kênh
- * "GGD Hub" với bốn kênh bot đăng tin — lịch chơi, vote MVP, thông báo, highlight. Chạy lại
+ * "GGD Hub" với năm kênh bot đăng tin — lịch chơi, vote MVP, thông báo, highlight, treo thưởng. Chạy lại
  * an toàn, theo thứ tự ưu tiên cho từng kênh:
  *
  * 1. ID đã có trong `.env` mà vẫn là kênh văn bản của server → giữ nguyên, kể cả khi admin đã
@@ -9,7 +9,8 @@
  *
  * Kênh tạo mới vào nhóm chứa kênh giữ được đầu tiên (nhóm đã đổi tên vẫn là nhóm của hội);
  * không kênh nào giữ được nằm trong nhóm thì tìm/tạo nhóm "GGD Hub" theo tên — chỉ khi thật sự
- * có kênh cần tìm hay tạo. Máy chủ đã có ba kênh đầu từ bản trước chỉ được thêm `#highlight`.
+ * có kênh cần tìm hay tạo. Máy chủ đã có các kênh cũ từ bản trước chỉ được thêm kênh còn thiếu
+ * (`#highlight`, `#treo-thưởng`).
  *
  * Tách khỏi discord.js qua `ChannelAdmin` để test được bằng bản giả.
  */
@@ -22,7 +23,8 @@ export interface ChannelPlan {
     | 'DISCORD_SCHEDULE_CHANNEL_ID'
     | 'DISCORD_VOTE_CHANNEL_ID'
     | 'DISCORD_ANNOUNCE_CHANNEL_ID'
-    | 'DISCORD_HIGHLIGHT_CHANNEL_ID';
+    | 'DISCORD_HIGHLIGHT_CHANNEL_ID'
+    | 'DISCORD_BOUNTY_CHANNEL_ID';
   name: string;
   topic: string;
   /** Bot được cấp thêm Attach Files trong kênh (đăng file highlight). */
@@ -51,6 +53,12 @@ export const CHANNELS: readonly ChannelPlan[] = [
     topic: 'Highlight người chơi gửi kèm khi khai điểm.',
     botAttachFiles: true,
   },
+  {
+    // Quyền như #lịch-chơi: mọi người xem, không nhắn; bot đăng tin và menu.
+    envKey: 'DISCORD_BOUNTY_CHANNEL_ID',
+    name: 'treo-thưởng',
+    topic: 'Treo thưởng mỗi buổi chơi — chọn mục đã hoàn thành trong menu dưới tin của bot.',
+  },
 ];
 
 /** ID kênh đã biết (đọc từ `.env`) theo tên biến; thiếu hoặc trống = chưa biết. */
@@ -74,7 +82,7 @@ export interface EnsuredChannel extends ChannelPlan {
 }
 
 export interface EnsureResult {
-  /** Nhóm chứa kênh tìm/tạo theo tên; `null` khi cả bốn kênh đều giữ theo ID (không cần nhóm). */
+  /** Nhóm chứa kênh tìm/tạo theo tên; `null` khi mọi kênh đều giữ theo ID (không cần nhóm). */
   categoryId: string | null;
   categoryCreated: boolean;
   channels: EnsuredChannel[];

@@ -1,6 +1,7 @@
 /**
- * Dựng tin Discord của một buổi chơi (embed + hàng nút) từ `SessionView` và tin vote
- * một hạng mục (embed + menu chọn) từ `VotePrompt`. Hàm thuần, trả JSON thuần (kiểu
+ * Dựng tin Discord của một buổi chơi (embed + hàng nút) từ `SessionView`, tin vote
+ * một hạng mục (embed + menu chọn) từ `VotePrompt` và tin treo thưởng của một buổi (embed +
+ * menu chọn nhiều) từ `BountyBoardView`. Hàm thuần, trả JSON thuần (kiểu
  * API của Discord) nên test không cần kết nối; `DiscordJsNotifier` gửi/sửa đúng
  * payload này. Các giới hạn của Discord (field 1024 ký tự, tiêu đề 256, nhãn menu
  * 100, tối đa 25 lựa chọn) được tôn trọng ở đây để tin không bao giờ bị từ chối.
@@ -14,8 +15,9 @@ import type {
   APIEmbedField,
   APIStringSelectComponent,
 } from 'discord.js';
+import { escapeDiscordMarkdown } from '../lib/discord-text.js';
 import { formatVnDay, formatVnTime } from '../lib/time.js';
-import type { SessionView, VotePrompt } from '../ports.js';
+import type { BountyBoardView, SessionView, VotePrompt } from '../ports.js';
 import { encodeCustomId } from './custom-ids.js';
 
 export interface SessionMessage {
@@ -154,4 +156,71 @@ function clipLabel(s: string): string {
     out += ch;
   }
   return `${out}…`;
+}
+
+// ---------------------------------------------------------------------------
+// Tin treo thưởng
+// ---------------------------------------------------------------------------
+
+export interface BountyBoardMessage {
+  embeds: APIEmbed[];
+  components: APIActionRowComponent<APIStringSelectComponent>[];
+}
+
+/** Cam — màu tin treo thưởng; xám khi buổi huỷ (như tin buổi). */
+const BOUNTY_COLOUR = 0xf97316;
+const EMBED_DESCRIPTION_MAX = 4096;
+
+/**
+ * Tin treo thưởng của một buổi (spec treo thưởng §7): tiêu đề "🎯 Treo thưởng — {chế độ} {giờ} {ngày}",
+ * mỗi mục một dòng `{icon} **{tên}** +{điểm}` (mô tả, nếu có, ở dòng ngay dưới; tên và mô tả escape
+ * Markdown) và menu chọn nhiều "Tôi đã hoàn thành…" (giá trị là id mục). Menu Discord có tối đa 25
+ * lựa chọn: hơn 25 mục thì menu có 25 mục đầu và chân tin ghi rõ (danh sách vẫn đủ). Danh sách dài
+ * quá giới hạn mô tả embed thì bớt mục cuối và ghi "… và X mục nữa". Buổi huỷ → "Buổi đã huỷ", không
+ * menu. Không có mục nào là lỗi lập trình (service không đăng tin khi đó; Discord từ chối menu rỗng).
+ */
+export function buildBountyBoardMessage(view: BountyBoardView): BountyBoardMessage {
+  const title = clip(`🎯 Treo thưởng — ${view.modeName} ${formatVnTime(view.startsAt)} ${formatVnDay(view.startsAt)}`, EMBED_TITLE_MAX);
+  if (view.status === 'cancelled') {
+    return { embeds: [{ title, description: 'Buổi đã huỷ', color: COLOURS.cancelled }], components: [] };
+  }
+  if (view.bounties.length === 0) throw new Error(`Tin treo thưởng buổi ${view.sessionId} không có mục nào`);
+
+  const embed: APIEmbed = { title, description: bountyList(view.bounties), color: BOUNTY_COLOUR };
+  const inMenu = view.bounties.slice(0, SELECT_OPTIONS_MAX);
+  if (inMenu.length < view.bounties.length) {
+    embed.footer = { text: `Menu chỉ có ${inMenu.length}/${view.bounties.length} mục đầu — nhận các mục còn lại trên web` };
+  }
+
+  const menu: APIStringSelectComponent = {
+    type: ComponentType.StringSelect,
+    custom_id: encodeCustomId({ kind: 'bounty', sessionId: view.sessionId }),
+    placeholder: 'Tôi đã hoàn thành…',
+    min_values: 1,
+    max_values: inMenu.length,
+    options: inMenu.map((b) => ({ label: clipLabel(`${b.icon} ${b.title}`), value: String(b.id), description: `+${b.points}` })),
+  };
+  return { embeds: [embed], components: [{ type: ComponentType.ActionRow, components: [menu] }] };
+}
+
+/** Các dòng mục; quá 4096 ký tự thì bớt mục cuối (ít nhất có thể) và ghi "… và X mục nữa". */
+function bountyList(bounties: BountyBoardView['bounties']): string {
+  const blocks = bounties.map((b) => {
+    const head = `${b.icon} **${escapeDiscordMarkdown(b.title)}** +${b.points}`;
+    return b.description ? `${head}\n${descriptionLine(b.description)}` : head;
+  });
+  for (let shown = blocks.length; shown > 0; shown -= 1) {
+    const hidden = blocks.length - shown;
+    const text = blocks.slice(0, shown).join('\n') + (hidden > 0 ? `\n… và ${hidden} mục nữa` : '');
+    if (text.length <= EMBED_DESCRIPTION_MAX) return text;
+  }
+  return `${blocks.length} mục`;
+}
+
+/**
+ * Mô tả mục thành một dòng: gộp xuống dòng thành dấu cách, escape Markdown, và chèn `\` trước ký tự
+ * chỉ có nghĩa ở đầu dòng (`#`, `>`, `-`, `1.`) — mô tả đứng đầu dòng nên sẽ thành tiêu đề/trích dẫn/danh sách.
+ */
+function descriptionLine(description: string): string {
+  return escapeDiscordMarkdown(description.replace(/\s+/g, ' ').trim()).replace(/^([#>-]|\d+\.)/, '\\$1');
 }

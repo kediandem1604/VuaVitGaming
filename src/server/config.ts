@@ -40,6 +40,8 @@ export type Config = {
     announceChannelId: string;
     /** Kênh `#highlight`; `null` = chưa đặt `DISCORD_HIGHLIGHT_CHANNEL_ID` → tính năng highlight tắt. */
     highlightChannelId: string | null;
+    /** Kênh `#treo-thưởng`; `null` = chưa đặt `DISCORD_BOUNTY_CHANNEL_ID` → phần Discord của treo thưởng tắt (web vẫn chạy). */
+    bountyChannelId: string | null;
     adminRoleIds: string[];
     modRoleIds: string[];
   };
@@ -115,6 +117,7 @@ const envSchema = z.object({
   DISCORD_VOTE_CHANNEL_ID: requiredString,
   DISCORD_ANNOUNCE_CHANNEL_ID: requiredString,
   DISCORD_HIGHLIGHT_CHANNEL_ID: optionalString,
+  DISCORD_BOUNTY_CHANNEL_ID: optionalString,
   DISCORD_ADMIN_ROLE_IDS: commaList,
   DISCORD_MOD_ROLE_IDS: commaList,
   BREVO_API_KEY: optionalString,
@@ -169,6 +172,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       voteChannelId: e.DISCORD_VOTE_CHANNEL_ID,
       announceChannelId: e.DISCORD_ANNOUNCE_CHANNEL_ID,
       highlightChannelId: e.DISCORD_HIGHLIGHT_CHANNEL_ID ?? null,
+      bountyChannelId: e.DISCORD_BOUNTY_CHANNEL_ID ?? null,
       adminRoleIds: e.DISCORD_ADMIN_ROLE_IDS,
       modRoleIds: e.DISCORD_MOD_ROLE_IDS,
     },

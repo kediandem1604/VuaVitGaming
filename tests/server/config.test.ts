@@ -117,6 +117,13 @@ test('DISCORD_HIGHLIGHT_CHANNEL_ID is optional: unset or blank → null, otherwi
   expect(loadConfig({ ...base, DISCORD_HIGHLIGHT_CHANNEL_ID: '4' }).discord.highlightChannelId).toBe('4');
 });
 
+test('DISCORD_BOUNTY_CHANNEL_ID is optional: unset or blank → null, otherwise the id', () => {
+  expect(loadConfig(base).discord.bountyChannelId).toBeNull();
+  expect(loadConfig({ ...base, DISCORD_BOUNTY_CHANNEL_ID: '' }).discord.bountyChannelId).toBeNull();
+  expect(loadConfig({ ...base, DISCORD_BOUNTY_CHANNEL_ID: '  ' }).discord.bountyChannelId).toBeNull();
+  expect(loadConfig({ ...base, DISCORD_BOUNTY_CHANNEL_ID: '5' }).discord.bountyChannelId).toBe('5');
+});
+
 test('on Render, a missing PUBLIC_URL falls back to RENDER_EXTERNAL_URL', () => {
   const onRender = { ...base, RENDER_EXTERNAL_URL: 'https://ggd-hub.onrender.com' };
   expect(loadConfig({ ...onRender, PUBLIC_URL: undefined }).publicUrl).toBe('https://ggd-hub.onrender.com');

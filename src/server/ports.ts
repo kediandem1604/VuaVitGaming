@@ -57,6 +57,19 @@ export interface BountyCompletedPost {
   points: number;
 }
 
+/**
+ * Tin treo thưởng của một buổi trong `#treo-thưởng` (spec treo thưởng §7): tiêu đề theo buổi, danh
+ * sách mục áp dụng (đã sắp: điểm giảm dần rồi id) và menu "Tôi đã hoàn thành…" khi buổi còn mở.
+ * Buổi huỷ → tin ghi "Buổi đã huỷ", không menu.
+ */
+export interface BountyBoardView {
+  sessionId: number;
+  startsAt: Date;
+  modeName: string;
+  status: 'scheduled' | 'cancelled';
+  bounties: { id: number; title: string; description: string | null; points: number; /** Icon role, hoặc 🎯 khi mục không gắn role. */ icon: string }[];
+}
+
 export interface DiscordNotifier {
   sendDm(discordId: string, text: string): Promise<void>;
   publishSession(view: SessionView): Promise<string>; // trả về message id
@@ -80,6 +93,10 @@ export interface DiscordNotifier {
    * không làm gì; lỗi Discord ném ra — nơi gọi chỉ ghi log.
    */
   postBountyCompleted(post: BountyCompletedPost): Promise<void>;
+  /** Đăng tin treo thưởng của buổi vào kênh `channelId`; trả về id tin. */
+  publishBountyBoard(channelId: string, view: BountyBoardView): Promise<string>;
+  /** Sửa tin treo thưởng đã đăng; tin hay kênh không còn → `MessageGoneError`. */
+  updateBountyBoard(channelId: string, messageId: string, view: BountyBoardView): Promise<void>;
 }
 
 /**

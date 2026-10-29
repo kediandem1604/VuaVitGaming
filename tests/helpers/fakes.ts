@@ -1,5 +1,6 @@
 import { MessageGoneError, RankRolePermissionError } from '../../src/server/ports.js';
 import type {
+  BountyBoardView,
   BountyCompletedPost,
   DiscordNotifier,
   GuildDirectory,
@@ -31,7 +32,8 @@ export class FakeMailer implements Mailer {
  * `postHighlight` đăng vào kênh `highlightChannelId`, gọi `onPostHighlight` (nếu có) ngay trước khi
  * trả kết quả — để test chen một thao tác vào giữa lúc "đang tải lên"; có `failPostWith` thì ném lỗi
  * đó mà không đăng gì (Discord từ chối); `deleteMessage` chỉ ghi lại; `postBountyCompleted` ghi vào
- * `bountyCompletions`.
+ * `bountyCompletions`. Tin treo thưởng: `publishBountyBoard` dùng chung bộ đếm `msg-<n>`, ghi vào
+ * `bountyBoards`; `updateBountyBoard` ghi vào `bountyBoardUpdates`, id trong `goneMessageIds` → `MessageGoneError`.
  */
 export class FakeNotifier implements DiscordNotifier {
   dms: { discordId: string; text: string }[] = [];
@@ -44,6 +46,8 @@ export class FakeNotifier implements DiscordNotifier {
   deletedMessages: { channelId: string; messageId: string }[] = [];
   /** Thông báo duyệt treo thưởng đã "đăng" vào `#treo-thưởng`. */
   bountyCompletions: BountyCompletedPost[] = [];
+  bountyBoards: { channelId: string; messageId: string; view: BountyBoardView }[] = [];
+  bountyBoardUpdates: { channelId: string; messageId: string; view: BountyBoardView }[] = [];
   /** Giới hạn tải lên giả (mặc định 10 MiB — server chưa boost); gán lại để giả cấp 2–3. */
   uploadLimit = 10 * 1024 * 1024;
   highlightChannelId = 'ch-highlight';
@@ -114,6 +118,19 @@ export class FakeNotifier implements DiscordNotifier {
   async postBountyCompleted(post: BountyCompletedPost): Promise<void> {
     this.assertUp();
     this.bountyCompletions.push(post);
+  }
+
+  async publishBountyBoard(channelId: string, view: BountyBoardView): Promise<string> {
+    this.assertUp();
+    const messageId = this.nextMessageId();
+    this.bountyBoards.push({ channelId, messageId, view });
+    return messageId;
+  }
+
+  async updateBountyBoard(channelId: string, messageId: string, view: BountyBoardView): Promise<void> {
+    this.assertUp();
+    if (this.goneMessageIds.has(messageId)) throw new MessageGoneError(`FakeNotifier: tin ${messageId} đã bị xoá`);
+    this.bountyBoardUpdates.push({ channelId, messageId, view });
   }
 
   private assertUp(): void {

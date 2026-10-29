@@ -1,6 +1,7 @@
 /**
  * Mã `custom_id` của nút và menu Discord (global constraints):
  *   `att:join:<sessionId>`  `att:leave:<sessionId>`  `vote:<roundId>:<categoryId>`
+ *   `bounty:claim:<sessionId>` (menu "Tôi đã hoàn thành…" trong `#treo-thưởng`)
  *
  * `parseCustomId` là ranh giới tin cậy với dữ liệu Discord gửi về: mọi chuỗi không
  * đúng dạng → `null`, không bao giờ ném lỗi. Id phải là số nguyên dương ở dạng
@@ -10,7 +11,8 @@
 
 export type CustomIdData =
   | { kind: 'att'; action: 'join' | 'leave'; sessionId: number }
-  | { kind: 'vote'; roundId: number; categoryId: number };
+  | { kind: 'vote'; roundId: number; categoryId: number }
+  | { kind: 'bounty'; sessionId: number };
 
 /** Giới hạn độ dài `custom_id` của Discord. */
 const MAX_LENGTH = 100;
@@ -19,6 +21,7 @@ const POSITIVE_INT = /^[1-9]\d*$/;
 
 export function encodeCustomId(d: CustomIdData): string {
   if (d.kind === 'att') return `att:${d.action}:${assertId(d.sessionId)}`;
+  if (d.kind === 'bounty') return `bounty:claim:${assertId(d.sessionId)}`;
   return `vote:${assertId(d.roundId)}:${assertId(d.categoryId)}`;
 }
 
@@ -37,6 +40,11 @@ export function parseCustomId(s: string): CustomIdData | null {
     const roundId = parseId(second);
     const categoryId = parseId(third);
     return roundId === null || categoryId === null ? null : { kind: 'vote', roundId, categoryId };
+  }
+  if (kind === 'bounty') {
+    if (second !== 'claim') return null;
+    const sessionId = parseId(third);
+    return sessionId === null ? null : { kind: 'bounty', sessionId };
   }
   return null;
 }

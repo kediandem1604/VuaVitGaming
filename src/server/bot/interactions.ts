@@ -7,6 +7,8 @@
  *   (`syncSessionMessage`) — ở đây không `update` tin, và kết quả giống hệt bấm trên
  *   web vì cùng gọi `setAttendance`.
  * - Menu vote (`vote:*`): bỏ (hoặc đổi) phiếu qua `castVote`; tin vote giữ nguyên tới khi đóng đợt.
+ * - Menu treo thưởng (`bounty:claim:*`): nhận từng mục đã chọn qua `claimBounty` (cùng luật với web),
+ *   trả lời ẩn một dòng cho mỗi mục.
  * - `/baocao`: khai điểm (`submitReport`), trả lời ẩn. `/bxh`: embed top 10 của role mùa
  *   này, công khai. `/hoso`: mã thành viên, role đang giữ, link web, trả lời ẩn.
  * - Autocomplete `role`: trả gợi ý ngay (không defer — Discord không cho defer autocomplete).
@@ -24,12 +26,14 @@ import { normalizeText } from '../../shared/text.js';
 import type { Ctx } from '../ctx.js';
 import { AppError } from '../lib/errors.js';
 import { formatVnDay, formatVnTime, seasonIdOf, toVnDate } from '../lib/time.js';
+import { escapeDiscordMarkdown } from '../lib/discord-text.js';
+import { claimBounty } from '../modules/bounties/claims.js';
 import { upsertMemberFromGuild } from '../modules/members/service.js';
 import { castVote } from '../modules/mvp/votes.js';
 import { listRoles } from '../modules/roles/service.js';
 import { setAttendance } from '../modules/sessions/service.js';
 import { getHeldRoles, getRoleLeaderboard } from '../modules/stats/leaderboard.js';
-import { submitReport } from '../modules/stats/reports.js';
+import { isId, submitReport } from '../modules/stats/reports.js';
 import { COMMAND, OPTION, filterRoleChoices, leaderboardEmbed, parseDayInput, profileText } from './commands.js';
 import { parseCustomId } from './custom-ids.js';
 import type { CustomIdData } from './custom-ids.js';
@@ -133,6 +137,9 @@ async function handleComponent(ctx: Ctx, interaction: ComponentInteractionLike, 
     case 'vote':
       await handleVote(ctx, interaction, data, values);
       return;
+    case 'bounty':
+      await handleBountyClaim(ctx, interaction, data, values);
+      return;
   }
 }
 
@@ -183,6 +190,57 @@ async function handleVote(
 }
 
 const POSITIVE_INT = /^[1-9]\d*$/;
+
+/** Giới hạn độ dài tin trả lời của Discord. */
+const REPLY_MAX = 2000;
+
+/**
+ * Menu "Tôi đã hoàn thành…": người chọn được tạo/cập nhật hồ sơ từ GuildMember (như các nút khác),
+ * rồi nhận lần lượt từng mục đã chọn (bỏ trùng, theo thứ tự chọn) qua `claimBounty` — mọi luật nhận
+ * nằm ở đó. Trả lời ẩn một dòng mỗi mục: `✅ **{mục}** — Đã gửi, chờ mod duyệt` hoặc `❌ **{mục}** — {lỗi}`.
+ * Một mục lỗi không chặn các mục sau. Giá trị lạ (client bị sửa) → mục "không rõ", lỗi của service.
+ */
+async function handleBountyClaim(
+  ctx: Ctx,
+  interaction: GuildComponentInteraction,
+  data: Extract<CustomIdData, { kind: 'bounty' }>,
+  values: readonly string[],
+): Promise<void> {
+  await interaction.deferReply(EPHEMERAL);
+  try {
+    const { member } = await upsertMemberFromGuild(ctx, toGuildMemberInfo(interaction.member));
+    const ids = [...new Set(values)].map((v) => (POSITIVE_INT.test(v) ? Number(v) : Number.NaN));
+    const known = ids.filter(isId);
+    const titles = new Map(
+      (await ctx.db.bounty.findMany({ where: { id: { in: known } }, select: { id: true, title: true } })).map((b) => [b.id, b.title]),
+    );
+
+    const lines: string[] = [];
+    for (const id of ids) {
+      const title = `**${escapeDiscordMarkdown(titles.get(id) ?? 'Mục không rõ')}**`;
+      try {
+        await claimBounty(ctx, member.id, data.sessionId, id, 'discord');
+        lines.push(`✅ ${title} — Đã gửi, chờ mod duyệt`);
+      } catch (err) {
+        if (!(err instanceof AppError)) console.error(`[bot] Lỗi nhận treo thưởng ${id} qua ${interaction.customId}:`, err);
+        lines.push(`❌ ${title} — ${err instanceof AppError ? err.message : 'Có lỗi xảy ra, thử lại sau'}`);
+      }
+    }
+    await interaction.editReply(fitLines(lines, REPLY_MAX));
+  } catch (err) {
+    await answerError(interaction, interaction.customId, err);
+  }
+}
+
+/** Nối các dòng; quá `max` ký tự thì bớt dòng cuối và ghi "… và X mục nữa". */
+function fitLines(lines: string[], max: number): string {
+  for (let shown = lines.length; shown > 0; shown -= 1) {
+    const hidden = lines.length - shown;
+    const text = lines.slice(0, shown).join('\n') + (hidden > 0 ? `\n… và ${hidden} mục nữa` : '');
+    if (text.length <= max) return text;
+  }
+  return `${lines.length} mục`;
+}
 
 /** Giá trị menu đã chọn → memberId; không phải số nguyên dương chính tắc → NaN để `castVote` từ chối (VALIDATION). */
 function nomineeIdOf(values: readonly string[]): number {

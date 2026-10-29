@@ -1,18 +1,18 @@
 /**
- * Dùng bot để tạo nhóm kênh "GGD Hub" (lịch chơi, vote MVP, thông báo, highlight) trên server
+ * Dùng bot để tạo nhóm kênh "GGD Hub" (lịch chơi, vote MVP, thông báo, highlight, treo thưởng) trên server
  * Discord và in ID kênh dạng `KEY=ID` ra stdout; thông báo cho người đọc in ra stderr. Cũng in
  * danh sách role của server kèm ID để chọn role admin/mod. Chạy lại an toàn: ID kênh đã có trong
  * biến môi trường (`docker compose run` nạp `deploy/server/.env`) mà vẫn là kênh văn bản của
  * server thì được giữ nguyên dù kênh/nhóm đã đổi tên; còn lại dùng kênh cùng tên hoặc tạo mới
- * (máy chủ đã có ba kênh đầu chỉ được tạo thêm #highlight).
+ * (máy chủ đã có các kênh cũ chỉ được tạo thêm kênh còn thiếu, vd #highlight, #treo-thưởng).
  *
- * Cần DISCORD_TOKEN và DISCORD_GUILD_ID; bốn biến DISCORD_*_CHANNEL_ID không bắt buộc (trống =
+ * Cần DISCORD_TOKEN và DISCORD_GUILD_ID; năm biến DISCORD_*_CHANNEL_ID không bắt buộc (trống =
  * chưa có). Bot phải có quyền **Manage Channels** và
  * **Attach Files** trên server. Trên máy chủ chạy qua `bash deploy/server/discord-setup.sh`
  * (tự ghi ID vào .env); ở máy: `npx tsx src/server/tools/setup-discord.ts`.
  *
  * Quyền của kênh mới: mọi người xem và đọc lịch sử nhưng không nhắn (chỉ bot đăng tin; nút và
- * menu vote vẫn bấm được); bot xem, gửi, nhúng link, đọc lịch sử — ở #highlight thêm đính kèm
+ * menu vote/treo thưởng vẫn bấm được); bot xem, gửi, nhúng link, đọc lịch sử — ở #highlight thêm đính kèm
  * file. Discord chỉ cho bot đặt những quyền chính nó đang có, nên danh sách quyền giữ đúng bộ
  * quyền bot được mời với, và Attach Files được kiểm trước khi tạo kênh (thiếu thì tạo #highlight
  * sẽ lỗi giữa chừng).
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
     log(`Server: ${guild.name}`);
     const known = knownChannelIds();
     const result = await ensureChannels(channelAdmin(guild, me.id), known);
-    log(`Nhóm kênh: ${result.categoryId === null ? 'không cần (cả bốn kênh giữ theo ID trong .env)' : result.categoryCreated ? 'đã tạo' : 'đã có'}`);
+    log(`Nhóm kênh: ${result.categoryId === null ? 'không cần (mọi kênh giữ theo ID trong .env)' : result.categoryCreated ? 'đã tạo' : 'đã có'}`);
     for (const channel of result.channels) {
       if (channel.keptById) {
         log(`  #${channel.name} (${channel.envKey}): đã có — giữ kênh ${channel.id} theo ID trong .env`);

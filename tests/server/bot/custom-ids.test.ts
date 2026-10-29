@@ -53,3 +53,11 @@ test('wrong shape is rejected', () => {
     expect(parseCustomId(s), JSON.stringify(s)).toBeNull();
   }
 });
+
+test('bounty menu custom id is bounty:claim:<sessionId> and parses back', () => {
+  expect(encodeCustomId({ kind: 'bounty', sessionId: 12 })).toBe('bounty:claim:12');
+  expect(parseCustomId('bounty:claim:12')).toEqual({ kind: 'bounty', sessionId: 12 });
+  for (const s of ['bounty:claim:0', 'bounty:claim:x', 'bounty:take:1', 'bounty:claim', 'bounty:claim:1:2', 'bounty:claim:01']) {
+    expect(parseCustomId(s), s).toBeNull();
+  }
+});

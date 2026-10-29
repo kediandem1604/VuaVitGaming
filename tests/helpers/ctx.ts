@@ -24,6 +24,7 @@ export function testConfig(): Config {
       voteChannelId: 'ch-vote',
       announceChannelId: 'ch-announce',
       highlightChannelId: 'ch-highlight',
+      bountyChannelId: 'ch-bounty',
       adminRoleIds: ['r-admin'],
       modRoleIds: ['r-mod'],
     },
