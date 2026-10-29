@@ -215,7 +215,7 @@ function normaliseNote(note: string | null | undefined): string | null {
 // ---------------------------------------------------------------------------
 
 /** Người khai/sửa phải còn trong server (không có hồ sơ hoặc đã rời → `FORBIDDEN`). */
-async function assertActiveMember(ctx: Ctx, memberId: number): Promise<void> {
+export async function assertActiveMember(ctx: Ctx, memberId: number): Promise<void> {
   const member = await ctx.db.member.findUnique({ where: { id: memberId }, select: { status: true } });
   if (member?.status !== 'active') throw appError('FORBIDDEN');
 }
@@ -392,7 +392,7 @@ const REVIEWABLE_INCLUDE = {
 type ReviewableReport = Prisma.StatReportGetPayload<{ include: typeof REVIEWABLE_INCLUDE }>;
 
 /** Người duyệt/huỷ phải là mod/admin (`FORBIDDEN` — phòng thủ thêm ngoài tầng web). */
-function assertReviewer(reviewer: Reviewer): void {
+export function assertReviewer(reviewer: Reviewer): void {
   if (reviewer.accessLevel !== 'mod' && reviewer.accessLevel !== 'admin') throw appError('FORBIDDEN');
 }
 
@@ -407,7 +407,7 @@ async function loadReviewable(ctx: Ctx, reportId: number): Promise<ReviewableRep
  * Lý do từ chối/huỷ duyệt: cắt khoảng trắng, phải có (`REASON_REQUIRED`), tối đa 200 ký tự
  * (`VALIDATION`). `what` là "từ chối", "huỷ duyệt" hay "bỏ báo cáo" để lời nhắn đúng ngữ cảnh.
  */
-function checkReason(raw: string | null | undefined, what: 'từ chối' | 'huỷ duyệt' | 'bỏ báo cáo'): string {
+export function checkReason(raw: string | null | undefined, what: 'từ chối' | 'huỷ duyệt' | 'bỏ báo cáo'): string {
   const reason = raw?.trim() ?? '';
   if (reason === '') throw appError('REASON_REQUIRED', `Cần ghi lý do ${what}`);
   if (reason.length > REASON_MAX) throw appError('VALIDATION', `Lý do ${what} tối đa 200 ký tự`);
@@ -530,7 +530,7 @@ function checkAccusationDecision(
  * chốt tính danh hiệu, hoặc chốt xong trước và ở đây thấy `closed_at` đã có (`SEASON_CLOSED`). Các
  * lượt duyệt/huỷ cùng mùa cũng xếp hàng với nhau.
  */
-async function lockOpenSeason(tx: Prisma.TransactionClient, seasonId: string): Promise<void> {
+export async function lockOpenSeason(tx: Prisma.TransactionClient, seasonId: string): Promise<void> {
   const [season] = await tx.$queryRaw<{ closed_at: Date | null }[]>`SELECT closed_at FROM seasons WHERE id = ${seasonId} FOR UPDATE`;
   if (season?.closed_at != null) throw appError('SEASON_CLOSED');
 }
@@ -606,7 +606,7 @@ async function notPendingError(db: Prisma.TransactionClient, reportId: number): 
  * đăng "👑 … đã hoá thân …" (spec §4.6). Không còn ai dẫn đầu (role chỉ có điểm 0, hoặc huỷ
  * lần khai duy nhất) → không đăng gì. Lỗi Discord chỉ ghi log.
  */
-async function announceIfLeaderChanged(ctx: Ctx, roleId: number, roleName: string, seasonId: string, before: LeaderboardRow | null): Promise<void> {
+export async function announceIfLeaderChanged(ctx: Ctx, roleId: number, roleName: string, seasonId: string, before: LeaderboardRow | null): Promise<void> {
   const after = await getRoleLeader(ctx, roleId, seasonId);
   if (after && after.memberId !== before?.memberId) {
     await announceHolderChange(ctx, after.displayName, roleName, seasonId);

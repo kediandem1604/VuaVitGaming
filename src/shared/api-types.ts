@@ -581,3 +581,42 @@ export interface BountyInput {
 export interface BountyPatch extends Partial<BountyInput> {
   active?: boolean;
 }
+
+export type BountyClaimStatus = 'pending' | 'approved' | 'rejected' | 'revoked';
+export type BountyClaimSource = 'web' | 'discord';
+
+/**
+ * Một lần nhận treo thưởng (spec treo thưởng §3, §6, §8). `role` và `points` là bản chép từ mục lúc
+ * nhận (sửa mục sau đó không đổi); `bounty` là tên/mô tả HIỆN TẠI của mục. `playedOn` = ngày VN của
+ * buổi (`YYYY-MM-DD`). `rejectReason` là lý do từ chối hoặc huỷ duyệt. `reviewedBy`/`reviewedAt`:
+ * người/giờ duyệt hoặc từ chối (từ chối tự động lúc chốt mùa: `reviewedBy = null`).
+ */
+export interface BountyClaimDto {
+  id: number;
+  bounty: { id: number; title: string; description: string | null };
+  member: { id: number; displayName: string };
+  session: { id: number; startsAt: string; modeName: string };
+  playedOn: string;
+  role: { id: number; nameVi: string; icon: string; faction: Faction } | null;
+  points: number;
+  status: BountyClaimStatus;
+  rejectReason: string | null;
+  source: BountyClaimSource;
+  createdAt: string;
+  reviewedBy: { id: number; displayName: string } | null;
+  reviewedAt: string | null;
+}
+
+/**
+ * `GET /api/sessions/:id/bounties`: mục áp dụng cho buổi (thứ tự của `bountiesForSession`) và mọi lần
+ * nhận của người xem ở buổi này (ghép theo `bounty.id`; có thể có lần nhận của mục đã tắt). `attended`:
+ * người xem có điểm danh `going`. `open`: buổi chưa huỷ, ngày buổi trong `[hôm nay − 3, hôm nay]` và
+ * mùa chưa chốt — `false` thì ẩn nút "Tôi đã hoàn thành" (không tính `attended`).
+ */
+export interface SessionBountiesDto {
+  sessionId: number;
+  attended: boolean;
+  open: boolean;
+  bounties: BountyDto[];
+  myClaims: BountyClaimDto[];
+}

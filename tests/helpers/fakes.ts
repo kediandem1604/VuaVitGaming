@@ -1,5 +1,6 @@
 import { MessageGoneError, RankRolePermissionError } from '../../src/server/ports.js';
 import type {
+  BountyCompletedPost,
   DiscordNotifier,
   GuildDirectory,
   GuildMemberInfo,
@@ -29,7 +30,8 @@ export class FakeMailer implements Mailer {
  * `updateSession`/`closeVote` với id trong `goneMessageIds` ném `MessageGoneError` (tin đã bị xoá).
  * `postHighlight` đăng vào kênh `highlightChannelId`, gọi `onPostHighlight` (nếu có) ngay trước khi
  * trả kết quả — để test chen một thao tác vào giữa lúc "đang tải lên"; có `failPostWith` thì ném lỗi
- * đó mà không đăng gì (Discord từ chối); `deleteMessage` chỉ ghi lại.
+ * đó mà không đăng gì (Discord từ chối); `deleteMessage` chỉ ghi lại; `postBountyCompleted` ghi vào
+ * `bountyCompletions`.
  */
 export class FakeNotifier implements DiscordNotifier {
   dms: { discordId: string; text: string }[] = [];
@@ -40,6 +42,8 @@ export class FakeNotifier implements DiscordNotifier {
   announcements: string[] = [];
   highlights: (HighlightPost & { channelId: string; messageId: string })[] = [];
   deletedMessages: { channelId: string; messageId: string }[] = [];
+  /** Thông báo duyệt treo thưởng đã "đăng" vào `#treo-thưởng`. */
+  bountyCompletions: BountyCompletedPost[] = [];
   /** Giới hạn tải lên giả (mặc định 10 MiB — server chưa boost); gán lại để giả cấp 2–3. */
   uploadLimit = 10 * 1024 * 1024;
   highlightChannelId = 'ch-highlight';
@@ -105,6 +109,11 @@ export class FakeNotifier implements DiscordNotifier {
   async deleteMessage(channelId: string, messageId: string): Promise<void> {
     this.assertUp();
     this.deletedMessages.push({ channelId, messageId });
+  }
+
+  async postBountyCompleted(post: BountyCompletedPost): Promise<void> {
+    this.assertUp();
+    this.bountyCompletions.push(post);
   }
 
   private assertUp(): void {

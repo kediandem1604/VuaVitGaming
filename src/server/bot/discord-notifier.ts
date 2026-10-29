@@ -14,7 +14,7 @@ import { DiscordAPIError, GuildPremiumTier, RESTJSONErrorCodes, escapeMarkdown }
 import type { APIEmbed, Client, SendableChannels } from 'discord.js';
 import type { Config } from '../config.js';
 import { HighlightChannelError, HighlightRejectedTooLargeError, MessageGoneError } from '../ports.js';
-import type { DiscordNotifier, HighlightPost, SessionView, VotePrompt } from '../ports.js';
+import type { BountyCompletedPost, DiscordNotifier, HighlightPost, SessionView, VotePrompt } from '../ports.js';
 import { buildSessionMessage, buildVoteMessage } from './embeds.js';
 
 /** Giới hạn tải lên của Discord theo cấp boost (spec §5): chưa boost / cấp 1 → 10 MiB; cấp 2–3 → 50 MiB (trần của app). */
@@ -141,6 +141,15 @@ export class DiscordJsNotifier implements DiscordNotifier {
       if (isUnknownMessage(err) || isUnknownChannel(err)) return;
       throw err;
     }
+  }
+
+  /**
+   * TẠM (Task 3 cài thật): kênh `#treo-thưởng` (`DISCORD_BOUNTY_CHANNEL_ID`) chưa có trong cấu hình nên
+   * chưa đăng gì — chỉ ghi log để biết lần duyệt đã tới đây. Bản thật đăng
+   * `✅ {tên} hoàn thành **{mục}** +{điểm}` (escape Markdown, không ping) như mô tả ở `BountyCompletedPost`.
+   */
+  async postBountyCompleted(post: BountyCompletedPost): Promise<void> {
+    console.info(`[bot] Chưa cấu hình kênh treo thưởng — bỏ qua thông báo: ${post.memberName} hoàn thành ${post.bountyTitle} +${post.points}`);
   }
 
   private scheduleChannel(): Promise<SendableChannels> {

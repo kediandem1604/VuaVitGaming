@@ -46,6 +46,17 @@ export interface HighlightPost {
   data: Buffer;
 }
 
+/**
+ * Một lần nhận treo thưởng vừa được duyệt (spec treo thưởng §7): adapter đăng vào kênh `#treo-thưởng`
+ * dòng `✅ {memberName} hoàn thành **{bountyTitle}** +{points}` (escape Markdown tên người và tên mục,
+ * không ping ai).
+ */
+export interface BountyCompletedPost {
+  memberName: string;
+  bountyTitle: string;
+  points: number;
+}
+
 export interface DiscordNotifier {
   sendDm(discordId: string, text: string): Promise<void>;
   publishSession(view: SessionView): Promise<string>; // trả về message id
@@ -64,6 +75,11 @@ export interface DiscordNotifier {
   postHighlight(post: HighlightPost): Promise<{ channelId: string; messageId: string }>;
   /** Xoá một tin; tin (hoặc kênh) đã mất thì coi như xong, lỗi khác ném ra. */
   deleteMessage(channelId: string, messageId: string): Promise<void>;
+  /**
+   * Đăng thông báo duyệt treo thưởng vào `#treo-thưởng` (`BountyCompletedPost`). Chưa cấu hình kênh →
+   * không làm gì; lỗi Discord ném ra — nơi gọi chỉ ghi log.
+   */
+  postBountyCompleted(post: BountyCompletedPost): Promise<void>;
 }
 
 /**

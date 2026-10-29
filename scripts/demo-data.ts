@@ -162,6 +162,7 @@ class SilentNotifier implements DiscordNotifier {
     return { channelId: 'demo-highlight', messageId: this.nextId() };
   }
   async deleteMessage(): Promise<void> {}
+  async postBountyCompleted(): Promise<void> {}
 
   private nextId(): string {
     this.counter += 1;
