@@ -364,6 +364,7 @@ const bounty = (over: Partial<BountyDto> & Pick<BountyDto, 'id' | 'title'>): Bou
   session: null,
   active: true,
   approvedClaims: 0,
+  totalClaims: 0,
   ...over,
 });
 
@@ -412,6 +413,7 @@ test('a session with bounties gets a "Treo thưởng" card beside it: two column
   expect(grid.children[0]).toBe(sessionCard);
   expect(grid.children[1]).toBe(card);
   expect(sessionCard).toHaveClass('lg:col-start-1');
+  expect(card).toHaveClass('lg:col-start-2');
 
   // Tiêu đề theo buổi (nhiều buổi trong ngày vẫn rõ thẻ nào của buổi nào).
   expect(within(card).getByText('19:00 · Cổ điển')).toBeInTheDocument();
@@ -423,7 +425,7 @@ test('a session with bounties gets a "Treo thưởng" card beside it: two column
   expect(within(items[0] as HTMLElement).getByText('+5')).toHaveClass('bg-gold');
   // Mục không role: icon 🎯.
   expect(items[1]).toHaveTextContent('🎯');
-  expect(within(items[1] as HTMLElement).getByRole('button', { name: 'Tôi đã hoàn thành' })).toHaveClass('btn-secondary');
+  expect(within(items[1] as HTMLElement).getByRole('button', { name: /^Tôi đã hoàn thành/ })).toHaveClass('btn-secondary');
 });
 
 test('a session without bounties draws no card (no empty right column)', async () => {
@@ -433,7 +435,30 @@ test('a session without bounties draws no card (no empty right column)', async (
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/1/bounties')).toBe(true));
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(screen.queryByRole('region', { name: /^Treo thưởng/ })).not.toBeInTheDocument();
-  expect(sessionCard).not.toHaveClass('lg:col-start-1');
+  // Vẫn cột 1 như khi có treo thưởng: thẻ không nhảy chỗ khi thẻ treo thưởng tải xong.
+  expect(sessionCard).toHaveClass('lg:col-start-1');
+});
+
+test('several sessions where only some have bounties: each session in column 1, its bounty card beside it in column 2', async () => {
+  const early: SessionDto = { ...oneSession, id: 1, startsAt: '2026-10-22T10:00:00.000Z' };
+  const late: SessionDto = { ...oneSession, id: 2, startsAt: '2026-10-22T13:00:00.000Z' };
+  stubFetch({
+    ...dayRoutes([late, early]),
+    'GET /api/sessions/1/bounties': () => json(200, sessionBounties({ bounties: [], myClaims: [] })),
+    'GET /api/sessions/2/bounties': () => json(200, sessionBounties({ sessionId: 2 })),
+  });
+  renderPage();
+
+  const card = await bountyCard();
+  const earlyCard = screen.getByRole('article', { name: '17:00 Cổ điển' });
+  const lateCard = screen.getByRole('article', { name: '20:00 Cổ điển' });
+  const grid = card.parentElement as HTMLElement;
+  // Thứ tự: buổi sớm (không treo thưởng) → buổi muộn → thẻ treo thưởng của buổi muộn; không ô trống xen giữa.
+  expect([...grid.children]).toEqual([earlyCard, lateCard, card]);
+  expect(earlyCard).toHaveClass('lg:col-start-1');
+  expect(lateCard).toHaveClass('lg:col-start-1');
+  expect(card).toHaveClass('lg:col-start-2');
+  expect(within(card).getByText('20:00 · Cổ điển')).toBeInTheDocument();
 });
 
 test('a cancelled session does not even ask for bounties', async () => {
@@ -459,13 +484,17 @@ test('"Tôi đã hoàn thành" posts the claim, shows "Chờ duyệt" and refres
   const card = await bountyCard();
   const second = within(card).getAllByRole('listitem')[1] as HTMLElement;
 
-  fireEvent.click(within(second).getByRole('button', { name: 'Tôi đã hoàn thành' }));
+  // Tên nút kèm tên mục: trình đọc màn hình phân biệt được các nút giống nhau.
+  fireEvent.click(within(second).getByRole('button', { name: 'Tôi đã hoàn thành: Tham gia đủ từ game đầu tới game cuối' }));
 
-  expect(await within(second).findByText('Chờ duyệt')).toBeInTheDocument();
+  // Chip mới nằm trong vùng thông báo (đã có sẵn trước khi bấm) nên được đọc lên.
+  const status = within(second).getByRole('status');
+  expect(status).toHaveAttribute('aria-live', 'polite');
+  expect(await within(status).findByText('Chờ duyệt')).toBeInTheDocument();
   expect(posted).toEqual({});
-  expect(within(second).queryByRole('button', { name: 'Tôi đã hoàn thành' })).not.toBeInTheDocument();
+  expect(within(second).queryByRole('button', { name: /^Tôi đã hoàn thành/ })).not.toBeInTheDocument();
   // Mục kia vẫn còn nút.
-  expect(within(within(card).getAllByRole('listitem')[0] as HTMLElement).getByRole('button', { name: 'Tôi đã hoàn thành' })).toBeInTheDocument();
+  expect(within(within(card).getAllByRole('listitem')[0] as HTMLElement).getByRole('button', { name: /^Tôi đã hoàn thành/ })).toBeInTheDocument();
   expect(invalidate).toHaveBeenCalledWith({ queryKey: PENDING_BOUNTY_CLAIMS_KEY });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_BOUNTY_CLAIMS_KEY });
 });
@@ -482,7 +511,7 @@ test('a failed claim shows the server message under that bounty and refetches th
   });
   renderPage();
   const first = within(await bountyCard()).getAllByRole('listitem')[0] as HTMLElement;
-  fireEvent.click(within(first).getByRole('button', { name: 'Tôi đã hoàn thành' }));
+  fireEvent.click(within(first).getByRole('button', { name: /^Tôi đã hoàn thành/ }));
   expect(await within(first).findByRole('alert')).toHaveTextContent('Bạn đã nhận mục này ở buổi này rồi');
   await waitFor(() => expect(calls).toBe(2));
 });
@@ -510,7 +539,7 @@ test('my claims show their status chip instead of the button', async () => {
   expect(items[1]).toHaveTextContent('Bị từ chối: Không có clip');
   expect(items[2]).toHaveTextContent('Đã bị huỷ: Nhầm buổi');
   expect(items[3]).toHaveTextContent('Chờ duyệt');
-  expect(screen.queryByRole('button', { name: 'Tôi đã hoàn thành' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Tôi đã hoàn thành/ })).not.toBeInTheDocument();
 });
 
 test('a claim of a bounty that was turned off still shows on the card', async () => {
@@ -531,7 +560,7 @@ test('not attending: no button, a small "Tham gia buổi để nhận thưởng"
   renderPage();
   const card = await bountyCard();
   expect(within(card).getByText('Tham gia buổi để nhận thưởng')).toBeInTheDocument();
-  expect(within(card).queryByRole('button', { name: 'Tôi đã hoàn thành' })).not.toBeInTheDocument();
+  expect(within(card).queryByRole('button', { name: /^Tôi đã hoàn thành/ })).not.toBeInTheDocument();
 });
 
 test('expired (open = false): the button is hidden, the bounties still show', async () => {
@@ -539,7 +568,7 @@ test('expired (open = false): the button is hidden, the bounties still show', as
   renderPage();
   const card = await bountyCard();
   expect(within(card).getAllByRole('listitem')).toHaveLength(2);
-  expect(within(card).queryByRole('button', { name: 'Tôi đã hoàn thành' })).not.toBeInTheDocument();
+  expect(within(card).queryByRole('button', { name: /^Tôi đã hoàn thành/ })).not.toBeInTheDocument();
   expect(within(card).queryByText('Tham gia buổi để nhận thưởng')).not.toBeInTheDocument();
 });
 
@@ -558,5 +587,5 @@ test('joining a session refreshes its bounty card (attended changes)', async () 
   const card = await bountyCard();
   expect(within(card).getByText('Tham gia buổi để nhận thưởng')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Tham gia' }));
-  expect(await within(card).findAllByRole('button', { name: 'Tôi đã hoàn thành' })).toHaveLength(2);
+  expect(await within(card).findAllByRole('button', { name: /^Tôi đã hoàn thành/ })).toHaveLength(2);
 });

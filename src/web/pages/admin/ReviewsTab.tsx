@@ -206,7 +206,7 @@ function RecentlyApproved() {
         {(list) =>
           list.length === 0 ? (
             <EmptyState>
-              <p>Chưa có lần khai nào được duyệt trong mùa đang mở</p>
+              <p>Chưa có lần khai hay treo thưởng nào được duyệt trong mùa đang mở</p>
             </EmptyState>
           ) : (
             <ul className="panel flex flex-col divide-y divide-night-700 p-0">

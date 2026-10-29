@@ -261,7 +261,8 @@ function BountyRow({ bounty, roles, sessions }: { bounty: BountyDto; roles: Role
           <button type="button" className="btn-secondary" disabled={busy} onClick={() => patch.mutate({ active: !bounty.active })}>
             {bounty.active ? 'Tắt' : 'Bật'}
           </button>
-          {bounty.approvedClaims === 0 && (
+          {/* Chỉ mục chưa có lần nhận nào (mọi trạng thái) mới xoá được — khớp điều kiện phía máy chủ. */}
+          {bounty.totalClaims === 0 && (
             <button
               type="button"
               className="btn-secondary"

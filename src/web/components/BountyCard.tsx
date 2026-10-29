@@ -4,7 +4,8 @@
  *
  * Mỗi mục: icon role (🎯 khi "Mọi role"), tên, mô tả nhỏ, nhãn `+{điểm}` màu vàng. Bên dưới:
  * - đã nhận → chip trạng thái ("Chờ duyệt" / "Đã nhận +{điểm}" / "Bị từ chối: {lý do}" / "Đã bị huỷ: {lý do}");
- * - chưa nhận, đã tham gia và còn hạn (`open`) → nút "Tôi đã hoàn thành" (`btn-secondary`);
+ * - chưa nhận, đã tham gia và còn hạn (`open`) → nút "Tôi đã hoàn thành" (`btn-secondary`, tên cho trình
+ *   đọc màn hình kèm tên mục); chip nằm trong vùng `role="status"` có sẵn nên được đọc lên sau khi nhận;
  * - hết hạn → không gì. Chưa tham gia mà còn hạn → một dòng nhỏ cuối thẻ "Tham gia buổi để nhận thưởng".
  * Lần nhận của mục đã tắt (không còn trong `bounties`) vẫn hiện kèm chip, để người chơi thấy kết quả.
  * Không có mục nào và không có lần nhận nào → không vẽ gì.
@@ -91,14 +92,27 @@ export function BountyCard({ data, session, onClaim, claimingId, error, classNam
               </div>
               <span className="chip shrink-0 bg-gold px-2.5 py-0.5 text-gold-ink tabular-nums">{`+${row.points}`}</span>
             </div>
-            {row.claim ? (
-              <span className={cx('chip self-start rounded-xl! px-2.5 py-0.5 break-words whitespace-normal!', CLAIM_CHIP_CLASS[row.claim.status])}>{claimStatusText(row.claim)}</span>
-            ) : (
-              canClaim && (
-                <button type="button" className="btn-secondary self-start" disabled={claimingId !== null} onClick={() => onClaim(row.id)}>
-                  {claimingId === row.id ? 'Đang gửi…' : 'Tôi đã hoàn thành'}
-                </button>
-              )
+            {(row.claim || canClaim) && (
+              <div className="flex flex-col items-start">
+                {/* Vùng thông báo có sẵn từ lúc còn nút, nên chip mới sau khi nhận được trình đọc màn hình đọc lên. */}
+                <div role="status" aria-live="polite" className="max-w-full">
+                  {row.claim && (
+                    <span className={cx('chip rounded-xl! px-2.5 py-0.5 break-words whitespace-normal!', CLAIM_CHIP_CLASS[row.claim.status])}>{claimStatusText(row.claim)}</span>
+                  )}
+                </div>
+                {!row.claim && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    // Kèm tên mục: thẻ có nhiều nút giống nhau.
+                    aria-label={claimingId === row.id ? `Đang gửi…: ${row.title}` : `Tôi đã hoàn thành: ${row.title}`}
+                    disabled={claimingId !== null}
+                    onClick={() => onClaim(row.id)}
+                  >
+                    {claimingId === row.id ? 'Đang gửi…' : 'Tôi đã hoàn thành'}
+                  </button>
+                )}
+              </div>
             )}
             {error?.bountyId === row.id && (
               <p role="alert" className="text-sm font-bold text-duck-soft">

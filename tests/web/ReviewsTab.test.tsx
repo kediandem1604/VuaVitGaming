@@ -387,7 +387,7 @@ test('SEASON_CLOSED shows the server message and refetches the list', async () =
 
   expect(await screen.findByRole('alert')).toHaveTextContent('Mùa đã chốt, không huỷ duyệt được nữa');
   await waitFor(() => expect(listCalls).toBe(2));
-  expect(await within(approvedSection()).findByText('Chưa có lần khai nào được duyệt trong mùa đang mở')).toBeInTheDocument();
+  expect(await within(approvedSection()).findByText('Chưa có lần khai hay treo thưởng nào được duyệt trong mùa đang mở')).toBeInTheDocument();
 });
 
 test('approving from the queue refreshes the recently approved list', async () => {
@@ -406,7 +406,7 @@ test('approving from the queue refreshes the recently approved list', async () =
 test('no recently approved report says so', async () => {
   stubFetch({});
   renderTab();
-  expect(await screen.findByText('Chưa có lần khai nào được duyệt trong mùa đang mở')).toBeInTheDocument();
+  expect(await screen.findByText('Chưa có lần khai hay treo thưởng nào được duyệt trong mùa đang mở')).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Đã duyệt gần đây (0)' })).toBeInTheDocument();
 });
 
@@ -857,7 +857,7 @@ test('revoking a bounty claim posts the reason, removes the row and refreshes sc
   fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do huỷ duyệt' }), { target: { value: ' Nhầm buổi ' } });
   fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
   await waitFor(() => expect(posted).toEqual({ reason: 'Nhầm buổi' }));
-  expect(await screen.findByText('Chưa có lần khai nào được duyệt trong mùa đang mở')).toBeInTheDocument();
+  expect(await screen.findByText('Chưa có lần khai hay treo thưởng nào được duyệt trong mùa đang mở')).toBeInTheDocument();
   for (const key of ['leaderboard', 'leaderboard-factions', 'hall', 'member']) expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: LEADERBOARD_TOTALS_KEY });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_BOUNTY_CLAIMS_KEY });

@@ -71,7 +71,8 @@ export function TodayPage() {
               </EmptyState>
             ) : (
               // Hai cột từ `lg`; `items-start` để thẻ ngắn (đã huỷ) không bị kéo cao bằng thẻ bên cạnh.
-              // Thẻ treo thưởng của một buổi là ô ngay sau thẻ buổi trong cùng lưới (xem `TodaySession`).
+              // Mỗi buổi một hàng: thẻ buổi luôn ở cột 1, thẻ treo thưởng (nếu có) ở cột 2 ngay cạnh
+              // (xem `TodaySession`) — tự xếp chỗ sẽ để lại ô trống khi chỉ vài buổi có treo thưởng.
               <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
                 {sortByStart(list).map((session) => (
                   <TodaySession key={session.id} session={session} reminders={reminders} />
@@ -193,12 +194,14 @@ function TodaySession({ session, reminders }: { session: SessionDto; reminders: 
         error={attendance.isError ? errorMessage(attendance.error) : null}
         onToggle={(going) => attendance.mutate(going)}
         reminders={reminders}
-        className={showBounties ? 'lg:col-start-1' : undefined}
+        // Luôn cột 1 (kể cả khi chưa tải xong treo thưởng) để thẻ không nhảy chỗ khi thẻ treo thưởng hiện ra.
+        className="lg:col-start-1"
       />
       {showBounties && bounties.data && (
         <BountyCard
           data={bounties.data}
           session={session}
+          className="lg:col-start-2"
           onClaim={(bountyId) => claim.mutate(bountyId)}
           claimingId={claim.isPending ? (claim.variables ?? null) : null}
           error={claim.isError && claim.variables !== undefined ? { bountyId: claim.variables, message: errorMessage(claim.error) } : null}

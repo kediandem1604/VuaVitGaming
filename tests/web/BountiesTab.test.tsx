@@ -24,12 +24,13 @@ const bounty = (over: Partial<BountyDto> & Pick<BountyDto, 'id' | 'title'>): Bou
   session: null,
   active: true,
   approvedClaims: 0,
+  totalClaims: 0,
   ...over,
 });
 
 const list: BountyDto[] = [
   bounty({ id: 1, title: 'Đã tắt', active: false }),
-  bounty({ id: 2, title: 'Bồ Nông nuốt hết vịt', points: 5, role: PELICAN, session: { id: 7, startsAt: tonight, modeName: 'Cổ điển' }, approvedClaims: 2 }),
+  bounty({ id: 2, title: 'Bồ Nông nuốt hết vịt', points: 5, role: PELICAN, session: { id: 7, startsAt: tonight, modeName: 'Cổ điển' }, approvedClaims: 2, totalClaims: 3 }),
   bounty({ id: 3, title: 'Tham gia đủ', description: 'Từ game đầu tới game cuối' }),
 ];
 
@@ -100,6 +101,15 @@ test('the list shows active bounties first, with role, points, scope, approved c
   // Đã tắt nằm cuối, có nút Bật.
   expect(items[2]).toHaveTextContent('Đã tắt');
   expect(within(items[2] as HTMLElement).getByRole('button', { name: 'Bật' })).toBeInTheDocument();
+});
+
+test('a bounty with only pending or rejected claims has no "Xoá" (delete would be refused)', async () => {
+  stubFetch({ 'GET /api/admin/bounties': () => json(200, [bounty({ id: 5, title: 'Chờ duyệt', approvedClaims: 0, totalClaims: 1 })]) });
+  renderTab();
+  const [item] = await rows();
+  expect(item).toHaveTextContent('0 lần nhận đã duyệt');
+  expect(within(item as HTMLElement).getByRole('button', { name: 'Tắt' })).toBeInTheDocument();
+  expect(within(item as HTMLElement).queryByRole('button', { name: 'Xoá' })).not.toBeInTheDocument();
 });
 
 test('creating posts the trimmed fields with the picked role and session, then refreshes', async () => {

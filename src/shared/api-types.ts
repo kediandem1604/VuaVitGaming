@@ -555,7 +555,7 @@ export interface HealthDto {
 /**
  * Một mục treo thưởng (`GET /api/admin/bounties`, tạo/sửa). `role` null = "Mọi role" (điểm chỉ vào
  * Tổng "Cả 3 phe"); `session` null = "Mọi buổi" (`startsAt` ISO 8601 UTC). `approvedClaims` = số lần
- * nhận đã duyệt của mục.
+ * nhận đã duyệt của mục; `totalClaims` = số lần nhận mọi trạng thái (> 0 thì không xoá được mục).
  */
 export interface BountyDto {
   id: number;
@@ -566,6 +566,7 @@ export interface BountyDto {
   session: { id: number; startsAt: string; modeName: string } | null;
   active: boolean;
   approvedClaims: number;
+  totalClaims: number;
 }
 
 /** Body `POST /api/admin/bounties`: tên 1–80, mô tả ≤ 200 (rỗng → null), điểm 1–50; `null` = mọi role / mọi buổi. */

@@ -19,7 +19,7 @@
  * phần ≤ 2000 ký tự, và cờ chỉ tắt khi mọi phần đã gửi được. Discord sập thì lượt sau của
  * bộ hẹn giờ đăng lại cả bảng — phần đã đăng được có thể lặp lại (chấp nhận).
  *
- * Nhắc mod 09:00 ngày 3 tháng sau khi mùa chưa chốt và còn lần khai chờ duyệt: một lần
+ * Nhắc mod 09:00 ngày 3 tháng sau khi mùa chưa chốt và còn lần khai hay lần nhận treo thưởng chờ duyệt: một lần
  * (`reviewNudgedAt`), và chỉ ghi dấu sau khi Discord đã nhận; đã qua giờ chốt thì không
  * nhắc nữa mà chốt luôn.
  */
@@ -317,13 +317,16 @@ async function tendClosedSeason(ctx: Ctx, season: { id: string; summaryPending: 
 }
 
 /**
- * Nhắc mod duyệt nốt hàng chờ của mùa — chỉ khi còn lần khai chờ. Ghi `reviewNudgedAt`
- * SAU khi Discord đã nhận: gửi lỗi thì ném ra (được ghi log) và lượt sau nhắc lại.
+ * Nhắc mod duyệt nốt hàng chờ của mùa — chỉ khi còn lần khai hoặc lần nhận treo thưởng chờ
+ * (cả hai đều bị từ chối "Mùa đã chốt" lúc chốt); tin nhắn nêu từng loại, bỏ loại bằng 0.
+ * Ghi `reviewNudgedAt` SAU khi Discord đã nhận: gửi lỗi thì ném ra (được ghi log) và lượt sau nhắc lại.
  */
 async function nudgeReviewers(ctx: Ctx, seasonId: string, now: Date): Promise<void> {
-  const pending = await ctx.db.statReport.count({ where: pendingInSeason(seasonId) });
-  if (pending === 0) return;
-  await ctx.notifier.announce(`📝 Mod ơi, còn ${pending} lần khai của mùa ${formatSeasonLabel(seasonId)} chờ duyệt. Hạn chót 00:05 ngày 4.`);
+  const reports = await ctx.db.statReport.count({ where: pendingInSeason(seasonId) });
+  const claims = await ctx.db.bountyClaim.count({ where: pendingClaimsInSeason(seasonId) });
+  if (reports === 0 && claims === 0) return;
+  const parts = [reports > 0 ? `${reports} lần khai` : null, claims > 0 ? `${claims} lần nhận treo thưởng` : null].filter((p) => p !== null);
+  await ctx.notifier.announce(`📝 Mod ơi, còn ${parts.join(' và ')} của mùa ${formatSeasonLabel(seasonId)} chờ duyệt. Hạn chót 00:05 ngày 4.`);
   await ctx.db.season.updateMany({ where: { id: seasonId, reviewNudgedAt: null }, data: { reviewNudgedAt: now } });
 }
 

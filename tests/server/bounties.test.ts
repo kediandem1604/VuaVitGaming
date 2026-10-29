@@ -116,6 +116,7 @@ test('create returns the DTO with role, session and zero approved claims; title 
     session: { id: session.id, startsAt: '2026-10-10T14:00:00.000Z', modeName: 'Cổ điển (Classic)' },
     active: true,
     approvedClaims: 0,
+    totalClaims: 0,
   });
   const row = await testDb.bounty.findUniqueOrThrow({ where: { id: one.id } });
   expect(row.createdById).toBe(mod.id);
@@ -187,7 +188,7 @@ test('a bounty with claims cannot be deleted, only switched off; one without cla
   await expect(deleteBounty(ctx, unused.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
 });
 
-test('approvedClaims counts only approved claims of each bounty', async () => {
+test('approvedClaims counts only approved claims of each bounty; totalClaims counts every status', async () => {
   const one = await createBounty(ctx, mod.id, input({ roleId: duck.id }));
   const two = await createBounty(ctx, mod.id, input());
   await claim({ bountyId: one.id, memberId: a.id, roleId: duck.id, points: 5 });
@@ -195,9 +196,11 @@ test('approvedClaims counts only approved claims of each bounty', async () => {
   await claim({ bountyId: one.id, memberId: mod.id, roleId: duck.id, points: 5, status: 'pending' });
   await claim({ bountyId: two.id, memberId: a.id, roleId: null, points: 5, status: 'revoked' });
 
-  const byId = new Map((await listBounties(ctx)).map((x) => [x.id, x.approvedClaims]));
-  expect(byId.get(one.id)).toBe(2);
-  expect(byId.get(two.id)).toBe(0);
+  const three = await createBounty(ctx, mod.id, input());
+  const byId = new Map((await listBounties(ctx)).map((x) => [x.id, [x.approvedClaims, x.totalClaims]]));
+  expect(byId.get(one.id)).toEqual([2, 3]);
+  expect(byId.get(two.id)).toEqual([0, 1]);
+  expect(byId.get(three.id)).toEqual([0, 0]);
 });
 
 test('bountiesForSession: active bounties of that session or of every session, by points desc then id', async () => {

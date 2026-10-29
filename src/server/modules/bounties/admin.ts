@@ -32,7 +32,7 @@ const WITH_REFS = {
 
 type BountyWithRefs = Prisma.BountyGetPayload<{ include: typeof WITH_REFS }>;
 
-function toDto(b: BountyWithRefs, approvedClaims: number): BountyDto {
+function toDto(b: BountyWithRefs, counts: ClaimCounts = NO_CLAIMS): BountyDto {
   return {
     id: b.id,
     title: b.title,
@@ -41,24 +41,39 @@ function toDto(b: BountyWithRefs, approvedClaims: number): BountyDto {
     role: b.role,
     session: b.session ? { id: b.session.id, startsAt: b.session.startsAt.toISOString(), modeName: b.session.mode.nameVi } : null,
     active: b.active,
-    approvedClaims,
+    approvedClaims: counts.approved,
+    totalClaims: counts.total,
   };
 }
 
-/** Số lần nhận đã duyệt của từng mục — một truy vấn gộp cho cả danh sách. */
-async function approvedCounts(db: DbClient, ids: number[]): Promise<Map<number, number>> {
+interface ClaimCounts {
+  approved: number;
+  total: number;
+}
+
+const NO_CLAIMS: ClaimCounts = { approved: 0, total: 0 };
+
+/** Số lần nhận (đã duyệt / mọi trạng thái) của từng mục — một truy vấn gộp theo (mục, trạng thái) cho cả danh sách. */
+async function claimCounts(db: DbClient, ids: number[]): Promise<Map<number, ClaimCounts>> {
   if (ids.length === 0) return new Map();
   const groups = await db.bountyClaim.groupBy({
-    by: ['bountyId'],
-    where: { bountyId: { in: ids }, status: 'approved' },
+    by: ['bountyId', 'status'],
+    where: { bountyId: { in: ids } },
     _count: { _all: true },
   });
-  return new Map(groups.map((g) => [g.bountyId, g._count._all]));
+  const counts = new Map<number, ClaimCounts>();
+  for (const g of groups) {
+    const c = counts.get(g.bountyId) ?? { approved: 0, total: 0 };
+    c.total += g._count._all;
+    if (g.status === 'approved') c.approved += g._count._all;
+    counts.set(g.bountyId, c);
+  }
+  return counts;
 }
 
 async function withCounts(db: DbClient, rows: BountyWithRefs[]): Promise<BountyDto[]> {
-  const counts = await approvedCounts(db, rows.map((r) => r.id));
-  return rows.map((r) => toDto(r, counts.get(r.id) ?? 0));
+  const counts = await claimCounts(db, rows.map((r) => r.id));
+  return rows.map((r) => toDto(r, counts.get(r.id)));
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +157,7 @@ export async function createBounty(ctx: Ctx, createdById: number, input: BountyI
     await markSessionsDirty(tx, [created.sessionId]);
     return created;
   });
-  return toDto(row, 0);
+  return toDto(row);
 }
 
 /**

@@ -17,7 +17,7 @@ import { reviewReport, submitReport } from '../../src/server/modules/stats/repor
 import type { Faction } from '../../src/shared/api-types.js';
 import { DEFAULT_TEST_NOW, makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
-import { createMember, roleByKey } from '../helpers/factories.js';
+import { createMember, createSession, roleByKey } from '../helpers/factories.js';
 import type { FakeNotifier } from '../helpers/fakes.js';
 import { patchDelegate } from '../helpers/prisma.js';
 
@@ -506,6 +506,39 @@ test('nudge on the 3rd only once and only with pending', async () => {
   await runSeasonJobs(ctx);
   expect(notifier.announcements).toEqual([NUDGE_TEXT(2, '10/2026')]);
   expect(await isSeasonClosed(ctx, '2026-10')).toBe(false);
+});
+
+/** Lần nhận treo thưởng chờ duyệt chèn thẳng vào DB, buổi chơi lúc `startsAt`, ngày chơi `playedOn`. */
+async function insertPendingClaim(memberId: number, startsAt: string, playedOn: string): Promise<void> {
+  const session = await createSession(testDb, { startsAt: new Date(startsAt), createdById: mod.id });
+  const bounty = await testDb.bounty.create({ data: { title: 'Thắng 1 ván', points: 3, sessionId: session.id, createdById: mod.id } });
+  await testDb.bountyClaim.create({
+    data: { bountyId: bounty.id, memberId, sessionId: session.id, playedOn: dateOnlyToDb(playedOn), points: 3, source: 'web' },
+  });
+}
+
+test('nudge counts pending bounty claims too (only claims, or both)', async () => {
+  // Mùa 10 chỉ có lần nhận treo thưởng chờ duyệt → vẫn nhắc, bỏ phần lần khai.
+  await ensureSeason(ctx, '2026-10');
+  await insertPendingClaim(a.id, '2026-10-21T14:00:00Z', '2026-10-21');
+  await insertPendingClaim(b.id, '2026-10-22T14:00:00Z', '2026-10-22');
+  setNow(NUDGE_AT);
+  await runSeasonJobs(ctx);
+  expect(notifier.announcements).toEqual(['📝 Mod ơi, còn 2 lần nhận treo thưởng của mùa 10/2026 chờ duyệt. Hạn chót 00:05 ngày 4.']);
+  expect(await seasonRow('2026-10')).toMatchObject({ reviewNudgedAt: new Date(NUDGE_AT) });
+
+  // Mùa 11 có cả hai → nêu cả hai số.
+  notifier.announcements = [];
+  await ensureSeason(ctx, '2026-11');
+  await testDb.statReport.create({
+    data: { memberId: a.id, roleId: duck.id, playedOn: dateOnlyToDb('2026-11-20'), value: 1, status: 'pending' },
+  });
+  await insertPendingClaim(a.id, '2026-11-20T14:00:00Z', '2026-11-20');
+  setNow('2026-12-03T02:00:00Z');
+  await runSeasonJobs(ctx);
+  expect(notifier.announcements.at(-1)).toBe(
+    '📝 Mod ơi, còn 1 lần khai và 1 lần nhận treo thưởng của mùa 11/2026 chờ duyệt. Hạn chót 00:05 ngày 4.',
+  );
 });
 
 test('nudge is not marked when the announcement fails and is retried next tick', async () => {
