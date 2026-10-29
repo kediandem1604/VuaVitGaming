@@ -449,18 +449,36 @@ test('bounty menu defers, upserts the presser and claims each chosen bounty with
   expect(errors).not.toHaveBeenCalled();
 });
 
-test('a new Discord user gets a profile but is told they did not attend; bad values are reported per item', async () => {
+test('claiming from the menu needs no attendance: a new user and one who left the session both claim (owner decision 2026-10-30)', async () => {
+  const sessionId = await openSession();
+  const survive = await bountyOf('Sống sót');
+
+  const i = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(survive)], member: guildMember('new-1', 'Người mới') });
+  await handleInteraction(ctx, i);
+  const fresh = await testDb.member.findUniqueOrThrow({ where: { discordId: 'new-1' } });
+  expect(fresh).toMatchObject({ displayName: 'Người mới' });
+  expect(i.steps.at(-1)).toMatchObject({ content: '✅ **Sống sót** — Đã gửi, chờ mod duyệt' });
+
+  // Tham gia rồi rời buổi (điểm danh `cancelled`) vẫn nhận được.
+  await handleInteraction(ctx, new FakeInteraction(`att:join:${sessionId}`, { member: guildMember('u2') }));
+  await handleInteraction(ctx, new FakeInteraction(`att:leave:${sessionId}`, { member: guildMember('u2') }));
+  const left = await testDb.member.findUniqueOrThrow({ where: { discordId: 'u2' } });
+  expect(await testDb.attendance.findFirst({ where: { sessionId, memberId: left.id } })).toMatchObject({ status: 'cancelled' });
+  const j = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(survive)], member: guildMember('u2') });
+  await handleInteraction(ctx, j);
+  expect(j.steps.at(-1)).toMatchObject({ content: '✅ **Sống sót** — Đã gửi, chờ mod duyệt' });
+  expect(await testDb.bountyClaim.findMany({ select: { memberId: true, source: true }, orderBy: { id: 'asc' } })).toEqual([
+    { memberId: fresh.id, source: 'discord' },
+    { memberId: left.id, source: 'discord' },
+  ]);
+});
+
+test('bad values are reported per item', async () => {
   const sessionId = await openSession();
   const survive = await bountyOf('Sống sót');
   const other = await openSession();
   const elsewhere = await bountyOf('Chỉ buổi khác', other);
 
-  const i = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(survive)], member: guildMember('new-1', 'Người mới') });
-  await handleInteraction(ctx, i);
-  expect(await testDb.member.findUnique({ where: { discordId: 'new-1' } })).toMatchObject({ displayName: 'Người mới' });
-  expect(i.steps.at(-1)).toMatchObject({ content: '❌ **Sống sót** — Bạn chưa tham gia buổi này' });
-
-  await handleInteraction(ctx, new FakeInteraction(`att:join:${sessionId}`));
   const mixed = new FakeInteraction(`bounty:claim:${sessionId}`, { kind: 'select', values: [String(elsewhere), 'abc', String(survive), String(survive)] });
   await handleInteraction(ctx, mixed);
   expect(mixed.steps.at(-1)).toMatchObject({

@@ -78,7 +78,7 @@ test('a player sees the session bounties, claims one and finds it in their list'
 
   const before = await send('GET', `/api/sessions/${session.id}/bounties`, sid);
   expect(before.statusCode).toBe(200);
-  expect(before.json<SessionBountiesDto>()).toMatchObject({ sessionId: session.id, attended: true, open: true, bounties: [{ id }], myClaims: [] });
+  expect(before.json<SessionBountiesDto>()).toMatchObject({ sessionId: session.id, open: true, bounties: [{ id }], myClaims: [] });
 
   const claimed = await send('POST', `/api/sessions/${session.id}/bounties/${id}/claim`, sid, {});
   expect(claimed.statusCode).toBe(201);
@@ -94,14 +94,29 @@ test('a player sees the session bounties, claims one and finds it in their list'
   expect(mine.json<BountyClaimDto[]>().map((c) => c.id)).toEqual([dto.id]);
 });
 
-test('claim errors come back with their Vietnamese message; odd ids are 404', async () => {
+test('a member who never joined the session sees the button state and can claim (owner decision 2026-10-30)', async () => {
   const id = await bountyId();
   const stranger = await sidFor(await createMember(testDb));
+  const card = await send('GET', `/api/sessions/${session.id}/bounties`, stranger);
+  expect(card.json<SessionBountiesDto>()).toMatchObject({ open: true, myClaims: [] });
   const res = await send('POST', `/api/sessions/${session.id}/bounties/${id}/claim`, stranger, {});
-  expect(res.statusCode).toBe(403);
-  expect(res.json()).toEqual({ error: { code: 'BOUNTY_NOT_ATTENDED', message: 'Bạn chưa tham gia buổi này' } });
+  expect(res.statusCode).toBe(201);
+  expect(res.json<BountyClaimDto>()).toMatchObject({ bounty: { id }, status: 'pending', source: 'web' });
 
+  // Đã bấm Tham gia rồi huỷ cũng nhận được.
+  const left = await createMember(testDb);
+  await testDb.attendance.create({ data: { sessionId: session.id, memberId: left.id, status: 'cancelled' } });
+  const viaCancelled = await send('POST', `/api/sessions/${session.id}/bounties/${id}/claim`, await sidFor(left), {});
+  expect(viaCancelled.statusCode).toBe(201);
+});
+
+test('claim errors come back with their Vietnamese message; odd ids are 404', async () => {
+  const id = await bountyId();
   const sid = await sidFor(player);
+  const res = await send('POST', `/api/sessions/${session.id}/bounties/999999/claim`, sid, {});
+  expect(res.statusCode).toBe(400);
+  expect(res.json()).toEqual({ error: { code: 'BOUNTY_NOT_APPLICABLE', message: 'Mục treo thưởng không áp dụng cho buổi này' } });
+
   expect((await send('POST', `/api/sessions/${session.id}/bounties/abc/claim`, sid, {})).statusCode).toBe(404);
   expect((await send('POST', `/api/sessions/0/bounties/${id}/claim`, sid, {})).statusCode).toBe(404);
   expect((await send('GET', '/api/sessions/abc/bounties', sid)).statusCode).toBe(404);

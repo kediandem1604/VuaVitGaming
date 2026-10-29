@@ -4,9 +4,9 @@
  *
  * Mỗi mục: icon role (🎯 khi "Mọi role"), tên, mô tả nhỏ, nhãn `+{điểm}` màu vàng. Bên dưới:
  * - đã nhận → chip trạng thái ("Chờ duyệt" / "Đã nhận +{điểm}" / "Bị từ chối: {lý do}" / "Đã bị huỷ: {lý do}");
- * - chưa nhận, đã tham gia và còn hạn (`open`) → nút "Tôi đã hoàn thành" (`btn-secondary`, tên cho trình
+ * - chưa nhận và còn hạn (`open`) → nút "Tôi đã hoàn thành" (`btn-secondary`, tên cho trình
  *   đọc màn hình kèm tên mục); chip nằm trong vùng `role="status"` có sẵn nên được đọc lên sau khi nhận;
- * - hết hạn → không gì. Chưa tham gia mà còn hạn → một dòng nhỏ cuối thẻ "Tham gia buổi để nhận thưởng".
+ * - hết hạn → không gì. Không cần đã tham gia buổi: mọi thành viên đều nhận được (chủ server chốt 2026-10-30).
  * Lần nhận của mục đã tắt (không còn trong `bounties`) vẫn hiện kèm chip, để người chơi thấy kết quả.
  * Không có mục nào và không có lần nhận nào → không vẽ gì.
  *
@@ -68,7 +68,7 @@ export function BountyCard({ data, session, onClaim, claimingId, error, classNam
   const stagger = useStaggerOnce(true);
   if (!hasBountyRows(data)) return null;
   const rows = rowsOf(data);
-  const canClaim = data.open && data.attended;
+  const canClaim = data.open;
 
   return (
     <section aria-labelledby={headingId} className={cx('panel flex min-w-0 flex-col gap-3', className)}>
@@ -122,8 +122,6 @@ export function BountyCard({ data, session, onClaim, claimingId, error, classNam
           </li>
         ))}
       </ul>
-
-      {data.open && !data.attended && <p className="text-sm text-night-300">Tham gia buổi để nhận thưởng</p>}
     </section>
   );
 }

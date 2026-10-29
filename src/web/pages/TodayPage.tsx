@@ -13,8 +13,8 @@
  * thẻ buổi xếp hai cột như cũ (không chừa cột phải trống). Cách xếp chỉ chọn khi mọi lần hỏi treo
  * thưởng của ngày đã xong (thành công hay lỗi) — trước đó giữ lưới cũ, nên đổi tối đa một lần. Hỏi treo thưởng lỗi thì lặng lẽ không vẽ thẻ
  * (phần phụ, không chắn trang). Nhận xong: chèn lần nhận vào cache của thẻ, làm mới hàng chờ duyệt
- * và "Treo thưởng của tôi"; lỗi thì hiện dưới mục đó và tải lại thẻ. Điểm danh xong cũng tải lại thẻ
- * (`attended` đổi).
+ * và "Treo thưởng của tôi"; lỗi thì hiện dưới mục đó và tải lại thẻ. Nhận không cần tham gia buổi, nên
+ * điểm danh không đụng tới thẻ.
  *
  * Điểm danh: cập nhật lạc quan (ghế đổi ngay khi bấm, xem `TodaySession`), rồi thay đúng
  * buổi đó trong cache bằng DTO trả về; lỗi thì trả lại như cũ, hiện thông báo ngay dưới thẻ
@@ -173,8 +173,6 @@ function TodaySession({ session, reminders, paired }: { session: SessionDto; rem
       queryClient.setQueryData<SessionDto[]>(SESSIONS_TODAY_KEY, (current) =>
         current?.map((item) => (item.id === updated.id ? updated : item)),
       );
-      // Tham gia/huỷ đổi `attended` của thẻ treo thưởng.
-      void queryClient.invalidateQueries({ queryKey: bountiesQuery.queryKey });
     },
     onError: (_error, _going, context) => {
       if (context?.previous) queryClient.setQueryData(SESSIONS_TODAY_KEY, context.previous);

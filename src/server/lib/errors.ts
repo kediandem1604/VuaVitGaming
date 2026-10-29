@@ -34,7 +34,6 @@ export type ErrorCode =
   | 'HIGHLIGHT_CHANNEL_UNAVAILABLE'
   | 'DISCORD_UNAVAILABLE'
   | 'BOUNTY_HAS_CLAIMS'
-  | 'BOUNTY_NOT_ATTENDED'
   | 'BOUNTY_NOT_APPLICABLE'
   | 'BOUNTY_CLAIM_EXPIRED'
   | 'BOUNTY_ALREADY_CLAIMED';
@@ -78,7 +77,6 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   // Mục treo thưởng đã có lần nhận (kể cả bị từ chối) — giữ lịch sử, chỉ cho tắt.
   BOUNTY_HAS_CLAIMS: { status: 409, message: 'Mục đã có lần nhận — chỉ tắt được, không xoá được' },
   // Luật nhận treo thưởng (spec treo thưởng §4) — câu đúng nguyên văn spec, web và Discord cùng hiện.
-  BOUNTY_NOT_ATTENDED: { status: 403, message: 'Bạn chưa tham gia buổi này' },
   BOUNTY_NOT_APPLICABLE: { status: 400, message: 'Mục treo thưởng không áp dụng cho buổi này' },
   BOUNTY_CLAIM_EXPIRED: { status: 400, message: 'Đã quá hạn nhận (3 ngày sau buổi chơi)' },
   BOUNTY_ALREADY_CLAIMED: { status: 409, message: 'Bạn đã nhận mục này ở buổi này rồi' },

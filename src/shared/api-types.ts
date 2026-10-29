@@ -610,13 +610,12 @@ export interface BountyClaimDto {
 
 /**
  * `GET /api/sessions/:id/bounties`: mục áp dụng cho buổi (thứ tự của `bountiesForSession`) và mọi lần
- * nhận của người xem ở buổi này (ghép theo `bounty.id`; có thể có lần nhận của mục đã tắt). `attended`:
- * người xem có điểm danh `going`. `open`: buổi chưa huỷ, ngày buổi trong `[hôm nay − 3, hôm nay]` và
- * mùa chưa chốt — `false` thì ẩn nút "Tôi đã hoàn thành" (không tính `attended`).
+ * nhận của người xem ở buổi này (ghép theo `bounty.id`; có thể có lần nhận của mục đã tắt). `open`: buổi
+ * chưa huỷ, ngày buổi trong `[hôm nay − 3, hôm nay]` và mùa chưa chốt — `true` thì mọi thành viên thấy nút
+ * "Tôi đã hoàn thành" (không cần đã tham gia buổi), `false` thì ẩn nút.
  */
 export interface SessionBountiesDto {
   sessionId: number;
-  attended: boolean;
   open: boolean;
   bounties: BountyDto[];
   myClaims: BountyClaimDto[];

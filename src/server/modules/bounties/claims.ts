@@ -4,15 +4,15 @@
  * duyệt trên web.
  *
  * Nhận — kiểm tra theo đúng thứ tự: người nhận còn trong server (`FORBIDDEN`) → buổi có (`NOT_FOUND`)
- * và không bị huỷ (`SESSION_NOT_OPEN`) → có điểm danh `going` ở buổi (`BOUNTY_NOT_ATTENDED`) → mục
- * đang bật và áp dụng cho buổi — riêng buổi đó hoặc mọi buổi (`BOUNTY_NOT_APPLICABLE`) → ngày VN của
+ * và không bị huỷ (`SESSION_NOT_OPEN`) → mục đang bật và áp dụng cho buổi — riêng buổi đó hoặc mọi buổi (`BOUNTY_NOT_APPLICABLE`) → ngày VN của
  * buổi trong `[hôm nay − 3, hôm nay]` (quá hạn → `BOUNTY_CLAIM_EXPIRED`; buổi ngày sau →
  * `VALIDATION` "Buổi chơi chưa diễn ra") → mùa của ngày buổi chưa chốt (`SEASON_CLOSED`) → chưa có lần
  * nhận cùng (mục, người, buổi), kể cả đã bị từ chối (`BOUNTY_ALREADY_CLAIMED`). Lần nhận chép `roleId`
  * và `points` của mục lúc nhận. Việc ghi nằm trong giao dịch khoá dòng `seasons` (`FOR UPDATE`) như
  * duyệt/huỷ — lần nhận không lọt vào sau lúc chốt mùa; hai lần nhận trùng chạy song song (web và
  * Discord cùng lúc) thì UNIQUE `(bounty_id, member_id, session_id)` chặn lần sau → cũng
- * `BOUNTY_ALREADY_CLAIMED`.
+ * `BOUNTY_ALREADY_CLAIMED`. Không cần điểm danh: mọi thành viên còn trong server đều nhận được, kể cả
+ * chưa bấm Tham gia hay đã huỷ tham gia (chủ server chốt 2026-10-30).
  *
  * Duyệt/từ chối/huỷ duyệt: giống lần khai (`stats/reports.ts`) — mod/admin; mod không tự duyệt/huỷ
  * phần của mình (admin được); lý do 1–200 ký tự sau khi cắt khoảng trắng; ghi trong giao dịch khoá dòng
@@ -106,12 +106,11 @@ export async function claimBounty(
   const session = isId(sessionId)
     ? await ctx.db.gameSession.findUnique({
         where: { id: sessionId },
-        select: { status: true, startsAt: true, attendances: { where: { memberId }, select: { status: true } } },
+        select: { status: true, startsAt: true },
       })
     : null;
   if (!session) throw appError('NOT_FOUND');
   if (session.status === 'cancelled') throw appError('SESSION_NOT_OPEN', 'Buổi chơi đã bị huỷ');
-  if (session.attendances[0]?.status !== 'going') throw appError('BOUNTY_NOT_ATTENDED');
 
   const bounty = isId(bountyId)
     ? await ctx.db.bounty.findUnique({ where: { id: bountyId }, select: { active: true, sessionId: true, roleId: true, points: true } })
@@ -170,7 +169,7 @@ export async function getSessionBounties(ctx: Ctx, viewerId: number, sessionId: 
   const session = isId(sessionId)
     ? await ctx.db.gameSession.findUnique({
         where: { id: sessionId },
-        select: { status: true, startsAt: true, attendances: { where: { memberId: viewerId }, select: { status: true } } },
+        select: { status: true, startsAt: true },
       })
     : null;
   if (!session) throw appError('NOT_FOUND');
@@ -186,7 +185,6 @@ export async function getSessionBounties(ctx: Ctx, viewerId: number, sessionId: 
   ]);
   return {
     sessionId,
-    attended: session.attendances[0]?.status === 'going',
     open,
     bounties,
     myClaims: mine.map(toDto),

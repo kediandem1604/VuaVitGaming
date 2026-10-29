@@ -40,7 +40,7 @@ type Handler = (init: RequestInit | undefined, url: string) => Response | Promis
 const BOUNTIES_PATH = /^GET \/api\/sessions\/(\d+)\/bounties$/;
 const noBounties: Handler = (_init, url) => {
   const sessionId = Number(BOUNTIES_PATH.exec(`GET ${url.split('?')[0]}`)?.[1]);
-  return json(200, { sessionId, attended: false, open: true, bounties: [], myClaims: [] });
+  return json(200, { sessionId, open: true, bounties: [], myClaims: [] });
 };
 
 /** fetch giả định tuyến theo `METHOD path` (bỏ query string). */
@@ -388,7 +388,7 @@ const claim = (over: Partial<BountyClaimDto> & Pick<BountyClaimDto, 'id' | 'stat
   ...over,
 });
 
-const sessionBounties = (over: Partial<SessionBountiesDto> = {}): SessionBountiesDto => ({ sessionId: 1, attended: true, open: true, bounties, myClaims: [], ...over });
+const sessionBounties = (over: Partial<SessionBountiesDto> = {}): SessionBountiesDto => ({ sessionId: 1, open: true, bounties, myClaims: [], ...over });
 
 const oneSession: SessionDto = { ...base, id: 1, startsAt: '2026-10-22T12:00:00.000Z', attendees: [a, me], myStatus: 'going' };
 
@@ -599,12 +599,14 @@ test('a claim of a bounty that was turned off still shows on the card', async ()
   expect(items[0]).toHaveTextContent('Chờ duyệt');
 });
 
-test('not attending: no button, a small "Tham gia buổi để nhận thưởng" note', async () => {
-  stubFetch({ ...dayRoutes([oneSession]), 'GET /api/sessions/1/bounties': () => json(200, sessionBounties({ attended: false })) });
+// Chưa tham gia hay đã huỷ tham gia (`myStatus: null`) vẫn nhận được — chủ server chốt 2026-10-30.
+test('not attending: the button still shows to every member while open', async () => {
+  const notGoing: SessionDto = { ...oneSession, attendees: [a], myStatus: null };
+  stubFetch({ ...dayRoutes([notGoing]), 'GET /api/sessions/1/bounties': () => json(200, sessionBounties()) });
   renderPage();
   const card = await bountyCard();
-  expect(within(card).getByText('Tham gia buổi để nhận thưởng')).toBeInTheDocument();
-  expect(within(card).queryByRole('button', { name: /^Tôi đã hoàn thành/ })).not.toBeInTheDocument();
+  expect(within(card).getAllByRole('button', { name: /^Tôi đã hoàn thành/ })).toHaveLength(2);
+  expect(within(card).queryByText('Tham gia buổi để nhận thưởng')).not.toBeInTheDocument();
 });
 
 test('expired (open = false): the button is hidden, the bounties still show', async () => {
@@ -613,23 +615,5 @@ test('expired (open = false): the button is hidden, the bounties still show', as
   const card = await bountyCard();
   expect(within(card).getAllByRole('listitem')).toHaveLength(2);
   expect(within(card).queryByRole('button', { name: /^Tôi đã hoàn thành/ })).not.toBeInTheDocument();
-  expect(within(card).queryByText('Tham gia buổi để nhận thưởng')).not.toBeInTheDocument();
 });
 
-test('joining a session refreshes its bounty card (attended changes)', async () => {
-  const notGoing: SessionDto = { ...oneSession, attendees: [a], myStatus: null };
-  let attended = false;
-  stubFetch({
-    ...dayRoutes([notGoing]),
-    'GET /api/sessions/1/bounties': () => json(200, sessionBounties({ attended })),
-    'POST /api/sessions/1/attendance': () => {
-      attended = true;
-      return json(200, oneSession);
-    },
-  });
-  renderPage();
-  const card = await bountyCard();
-  expect(within(card).getByText('Tham gia buổi để nhận thưởng')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Tham gia' }));
-  expect(await within(card).findAllByRole('button', { name: /^Tôi đã hoàn thành/ })).toHaveLength(2);
-});

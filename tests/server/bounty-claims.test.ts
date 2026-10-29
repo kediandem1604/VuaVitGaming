@@ -107,11 +107,11 @@ test('a member who left the server cannot claim', async () => {
   await expect(claimBounty(ctx, a.id, session.id, id, 'web')).rejects.toMatchObject({ code: 'FORBIDDEN' });
 });
 
-test('only members marked going at the session can claim', async () => {
+test('claiming does not need attendance: no attendance or a cancelled one can claim (owner decision 2026-10-30)', async () => {
   const id = await bounty();
-  await expect(claimBounty(ctx, b.id, session.id, id, 'web')).rejects.toMatchObject({ message: 'Bạn chưa tham gia buổi này' });
-  await going(session.id, b.id, 'cancelled');
-  await expect(claimBounty(ctx, b.id, session.id, id, 'web')).rejects.toMatchObject({ message: 'Bạn chưa tham gia buổi này' });
+  await expect(claimBounty(ctx, b.id, session.id, id, 'web')).resolves.toMatchObject({ member: { id: b.id }, status: 'pending' });
+  await going(session.id, mod.id, 'cancelled');
+  await expect(claimBounty(ctx, mod.id, session.id, id, 'discord')).resolves.toMatchObject({ member: { id: mod.id }, status: 'pending', source: 'discord' });
 });
 
 test('a missing session is not found; a cancelled one cannot be claimed; an ended one can', async () => {
@@ -194,18 +194,17 @@ test('session bounties list the applicable bounties, the viewer claims and wheth
   const big = await bounty({ points: 9, sessionId: session.id });
   const small = await bounty({ points: 2 });
   const claimed = await claimBounty(ctx, a.id, session.id, small, 'web');
-  await going(session.id, b.id);
   await claimBounty(ctx, b.id, session.id, big, 'web');
 
   const mine = await getSessionBounties(ctx, a.id, session.id);
+  expect(mine).not.toHaveProperty('attended');
   expect(mine.sessionId).toBe(session.id);
-  expect(mine.attended).toBe(true);
   expect(mine.open).toBe(true);
   expect(mine.bounties.map((x) => x.id)).toEqual([big, small]);
   expect(mine.myClaims).toEqual([claimed]);
 
   const stranger = await getSessionBounties(ctx, mod.id, session.id);
-  expect(stranger).toMatchObject({ attended: false, open: true, myClaims: [] });
+  expect(stranger).toMatchObject({ open: true, myClaims: [] });
 
   setNow('2026-10-14T05:00:00Z');
   expect((await getSessionBounties(ctx, a.id, session.id)).open).toBe(false);
