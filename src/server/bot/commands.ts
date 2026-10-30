@@ -87,7 +87,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
         {
           type: ApplicationCommandOptionType.String,
           name: OPTION.day,
-          description: 'Ngày chơi dd/MM hoặc YYYY-MM-DD (bỏ trống = hôm nay)',
+          description: 'Ngày chơi dd/MM hoặc YYYY-MM-DD (bỏ trống = hôm nay; trước 6:00 sáng = hôm qua)',
         },
         {
           type: ApplicationCommandOptionType.String,

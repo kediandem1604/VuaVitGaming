@@ -245,14 +245,17 @@ export interface ReportDto {
   penaltyOf: AccusationDto | null;
 }
 
-/** Trạng thái báo cáo người chơi: chờ duyệt, đúng, bị bác, bị thay thế (trùng vụ đã duyệt trước). */
-export type AccusationStatus = 'pending' | 'approved' | 'rejected' | 'superseded';
+/**
+ * Trạng thái báo cáo người chơi: chờ duyệt, đúng, bị bác, bị thay thế (trùng vụ đã duyệt trước), bị huỷ
+ * duyệt (chỉ báo cáo độc lập, từ `approved`, trạng thái cuối).
+ */
+export type AccusationStatus = 'pending' | 'approved' | 'rejected' | 'superseded' | 'revoked';
 
 /**
- * Báo cáo người chơi gửi kèm `POST/PATCH /api/reports` (trường `accusation`; PATCH `null` = bỏ báo
- * cáo, vắng mặt = giữ nguyên). Bốn trường bắt buộc: người bị báo cáo (thành viên đang hoạt động,
- * khác chính mình), role của họ (đang bật, có chỉ số phạt), người bị bắn (đang hoạt động, khác người
- * bị báo cáo), phe của người bị bắn.
+ * Bốn trường của một báo cáo người chơi: người bị báo cáo (thành viên đang hoạt động, khác chính mình),
+ * role của họ (đang bật, có chỉ số phạt), người bị bắn (đang hoạt động, khác người bị báo cáo), phe của
+ * người bị bắn. `POST/PATCH /api/reports` KHÔNG còn nhận trường `accusation` (400 `VALIDATION` "Báo cáo
+ * người chơi gửi ở tab riêng") — gửi qua `POST /api/accusations` (`StandaloneAccusationInputDto`).
  */
 export interface AccusationInputDto {
   accusedId: number;
@@ -275,6 +278,52 @@ export interface AccusationDto {
   victim: { id: number; displayName: string };
   victimFaction: Faction;
   rejectReason: string | null;
+}
+
+/**
+ * Thân `POST /api/accusations` — báo cáo người chơi độc lập (tab "Báo cáo người chơi", spec 2026-10-31
+ * §B). `playedOn` `YYYY-MM-DD` trong `[hôm nay − 3, hôm nay]` giờ VN (mặc định ở web: `defaultPlayedOn`
+ * của `src/shared/report-day.ts`); `sessionId` không bắt buộc (buổi không bị huỷ, cùng ngày VN; mặc định
+ * `pickDefaultSession`); `note` tuỳ chọn, cắt khoảng trắng, ≤ 300 ký tự (rỗng → null). Tối đa 10 báo
+ * cáo mỗi người mỗi ngày VN (429 `RATE_LIMITED`).
+ */
+export interface StandaloneAccusationInputDto extends AccusationInputDto {
+  playedOn: string;
+  sessionId?: number | null;
+  note?: string | null;
+}
+
+/**
+ * Một báo cáo người chơi độc lập (`GET /api/accusations/mine`, `GET /api/admin/accusations`, trả về
+ * sau `POST /api/accusations`). Ngày giờ ISO 8601 (UTC); `playedOn` `YYYY-MM-DD` (ngày VN).
+ * - `status` / `rejectReason`: `pending` "Đang chờ duyệt"; `approved` "Báo cáo đúng · bạn +1 điểm";
+ *   `rejected` lý do bác (chốt mùa: "Mùa đã chốt"); `superseded` "Đã có người báo cáo trước"
+ *   (`rejectReason` đúng câu đó); `revoked` lý do huỷ.
+ * - `duplicate`: chỉ ở "Báo cáo của tôi" — `true` khi báo cáo còn `pending` nhưng trùng vụ với một báo
+ *   cáo khác đang chờ sớm hơn (mod quyết báo cáo đó trước; bị bác thì báo cáo này hiện lên). Ở danh sách
+ *   quản trị luôn `false` (hàng chờ không có báo cáo trùng bị ẩn).
+ * - `session`: buổi đã chọn hoặc `null`. `accusedRole.faction` để nhóm/hiện icon.
+ * - `reviewedBy`/`reviewedAt`: chỉ danh sách quản trị (ở "của tôi" luôn `null`); `reviewedAt` có cả ở
+ *   báo cáo bị bác/thay thế. Báo cáo bị bác tự động lúc chốt mùa: `reviewedBy = null`.
+ * Dòng hàng chờ: "{reporter} — {accused} ({accusedRole.icon} {accusedRole.nameVi}) bắn {victim} — phe
+ * {victimFaction}", ngày, buổi, ghi chú.
+ */
+export interface StandaloneAccusationDto {
+  id: number;
+  status: AccusationStatus;
+  reporter: { id: number; displayName: string };
+  accused: { id: number; displayName: string };
+  accusedRole: { id: number; nameVi: string; icon: string; faction: Faction; penaltyPoints: number | null };
+  victim: { id: number; displayName: string };
+  victimFaction: Faction;
+  playedOn: string;
+  session: { id: number; startsAt: string; modeName: string } | null;
+  note: string | null;
+  rejectReason: string | null;
+  duplicate: boolean;
+  createdAt: string;
+  reviewedBy: { id: number; displayName: string } | null;
+  reviewedAt: string | null;
 }
 
 /** Một dòng ô chọn người (`GET /api/members/options`): thành viên đang hoạt động, theo tên. */

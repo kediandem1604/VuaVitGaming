@@ -1,8 +1,9 @@
 /**
- * Báo cáo người chơi (spec điểm role §6): người khai gửi kèm một lần khai của mình một báo cáo
- * "{người} (đang chơi {role}) đã bắn {người bị bắn} thuộc {phe}" trong ngày chơi của lần khai.
- * File này giữ phần riêng của báo cáo; `reports.ts` gọi tới trong đúng giao dịch của việc khai,
- * sửa, duyệt và huỷ duyệt.
+ * Báo cáo người chơi (spec điểm role §6): "{người} (đang chơi {role}) đã bắn {người bị bắn} thuộc {phe}".
+ * Hai loại: báo cáo CŨ gửi kèm một lần khai (`reportId` có — không tạo mới được nữa, vẫn duyệt/huỷ qua
+ * lần khai trong `reports.ts`) và báo cáo ĐỘC LẬP gửi ở tab riêng (`reportId` null, spec 2026-10-31 §B,
+ * `standalone-accusations.ts`). File này giữ phần dùng chung: kiểm bốn trường, vụ và báo cáo trùng (cả
+ * hai loại cùng một vụ), tạo/gỡ mục trừ điểm, DM, chốt mùa.
  *
  * Vụ: hai báo cáo cùng (người bị báo cáo, role, người bị bắn, ngày chơi) là một vụ. Một báo cáo
  * `pending` được HIỆN (mod quyết trên khung báo cáo) khi nó là báo cáo `pending` sớm nhất của vụ
@@ -23,6 +24,7 @@
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import type { AccusationDto, AccusationInputDto, Faction } from '../../../shared/api-types.js';
+import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dbToDateOnly, formatVnDay } from '../../lib/time.js';
 
@@ -30,7 +32,7 @@ import { dbToDateOnly, formatVnDay } from '../../lib/time.js';
 export const SUPERSEDED_REASON = 'Đã có người báo cáo trước';
 
 /** Tên phe trong câu "(phe …)" của ghi chú mục trừ điểm và DM. */
-const FACTION_NAME: Record<Faction, string> = { goose: 'Ngỗng', duck: 'Vịt', neutral: 'thứ 3' };
+export const FACTION_NAME: Record<Faction, string> = { goose: 'Ngỗng', duck: 'Vịt', neutral: 'thứ 3' };
 
 const INT32_MAX = 2_147_483_647;
 const idSchema = z.number().int().min(1).max(INT32_MAX);
@@ -51,7 +53,7 @@ type Db = Prisma.TransactionClient;
 // ---------------------------------------------------------------------------
 
 /**
- * Kiểm tra báo cáo gửi kèm lần khai của `reporterId` (spec §6), theo thứ tự: đủ bốn trường đúng
+ * Kiểm tra bốn trường của một báo cáo của `reporterId` (spec §6), theo thứ tự: đủ bốn trường đúng
  * kiểu → không tự báo cáo → người bị bắn khác người bị báo cáo → người bị báo cáo là thành viên
  * đang hoạt động → role đang bật và có chỉ số phạt → người bị bắn là thành viên đang hoạt động.
  * Sai → `VALIDATION` với lời nhắn cụ thể. Trả về báo cáo đã chuẩn hoá.
@@ -76,58 +78,16 @@ export async function validateAccusation(db: Db, reporterId: number, raw: unknow
   return a;
 }
 
-/** Tạo báo cáo `pending` kèm lần khai vừa tạo/sửa; `createdAt` = giờ gửi báo cáo (xếp thứ tự trong vụ). */
-export async function createAccusation(
-  db: Db,
-  report: { id: number; memberId: number; playedOn: Date },
-  a: AccusationInputDto,
-  now: Date,
-): Promise<void> {
-  await db.playerAccusation.create({
-    data: {
-      reportId: report.id,
-      reporterId: report.memberId,
-      accusedId: a.accusedId,
-      accusedRoleId: a.accusedRoleId,
-      victimId: a.victimId,
-      victimFaction: a.victimFaction,
-      playedOn: report.playedOn,
-      createdAt: now,
-    },
-  });
-}
-
 /**
- * Đồng bộ báo cáo khi sửa lần khai còn chờ duyệt (đã cập nhật lần khai trong cùng giao dịch):
- * `undefined` = giữ nguyên (chỉ theo ngày chơi mới của lần khai); `null` = bỏ báo cáo; một báo cáo
- * → giữ nguyên nếu trùng hệt (để không mất chỗ sớm nhất trong vụ), khác thì thay bằng báo cáo mới.
+ * Sửa lần khai còn chờ duyệt (đã cập nhật lần khai trong cùng giao dịch): báo cáo cũ gửi kèm lần khai
+ * (nếu có) theo ngày chơi mới của lần khai. Báo cáo người chơi không còn gửi/sửa/bỏ qua lần khai nữa
+ * (spec 2026-10-31 §B — tab riêng).
  */
-export async function syncAccusationOnEdit(
-  db: Db,
-  report: { id: number; memberId: number; playedOn: Date },
-  next: AccusationInputDto | null | undefined,
-  now: Date,
-): Promise<void> {
-  const existing = await db.playerAccusation.findUnique({ where: { reportId: report.id } });
-  if (next === undefined) {
-    if (existing && existing.playedOn.getTime() !== report.playedOn.getTime()) {
-      await db.playerAccusation.update({ where: { id: existing.id }, data: { playedOn: report.playedOn } });
-    }
-    return;
-  }
-  if (
-    existing &&
-    next !== null &&
-    existing.accusedId === next.accusedId &&
-    existing.accusedRoleId === next.accusedRoleId &&
-    existing.victimId === next.victimId &&
-    existing.victimFaction === next.victimFaction &&
-    existing.playedOn.getTime() === report.playedOn.getTime()
-  ) {
-    return;
-  }
-  if (existing) await db.playerAccusation.delete({ where: { id: existing.id } });
-  if (next !== null) await createAccusation(db, report, next, now);
+export async function syncAccusationOnEdit(db: Db, report: { id: number; playedOn: Date }): Promise<void> {
+  await db.playerAccusation.updateMany({
+    where: { reportId: report.id, NOT: { playedOn: report.playedOn } },
+    data: { playedOn: report.playedOn },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +283,20 @@ export async function applyAccusationReview(
     return null;
   }
 
+  return approveCase(tx, a, reviewed);
+}
+
+/**
+ * Báo cáo `a` (đang hiện, còn `pending`) đúng — trong giao dịch đã khoá dòng mùa: tạo mục trừ điểm cho
+ * người bị báo cáo (`source = 'accusation'`, đã duyệt, `penaltyValue = 1`), báo cáo → `approved` gắn mục
+ * đó, mọi báo cáo `pending` khác của vụ (gắn lần khai hay độc lập) → `superseded`. Dùng chung cho báo cáo
+ * kèm lần khai và báo cáo độc lập. Trả về thông tin DM / kiểm tra hoá thân.
+ */
+export async function approveCase(
+  tx: Db,
+  a: AccusationRow,
+  reviewed: { reviewedById: number; reviewedAt: Date },
+): Promise<PenaltyNotice> {
   // Báo cáo đúng: mục trừ điểm cho người bị báo cáo, rồi gắn vào báo cáo và thay thế báo cáo trùng.
   const phe = FACTION_NAME[a.victimFaction];
   const penalty = await tx.statReport.create({
@@ -335,7 +309,7 @@ export async function applyAccusationReview(
       source: 'accusation',
       status: 'approved',
       note: `Bị báo cáo: bắn ${a.victim.displayName} (phe ${phe})`,
-      createdAt: o.now,
+      createdAt: reviewed.reviewedAt,
       ...reviewed,
     },
   });
@@ -401,6 +375,33 @@ export async function revokePenalty(
   return count === 0 ? null : penaltyNoticeOf(tx, penaltyReportId);
 }
 
+/**
+ * Báo cáo ĐỘC LẬP `approved` đã tạo ra mục trừ điểm `penaltyReportId` (để huỷ dây chuyền khi mod huỷ
+ * riêng mục trừ điểm — +1 của người gửi mất theo), kèm người gửi. Không có → null.
+ */
+export async function standaloneOfPenalty(
+  db: Db,
+  penaltyReportId: number,
+): Promise<{ id: number; reporterId: number; reporterDiscordId: string } | null> {
+  const a = await db.playerAccusation.findFirst({
+    where: { penaltyReportId, reportId: null, status: 'approved' },
+    select: { id: true, reporterId: true, reporter: { select: { discordId: true } } },
+  });
+  return a ? { id: a.id, reporterId: a.reporterId, reporterDiscordId: a.reporter.discordId } : null;
+}
+
+/**
+ * Huỷ báo cáo độc lập `id` (`approved → revoked`, có điều kiện) trong giao dịch huỷ duyệt đã khoá mùa.
+ * Trả về true nếu vừa huỷ được (đã huỷ trước → false, không lỗi).
+ */
+export async function revokeStandalone(tx: Db, id: number, o: { revokerId: number; now: Date; reason: string }): Promise<boolean> {
+  const { count } = await tx.playerAccusation.updateMany({
+    where: { id, reportId: null, status: 'approved' },
+    data: { status: 'revoked', revokedById: o.revokerId, revokedAt: o.now, rejectReason: o.reason },
+  });
+  return count === 1;
+}
+
 /** Thông tin DM của một mục trừ điểm (`source = 'accusation'`) theo báo cáo đã tạo ra nó. */
 export async function penaltyNoticeOf(db: Db, penaltyReportId: number): Promise<PenaltyNotice | null> {
   const a = await db.playerAccusation.findUnique({
@@ -439,9 +440,43 @@ export function penaltyRemovedDmText(n: PenaltyNotice, reason: string): string {
   );
 }
 
+/** "Báo cáo {người} ({role}) bắn {người bị bắn} (phe …) ngày dd/mm" — phần đầu DM cho người gửi báo cáo độc lập. */
+export function describeAccusation(a: { accusedName: string; roleName: string; victimName: string; victimFaction: Faction; playedOn: string }): string {
+  return (
+    `Báo cáo ${a.accusedName} (${a.roleName}) bắn ${a.victimName} (phe ${FACTION_NAME[a.victimFaction]}) ` +
+    `ngày ${formatVnDay(a.playedOn)}`
+  );
+}
+
+/** Gửi DM; Discord lỗi chỉ ghi log (kèm `what` để biết DM gì) — DB đã lưu rồi. */
+export async function safeDm(ctx: Ctx, discordId: string, what: string, text: string): Promise<void> {
+  try {
+    await ctx.notifier.sendDm(discordId, text);
+  } catch (err) {
+    console.error(`[stats] Không gửi được DM ${what} tới ${discordId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Chốt mùa
 // ---------------------------------------------------------------------------
+
+/** Điều kiện "báo cáo độc lập còn chờ duyệt có ngày chơi trong khoảng [first, last]". */
+export function pendingStandaloneIn(first: Date, last: Date): Prisma.PlayerAccusationWhereInput {
+  return { reportId: null, status: 'pending', playedOn: { gte: first, lte: last } };
+}
+
+/**
+ * Bác mọi báo cáo độc lập `pending` có ngày chơi trong khoảng (chốt mùa — spec 2026-10-31 §B) với cùng
+ * lý do, không có người duyệt; trong giao dịch chốt mùa. Trả về số báo cáo bị bác.
+ */
+export async function rejectPendingStandalone(tx: Db, first: Date, last: Date, reason: string, now: Date): Promise<number> {
+  const { count } = await tx.playerAccusation.updateMany({
+    where: pendingStandaloneIn(first, last),
+    data: { status: 'rejected', rejectReason: reason, reviewedAt: now, reviewedById: null },
+  });
+  return count;
+}
 
 /**
  * Bác mọi báo cáo `pending` của các lần khai sắp bị tự từ chối (`reports` — điều kiện lần khai còn

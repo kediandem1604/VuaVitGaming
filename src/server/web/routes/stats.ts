@@ -12,7 +12,6 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type {
-  AccusationInputDto,
   FactionTopDto,
   FactionTotalsDto,
   HallDto,
@@ -85,9 +84,9 @@ const reportBody = z
     playedOn: z.string().regex(VN_DATE),
     sessionId: int32Id.nullish(),
     note: z.string().nullish(),
-    // Báo cáo người chơi (spec điểm role §6): chỉ cần là object hoặc null — thiếu trường, người/role
-    // không hợp lệ, tự báo cáo… do service báo với lời nhắn cụ thể. PATCH `null` = bỏ báo cáo.
-    accusation: z.custom<AccusationInputDto>((v) => typeof v === 'object' && v !== null && !Array.isArray(v)).nullish(),
+    // Báo cáo người chơi không còn gửi kèm lần khai (spec 2026-10-31 §B): có mặt (kể cả null) → service
+    // báo 400 `VALIDATION` "Báo cáo người chơi gửi ở tab riêng" thay vì "Dữ liệu không hợp lệ".
+    accusation: z.unknown().optional(),
   })
   .strict();
 

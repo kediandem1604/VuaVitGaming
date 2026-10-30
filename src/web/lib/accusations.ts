@@ -37,6 +37,7 @@ export function accusationStatusText(a: Pick<AccusationDto, 'status' | 'rejectRe
     approved: viewer === 'reporter' ? 'Báo cáo đúng · bạn +1 điểm' : 'Báo cáo đúng · người báo cáo +1 điểm',
     rejected: a.rejectReason ? `Báo cáo bị bác: ${a.rejectReason}` : 'Báo cáo bị bác',
     superseded: a.rejectReason ?? 'Đã có người báo cáo trước',
+    revoked: a.rejectReason ? `Đã bị huỷ: ${a.rejectReason}` : 'Đã bị huỷ',
   };
   return texts[a.status];
 }

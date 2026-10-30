@@ -8,7 +8,8 @@
  * sau) chạy lại bao nhiêu lần cũng được. Trong MỘT giao dịch: đặt `closedAt` có điều
  * kiện (chỉ lần đổi được từ null mới trao danh hiệu), từ chối mọi lần khai còn chờ duyệt
  * có ngày chơi trong mùa ('Mùa đã chốt', không có người duyệt) cùng báo cáo người chơi kèm
- * chúng (spec điểm role §6) và mọi lần nhận treo thưởng còn chờ duyệt của mùa (spec treo thưởng
+ * chúng (spec điểm role §6), mọi báo cáo người chơi độc lập còn chờ duyệt có ngày chơi trong mùa (spec
+ * 2026-10-31 §B) và mọi lần nhận treo thưởng còn chờ duyệt của mùa (spec treo thưởng
  * §4, cùng lý do), rồi lưu top 1 mỗi role có
  * điểm > 0 vào `role_titles` (`skipDuplicates`). Mùa đã chốt mà gọi lại chỉ dọn lần khai
  * chờ duyệt lọt vào sau giờ chốt (kiểm-tra-rồi-ghi ở `reports.ts` có khe nhỏ) — không
@@ -19,7 +20,8 @@
  * phần ≤ 2000 ký tự, và cờ chỉ tắt khi mọi phần đã gửi được. Discord sập thì lượt sau của
  * bộ hẹn giờ đăng lại cả bảng — phần đã đăng được có thể lặp lại (chấp nhận).
  *
- * Nhắc mod 09:00 ngày 3 tháng sau khi mùa chưa chốt và còn lần khai hay lần nhận treo thưởng chờ duyệt: một lần
+ * Nhắc mod 09:00 ngày 3 tháng sau khi mùa chưa chốt và còn lần khai, báo cáo người chơi độc lập hay lần
+ * nhận treo thưởng chờ duyệt: một lần
  * (`reviewNudgedAt`), và chỉ ghi dấu sau khi Discord đã nhận; đã qua giờ chốt thì không
  * nhắc nữa mà chốt luôn.
  */
@@ -44,7 +46,7 @@ import {
 import { HOT_TX } from '../../lib/tx.js';
 // Vòng import với leaderboard.ts (bên đó dùng `checkSeasonId`, `isSeasonClosed`) là an
 // toàn: hai bên chỉ gọi hàm của nhau lúc chạy, không dùng gì ở cấp module.
-import { rejectPendingAccusations } from '../stats/accusations.js';
+import { pendingStandaloneIn, rejectPendingAccusations, rejectPendingStandalone } from '../stats/accusations.js';
 import { computeSeasonLeaders } from '../stats/leaderboard.js';
 
 const SEASON_ID = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -120,6 +122,18 @@ function pendingClaimsInSeason(seasonId: string): Prisma.BountyClaimWhereInput {
   return { status: 'pending', playedOn: { gte: dateOnlyToDb(first), lte: dateOnlyToDb(last) } };
 }
 
+/** Điều kiện "báo cáo người chơi độc lập còn chờ duyệt có ngày chơi trong mùa". */
+function pendingStandaloneInSeason(seasonId: string): Prisma.PlayerAccusationWhereInput {
+  const { first, last } = seasonDateRange(seasonId);
+  return pendingStandaloneIn(dateOnlyToDb(first), dateOnlyToDb(last));
+}
+
+/** Bác báo cáo độc lập còn chờ của mùa ("Mùa đã chốt"), trong giao dịch chốt; trả về số báo cáo bị bác. */
+function rejectStandaloneOfSeason(tx: Prisma.TransactionClient, seasonId: string, now: Date): Promise<number> {
+  const { first, last } = seasonDateRange(seasonId);
+  return rejectPendingStandalone(tx, dateOnlyToDb(first), dateOnlyToDb(last), SEASON_CLOSED_REASON, now);
+}
+
 /** Từ chối tự động lúc chốt mùa: lý do cố định, không có người duyệt. */
 function autoRejection(now: Date): Prisma.StatReportUncheckedUpdateManyInput {
   return { status: 'rejected', rejectReason: SEASON_CLOSED_REASON, reviewedAt: now, reviewedById: null };
@@ -154,6 +168,7 @@ export async function closeSeason(ctx: Ctx, seasonId: string): Promise<{ titles:
     await rejectPendingAccusations(tx, pendingInSeason(seasonId), SEASON_CLOSED_REASON, now);
     const { count: autoRejected } = await tx.statReport.updateMany({ where: pendingInSeason(seasonId), data: autoRejection(now) });
     await tx.bountyClaim.updateMany({ where: pendingClaimsInSeason(seasonId), data: autoClaimRejection(now) });
+    await rejectStandaloneOfSeason(tx, seasonId, now);
 
     let titles = 0;
     if (wasOpen) {
@@ -317,34 +332,42 @@ async function tendClosedSeason(ctx: Ctx, season: { id: string; summaryPending: 
 }
 
 /**
- * Nhắc mod duyệt nốt hàng chờ của mùa — chỉ khi còn lần khai hoặc lần nhận treo thưởng chờ
- * (cả hai đều bị từ chối "Mùa đã chốt" lúc chốt); tin nhắn nêu từng loại, bỏ loại bằng 0.
+ * Nhắc mod duyệt nốt hàng chờ của mùa — chỉ khi còn lần khai, báo cáo người chơi độc lập hoặc lần nhận
+ * treo thưởng chờ (đều bị từ chối "Mùa đã chốt" lúc chốt); tin nhắn nêu từng loại, bỏ loại bằng 0.
  * Ghi `reviewNudgedAt` SAU khi Discord đã nhận: gửi lỗi thì ném ra (được ghi log) và lượt sau nhắc lại.
  */
 async function nudgeReviewers(ctx: Ctx, seasonId: string, now: Date): Promise<void> {
   const reports = await ctx.db.statReport.count({ where: pendingInSeason(seasonId) });
   const claims = await ctx.db.bountyClaim.count({ where: pendingClaimsInSeason(seasonId) });
-  if (reports === 0 && claims === 0) return;
-  const parts = [reports > 0 ? `${reports} lần khai` : null, claims > 0 ? `${claims} lần nhận treo thưởng` : null].filter((p) => p !== null);
+  const accusations = await ctx.db.playerAccusation.count({ where: pendingStandaloneInSeason(seasonId) });
+  if (reports === 0 && claims === 0 && accusations === 0) return;
+  const parts = [
+    reports > 0 ? `${reports} lần khai` : null,
+    accusations > 0 ? `${accusations} báo cáo người chơi` : null,
+    claims > 0 ? `${claims} lần nhận treo thưởng` : null,
+  ].filter((p) => p !== null);
   await ctx.notifier.announce(`📝 Mod ơi, còn ${parts.join(' và ')} của mùa ${formatSeasonLabel(seasonId)} chờ duyệt. Hạn chót 00:05 ngày 4.`);
   await ctx.db.season.updateMany({ where: { id: seasonId, reviewNudgedAt: null }, data: { reviewNudgedAt: now } });
 }
 
 /**
- * Lần khai / lần nhận treo thưởng chờ duyệt lọt vào mùa đã chốt (khe kiểm-tra-rồi-ghi khi khai
+ * Lần khai / báo cáo người chơi độc lập / lần nhận treo thưởng chờ duyệt lọt vào mùa đã chốt (khe kiểm-tra-rồi-ghi khi khai
  * hay nhận): từ chối như lúc chốt. Đếm trước cho rẻ.
  */
 async function rejectStrayPending(ctx: Ctx, seasonId: string, now: Date): Promise<void> {
   const where = pendingInSeason(seasonId);
   const claimWhere = pendingClaimsInSeason(seasonId);
   const [reports, claims] = [await ctx.db.statReport.count({ where }), await ctx.db.bountyClaim.count({ where: claimWhere })];
-  if (reports === 0 && claims === 0) return;
+  const accusations = await ctx.db.playerAccusation.count({ where: pendingStandaloneInSeason(seasonId) });
+  if (reports === 0 && claims === 0 && accusations === 0) return;
   const counts = await ctx.db.$transaction(async (tx) => {
     await rejectPendingAccusations(tx, where, SEASON_CLOSED_REASON, now);
     const r = (await tx.statReport.updateMany({ where, data: autoRejection(now) })).count;
     const c = (await tx.bountyClaim.updateMany({ where: claimWhere, data: autoClaimRejection(now) })).count;
-    return { r, c };
+    const a = await rejectStandaloneOfSeason(tx, seasonId, now);
+    return { r, c, a };
   });
+  if (counts.a > 0) console.warn(`[seasons] Đã bác ${counts.a} báo cáo người chơi lọt vào mùa ${seasonId} sau giờ chốt`);
   if (counts.r > 0) console.warn(`[seasons] Đã từ chối ${counts.r} lần khai lọt vào mùa ${seasonId} sau giờ chốt`);
   if (counts.c > 0) console.warn(`[seasons] Đã từ chối ${counts.c} lần nhận treo thưởng lọt vào mùa ${seasonId} sau giờ chốt`);
 }

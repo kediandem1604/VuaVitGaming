@@ -19,17 +19,18 @@ import { reviewReport, submitReport } from '../../../src/server/modules/stats/re
 import type { RoleDto } from '../../../src/shared/api-types.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
-import { createMember, roleByKey } from '../../helpers/factories.js';
+import { createMember, createSession, roleByKey } from '../../helpers/factories.js';
 import type { FakeNotifier } from '../../helpers/fakes.js';
 
 let ctx: Ctx;
 let notifier: FakeNotifier;
+let setNow: (iso: string) => void;
 let errors: ReturnType<typeof vi.spyOn>;
 let warns: ReturnType<typeof vi.spyOn>;
 
 beforeEach(async () => {
   await resetDb();
-  ({ ctx, notifier } = makeTestCtx());
+  ({ ctx, notifier, setNow } = makeTestCtx());
   errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   warns = vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -433,6 +434,34 @@ test('/baocao takes dd/MM or YYYY-MM-DD for the day and keeps the note', async (
   await handleInteraction(ctx, iso);
   expect(iso.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 0 mạng chém ngày 20/10. Chờ mod duyệt nhé!');
   expect(await reports()).toHaveLength(2);
+});
+
+test('/baocao without ngay uses the default report day (before 06:00 VN = yesterday) and its default session', async () => {
+  const creator = await createMember(testDb, { displayName: 'Mod' });
+  // Buổi 21:00 và 23:00 ngày 22/10 giờ VN, một buổi 22:00 bị huỷ.
+  await createSession(testDb, { startsAt: new Date('2026-10-22T14:00:00Z'), createdById: creator.id });
+  const late = await createSession(testDb, { startsAt: new Date('2026-10-22T16:00:00Z'), createdById: creator.id });
+  await createSession(testDb, { startsAt: new Date('2026-10-22T15:00:00Z'), status: 'cancelled', createdById: creator.id });
+
+  // 05:30 ngày 23/10 giờ VN → ngày chơi 22/10, buổi đã bắt đầu gần nhất 23:00.
+  setNow('2026-10-22T22:30:00Z');
+  const i = baocao({ role: 'swordsman', so_lieu: 2 });
+  await handleInteraction(ctx, i);
+  expect(i.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 2 mạng chém ngày 22/10. Chờ mod duyệt nhé!');
+  expect((await reports())[0]).toMatchObject({ playedOn: new Date('2026-10-22T00:00:00Z'), sessionId: late.id });
+
+  // 06:00 ngày 23/10 → hôm nay (23/10), chưa có buổi → không gắn buổi.
+  setNow('2026-10-22T23:00:00Z');
+  const today = baocao({ role: 'swordsman', so_lieu: 1 });
+  await handleInteraction(ctx, today);
+  expect(today.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 1 mạng chém ngày 23/10. Chờ mod duyệt nhé!');
+  expect((await reports())[1]).toMatchObject({ playedOn: new Date('2026-10-23T00:00:00Z'), sessionId: null });
+
+  // Nhập `ngay` rõ ràng → không tự gắn buổi.
+  const explicit = baocao({ role: 'swordsman', so_lieu: 1, ngay: '22/10' });
+  await handleInteraction(ctx, explicit);
+  expect((await reports())[2]).toMatchObject({ playedOn: new Date('2026-10-22T00:00:00Z'), sessionId: null });
+  expect(errors).not.toHaveBeenCalled();
 });
 
 test('/baocao resolves a role typed as its exact Vietnamese name, ignoring case and diacritics', async () => {

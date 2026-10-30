@@ -69,14 +69,17 @@ const accusation = (o: Partial<AccusationInputDto> = {}): AccusationInputDto => 
   ...o,
 });
 
-/** Khai Vịt 2 mạng ngày 10/10 (mặc định An) kèm báo cáo `acc`; trả về id lần khai. */
+/**
+ * Khai Vịt 2 mạng ngày 10/10 (mặc định An) kèm báo cáo CŨ gắn lần khai `acc` (dữ liệu có từ trước khi
+ * tách tab — giờ không gửi kèm được nữa nên chèn thẳng vào DB, `createdAt` = giờ của ctx); trả về id lần khai.
+ */
 async function submitWith(acc: AccusationInputDto | null = accusation(), o: { memberId?: number; playedOn?: string } = {}): Promise<number> {
-  const r = await submitReport(ctx, o.memberId ?? an.id, {
-    roleId: duck.id,
-    value: 2,
-    playedOn: o.playedOn ?? PLAYED_ON,
-    ...(acc ? { accusation: acc } : {}),
-  });
+  const r = await submitReport(ctx, o.memberId ?? an.id, { roleId: duck.id, value: 2, playedOn: o.playedOn ?? PLAYED_ON });
+  if (acc) {
+    await testDb.playerAccusation.create({
+      data: { ...acc, reportId: r.id, reporterId: r.memberId, playedOn: r.playedOn, createdAt: ctx.now() },
+    });
+  }
   return r.id;
 }
 
@@ -87,21 +90,30 @@ const approveBoth = (id: number, by = mod) => review(by, id, { approve: true, ac
 // Gửi, sửa, bỏ
 // ---------------------------------------------------------------------------
 
-test('an accusation rides along a new report; PATCH replaces, keeps, moves its date, or removes it (null)', async () => {
+test('reports no longer take an accusation (POST/PATCH, even null) → VALIDATION; nothing is written', async () => {
+  const withAcc = { roleId: duck.id, value: 2, playedOn: PLAYED_ON, accusation: accusation() } as Parameters<typeof submitReport>[2];
+  await expect(submitReport(ctx, an.id, withAcc)).rejects.toMatchObject({ code: 'VALIDATION', message: 'Báo cáo người chơi gửi ở tab riêng' });
+  const withNull = { roleId: duck.id, value: 2, playedOn: PLAYED_ON, accusation: null } as Parameters<typeof submitReport>[2];
+  await expect(submitReport(ctx, an.id, withNull)).rejects.toMatchObject({ code: 'VALIDATION' });
+  expect(await testDb.statReport.count()).toBe(0);
+
+  const id = await submitWith(null);
+  for (const acc of [accusation(), null]) {
+    await expect(updateOwnReport(ctx, an.id, id, { accusation: acc } as Parameters<typeof updateOwnReport>[3])).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: 'Báo cáo người chơi gửi ở tab riêng',
+    });
+  }
+  expect(await testDb.playerAccusation.count()).toBe(0);
+});
+
+test('an old accusation attached to a pending report still shows on it and follows its new played day', async () => {
   const id = await submitWith();
-  expect(await accusationOf(id)).toMatchObject({
-    reporterId: an.id,
-    accusedId: binh.id,
-    accusedRoleId: vigilante.id,
-    victimId: cuong.id,
-    victimFaction: 'goose',
-    playedOn: dateOnlyToDb(PLAYED_ON),
-    status: 'pending',
-    createdAt: new Date(NOW),
-  });
+  const first = await accusationOf(id);
+  expect(first).toMatchObject({ reporterId: an.id, playedOn: dateOnlyToDb(PLAYED_ON), status: 'pending', reportId: id });
   const dto = await getReportDto(ctx, id);
   expect(dto.accusation).toEqual({
-    id: (await accusationOf(id)).id,
+    id: first.id,
     status: 'pending',
     accused: { id: binh.id, displayName: 'Bình' },
     accusedRole: { id: vigilante.id, nameVi: 'Dân phòng', icon: vigilante.icon, penaltyPoints: 3 },
@@ -112,53 +124,8 @@ test('an accusation rides along a new report; PATCH replaces, keeps, moves its d
   expect(dto.accusationDuplicate).toBe(false);
   expect(dto.penaltyOf).toBeNull();
 
-  // Không gửi `accusation` → giữ nguyên; đổi ngày chơi → báo cáo theo ngày mới.
-  const first = await accusationOf(id);
   await updateOwnReport(ctx, an.id, id, { value: 3, playedOn: '2026-10-09' });
   expect(await accusationOf(id)).toMatchObject({ id: first.id, playedOn: dateOnlyToDb('2026-10-09') });
-
-  // Gửi y hệt → không tạo lại (giữ chỗ sớm nhất trong vụ); gửi khác → thay.
-  await updateOwnReport(ctx, an.id, id, { accusation: accusation() });
-  expect((await accusationOf(id)).id).toBe(first.id);
-  await updateOwnReport(ctx, an.id, id, { accusation: accusation({ victimId: dung.id, victimFaction: 'duck' }) });
-  expect(await accusationOf(id)).toMatchObject({ victimId: dung.id, victimFaction: 'duck', status: 'pending' });
-
-  // `null` = bỏ báo cáo.
-  await updateOwnReport(ctx, an.id, id, { accusation: null });
-  expect(await testDb.playerAccusation.count()).toBe(0);
-  expect((await getReportDto(ctx, id)).accusation).toBeNull();
-
-  // Thêm báo cáo khi sửa lần khai chưa có.
-  const plain = await submitWith(null);
-  await updateOwnReport(ctx, an.id, plain, { accusation: accusation() });
-  expect((await accusationOf(plain)).status).toBe('pending');
-});
-
-test('accusation checks: all four fields, no self-accusation, victim ≠ accused, active members, a role with a penalty', async () => {
-  const left = await createMember(testDb, { displayName: 'Đã rời', status: 'left' });
-  const cases: [unknown, string][] = [
-    [{ accusedId: binh.id, accusedRoleId: vigilante.id, victimId: cuong.id }, 'Báo cáo cần đủ người bị báo cáo, role, người bị bắn và phe'],
-    [{ ...accusation(), victimFaction: 'bird' }, 'Báo cáo cần đủ người bị báo cáo, role, người bị bắn và phe'],
-    [accusation({ accusedId: an.id }), 'Không thể tự báo cáo chính mình'],
-    [accusation({ victimId: binh.id }), 'Người bị bắn phải khác người bị báo cáo'],
-    [accusation({ accusedId: left.id }), 'Người bị báo cáo không còn trong server'],
-    [accusation({ accusedId: 99_999 }), 'Người bị báo cáo không còn trong server'],
-    [accusation({ accusedRoleId: duck.id }), 'Role bị báo cáo phải đang bật và có điểm trừ'],
-    [accusation({ victimId: left.id }), 'Người bị bắn không còn trong server'],
-  ];
-  for (const [acc, message] of cases) {
-    await expect(submitWith(acc as AccusationInputDto), message).rejects.toMatchObject({ code: 'VALIDATION', message });
-  }
-  // Không lần khai nào được tạo khi báo cáo sai.
-  expect(await testDb.statReport.count()).toBe(0);
-
-  // Sửa cũng kiểm như vậy, và báo cáo cũ còn nguyên.
-  const id = await submitWith();
-  await expect(updateOwnReport(ctx, an.id, id, { accusation: accusation({ accusedId: an.id }) })).rejects.toMatchObject({
-    code: 'VALIDATION',
-    message: 'Không thể tự báo cáo chính mình',
-  });
-  expect((await accusationOf(id)).accusedId).toBe(binh.id);
 });
 
 // ---------------------------------------------------------------------------
@@ -360,8 +327,8 @@ test('a decision sent for an accusation that is hidden or gone → NOT_PENDING "
     code: 'NOT_PENDING',
     message: 'Lần khai vừa được sửa, hãy xem lại',
   });
-  // Người khai vừa bỏ báo cáo trước khi mod bấm.
-  await updateOwnReport(ctx, an.id, first, { accusation: null });
+  // Báo cáo biến mất trước khi mod bấm.
+  await testDb.playerAccusation.delete({ where: { reportId: first } });
   await expect(approveBoth(first)).rejects.toMatchObject({ code: 'NOT_PENDING', message: 'Lần khai vừa được sửa, hãy xem lại' });
   expect(await penaltyRows()).toHaveLength(0);
   expect((await reportRow(first)).status).toBe('pending');

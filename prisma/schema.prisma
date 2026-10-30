@@ -76,12 +76,14 @@ enum ReportSource {
 }
 
 /// Trạng thái một báo cáo người chơi (spec điểm role §6): `superseded` khi báo cáo trùng khác của
-/// cùng vụ đã được duyệt trước.
+/// cùng vụ đã được duyệt trước; `revoked` = báo cáo độc lập bị huỷ duyệt (chỉ từ `approved`, trạng thái
+/// cuối; CHECK bắt đủ người huỷ, giờ huỷ và lý do).
 enum AccusationStatus {
   pending
   approved
   rejected
   superseded
+  revoked
 }
 
 /// Trạng thái một lần nhận treo thưởng (spec treo thưởng §3–4) — giống lần khai: `revoked` chỉ từ
@@ -144,6 +146,7 @@ model Member {
   accusationsReceived PlayerAccusation[] @relation("AccusationAccused")
   accusationsAsVictim PlayerAccusation[] @relation("AccusationVictim")
   accusationsReviewed PlayerAccusation[] @relation("AccusationReviewer")
+  accusationsRevoked  PlayerAccusation[] @relation("AccusationRevoker")
   bountiesCreated      Bounty[]      @relation("BountyCreator")
   bountyClaims         BountyClaim[] @relation("BountyClaimMember")
   bountyClaimsReviewed BountyClaim[] @relation("BountyClaimReviewer")
@@ -206,6 +209,7 @@ model GameSession {
   statReports   StatReport[]
   bounties      Bounty[]
   bountyClaims  BountyClaim[]
+  accusations   PlayerAccusation[]
 
   @@index([startsAt])
   @@map("game_sessions")
@@ -416,10 +420,13 @@ model StatReport {
 /// `accusedRole`) đã bắn `victim` thuộc `victimFaction` trong ngày `playedOn` (= ngày chơi của lần khai
 /// `report`). Duyệt đúng → `report.bonusPoints = 1`, tạo lần khai trừ điểm `penaltyReport`
 /// (`source = accusation`); báo cáo trùng cùng vụ (accused, role, victim, playedOn) còn `pending` →
-/// `superseded`. CHECK: `accused_id <> reporter_id`, `victim_id <> accused_id`. Task này chỉ tạo bảng.
+/// `superseded`. CHECK: `accused_id <> reporter_id`, `victim_id <> accused_id`. Báo cáo độc lập (spec
+/// 2026-10-31 §B, `reportId` null) không có lần khai: duyệt đúng → +1 vào Tổng "Cả 3 phe" của người gửi
+/// (không qua `bonusPoints`). CHECK: ghi chú ≤ 300; `revoked` có đủ người huỷ, giờ huỷ, lý do.
 model PlayerAccusation {
   id              Int              @id @default(autoincrement())
-  reportId        Int              @unique @map("report_id")
+  /// Lần khai chứa báo cáo (báo cáo cũ gửi kèm lần khai); null = báo cáo độc lập (tab "Báo cáo người chơi").
+  reportId        Int?             @unique @map("report_id")
   reporterId      Int              @map("reporter_id")
   accusedId       Int              @map("accused_id")
   accusedRoleId   Int              @map("accused_role_id")
@@ -432,16 +439,25 @@ model PlayerAccusation {
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
   reviewedById    Int?             @map("reviewed_by")
   reviewedAt      DateTime?        @map("reviewed_at") @db.Timestamptz(3)
+  /// Chỉ báo cáo độc lập: buổi chơi (không bắt buộc, cùng ngày VN với `playedOn`) và ghi chú ≤ 300 ký tự.
+  sessionId       Int?             @map("session_id")
+  note            String?
+  revokedById     Int?             @map("revoked_by")
+  revokedAt       DateTime?        @map("revoked_at") @db.Timestamptz(3)
 
-  report        StatReport  @relation("AccusationReport", fields: [reportId], references: [id])
+  report        StatReport?  @relation("AccusationReport", fields: [reportId], references: [id], onDelete: Restrict)
   reporter      Member      @relation("AccusationReporter", fields: [reporterId], references: [id])
   accused       Member      @relation("AccusationAccused", fields: [accusedId], references: [id])
   accusedRole   Role        @relation(fields: [accusedRoleId], references: [id])
   victim        Member      @relation("AccusationVictim", fields: [victimId], references: [id])
   penaltyReport StatReport? @relation("AccusationPenaltyReport", fields: [penaltyReportId], references: [id])
   reviewedBy    Member?     @relation("AccusationReviewer", fields: [reviewedById], references: [id])
+  session       GameSession? @relation(fields: [sessionId], references: [id])
+  revokedBy     Member?     @relation("AccusationRevoker", fields: [revokedById], references: [id])
 
   @@index([accusedId, accusedRoleId, victimId, playedOn, status])
+  @@index([reporterId, createdAt])
+  @@index([status, playedOn])
   @@map("player_accusations")
 }
 

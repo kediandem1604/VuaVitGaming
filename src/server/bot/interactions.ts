@@ -9,7 +9,8 @@
  * - Menu vote (`vote:*`): bỏ (hoặc đổi) phiếu qua `castVote`; tin vote giữ nguyên tới khi đóng đợt.
  * - Menu treo thưởng (`bounty:claim:*`): nhận từng mục đã chọn qua `claimBounty` (cùng luật với web),
  *   trả lời ẩn một dòng cho mỗi mục.
- * - `/baocao`: khai điểm (`submitReport`), trả lời ẩn. `/bxh`: embed top 10 của role mùa
+ * - `/baocao`: khai điểm (`submitReport`), trả lời ẩn; không nhập `ngay` → ngày chơi mặc định (trước
+ *   06:00 giờ VN là hôm qua) kèm buổi mặc định nếu có (`src/shared/report-day.ts`, như web). `/bxh`: embed top 10 của role mùa
  *   này, công khai. `/hoso`: mã thành viên, role đang giữ, link web, trả lời ẩn.
  * - Autocomplete `role`: trả gợi ý ngay (không defer — Discord không cho defer autocomplete).
  *
@@ -22,10 +23,11 @@
 import { MessageFlags } from 'discord.js';
 import type { APIEmbed } from 'discord.js';
 import type { RoleDto } from '../../shared/api-types.js';
+import { defaultPlayedOn, pickDefaultSession } from '../../shared/report-day.js';
 import { normalizeText } from '../../shared/text.js';
 import type { Ctx } from '../ctx.js';
 import { AppError } from '../lib/errors.js';
-import { formatVnDay, formatVnTime, seasonIdOf, toVnDate } from '../lib/time.js';
+import { formatVnDay, formatVnTime, seasonIdOf, toVnDate, vnDayRange } from '../lib/time.js';
 import { escapeDiscordMarkdown } from '../lib/discord-text.js';
 import { claimBounty } from '../modules/bounties/claims.js';
 import { upsertMemberFromGuild } from '../modules/members/service.js';
@@ -294,11 +296,14 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
       await interaction.editReply(ROLE_NOT_FOUND);
       return;
     }
-    const playedOn = parseDayInput(interaction.options.getString(OPTION.day) ?? undefined, toVnDate(ctx.now()));
+    const typedDay = interaction.options.getString(OPTION.day)?.trim() ?? '';
+    // Bỏ trống `ngay` → ngày chơi mặc định (spec ngày chơi mặc định §A) và buổi mặc định của ngày đó.
+    const playedOn = typedDay === '' ? defaultPlayedOn(ctx.now()) : parseDayInput(typedDay, toVnDate(ctx.now()));
     if (!playedOn) {
       await interaction.editReply('Ngày không hợp lệ (dùng dd/MM hoặc YYYY-MM-DD)');
       return;
     }
+    const sessionId = typedDay === '' ? await defaultSessionId(ctx, playedOn) : null;
 
     // `so_lieu` là bắt buộc; thiếu (client bị sửa) → NaN để service từ chối như giá trị sai.
     const value = interaction.options.getInteger(OPTION.value) ?? Number.NaN;
@@ -306,13 +311,31 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
     const extraValue = interaction.options.getInteger(OPTION.extraValue) ?? 0;
     // `so_lieu_phat` cũng không bắt buộc; bỏ trống → 0.
     const penaltyValue = interaction.options.getInteger(OPTION.penaltyValue) ?? 0;
-    const report = await submitReport(ctx, member.id, { roleId: role.id, value, extraValue, penaltyValue, playedOn, note: interaction.options.getString(OPTION.note) });
+    const report = await submitReport(ctx, member.id, {
+      roleId: role.id,
+      value,
+      extraValue,
+      penaltyValue,
+      playedOn,
+      sessionId,
+      note: interaction.options.getString(OPTION.note),
+    });
     await interaction.editReply(
       `Đã gửi: ${role.icon} ${role.nameVi} — ${formatReportValue(report, role)} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
     );
   } catch (err) {
     await answerError(interaction, `/${interaction.commandName}`, err);
   }
+}
+
+/** Buổi mặc định (`pickDefaultSession`) trong các buổi bắt đầu ngày VN `playedOn`, hoặc null. */
+async function defaultSessionId(ctx: Ctx, playedOn: string): Promise<number | null> {
+  const { start, end } = vnDayRange(playedOn);
+  const sessions = await ctx.db.gameSession.findMany({
+    where: { startsAt: { gte: start, lt: end }, status: { not: 'cancelled' } },
+    select: { id: true, startsAt: true, status: true },
+  });
+  return pickDefaultSession(sessions, ctx.now(), playedOn)?.id ?? null;
 }
 
 /** `/bxh`: top 10 của role trong mùa hiện tại, embed công khai (không cần hồ sơ người gõ). */

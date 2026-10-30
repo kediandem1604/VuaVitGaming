@@ -22,6 +22,11 @@
  * theo phe, chốt mùa) — nhưng KHÔNG tăng `games`. Lần nhận không có role chỉ cộng vào bảng tổng
  * "Cả 3 phe". Mốc phân hoà gồm cả `reviewedAt` của lần nhận.
  *
+ * Báo cáo người chơi độc lập (spec 2026-10-31 §B): mỗi báo cáo `report_id IS NULL` ở trạng thái
+ * `approved` có ngày chơi trong mùa cộng +1 cho người gửi — CHỈ vào bảng tổng "Cả 3 phe" (cùng đường
+ * với lần nhận treo thưởng không role), mốc phân hoà là `reviewedAt` của báo cáo. Báo cáo cũ gắn lần
+ * khai vẫn tính qua `bonusPoints` của lần khai.
+ *
  * Chỉ người có điểm > 0 mới lên bảng (điểm mùa có thể âm khi bị trừ nhiều hơn được cộng):
  * role mà mọi lần khai đã duyệt gộp lại ≤ 0 thì chưa ai hoá thân (§4.7 chỉ lưu top 1 "có
  * điểm > 0"), và nhờ vậy `getRoleLeaderboard(...)[0]` luôn chính là người đang hoá thân
@@ -95,7 +100,10 @@ function compareAgg(x: Agg, y: Agg): number {
   return y.score - x.score || x.lastApprovedAt.getTime() - y.lastApprovedAt.getTime() || x.memberId - y.memberId;
 }
 
-/** Điểm treo thưởng không gắn role của một người trong mùa (chỉ vào bảng tổng "Cả 3 phe"). */
+/**
+ * Điểm không gắn role của một người trong mùa (chỉ vào bảng tổng "Cả 3 phe"): treo thưởng không role
+ * và +1 mỗi báo cáo người chơi độc lập được duyệt đúng.
+ */
 interface Unassigned {
   memberId: number;
   score: number;
@@ -124,8 +132,9 @@ async function aggregateSeason(db: DbClient, seasonId: string, roleId?: number, 
  * Như `aggregateSeason`, cộng thêm lần nhận treo thưởng đã duyệt của mùa — đúng MỘT truy vấn gộp
  * nữa (GROUP BY role, người trên `bounty_claims`): lần nhận có role cộng `points` vào ô (role,
  * người) mà không tăng `games` (ô chỉ có lần nhận vẫn được tạo, 0 trận); lần nhận không role trả
- * riêng trong `unassigned` theo người (chỉ bảng tổng "Cả 3 phe" dùng). Có `roleId` thì chỉ lấy
- * lần nhận của role đó (`unassigned` rỗng).
+ * riêng trong `unassigned` theo người (chỉ bảng tổng "Cả 3 phe" dùng). Không có `roleId` thì thêm
+ * MỘT truy vấn gộp báo cáo độc lập đã duyệt theo người gửi (+1 mỗi báo cáo, cũng vào `unassigned`).
+ * Có `roleId` thì chỉ lấy lần nhận của role đó (`unassigned` rỗng).
  */
 async function aggregateSeasonCells(
   db: DbClient,
@@ -196,7 +205,7 @@ async function aggregateSeasonCells(
     // Lần nhận đã duyệt luôn có reviewedAt; phòng hờ dữ liệu lạ.
     const lastApprovedAt = g._max.reviewedAt ?? new Date(0);
     if (g.roleId === null) {
-      unassigned.push({ memberId: g.memberId, score, lastApprovedAt });
+      if (roleId === undefined) unassigned.push({ memberId: g.memberId, score, lastApprovedAt });
       continue;
     }
     const key = `${g.roleId}:${g.memberId}`;
@@ -205,6 +214,19 @@ async function aggregateSeasonCells(
     else {
       cell.score += score;
       if (lastApprovedAt > cell.lastApprovedAt) cell.lastApprovedAt = lastApprovedAt;
+    }
+  }
+
+  // Báo cáo người chơi độc lập đúng: +1 mỗi báo cáo cho người gửi, không role.
+  if (roleId === undefined) {
+    const accusationGroups = await db.playerAccusation.groupBy({
+      by: ['reporterId'],
+      where: { reportId: null, status: 'approved', playedOn },
+      _count: { _all: true },
+      _max: { reviewedAt: true },
+    });
+    for (const g of accusationGroups) {
+      unassigned.push({ memberId: g.reporterId, score: g._count._all, lastApprovedAt: g._max.reviewedAt ?? new Date(0) });
     }
   }
 

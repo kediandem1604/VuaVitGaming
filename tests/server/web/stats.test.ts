@@ -1190,46 +1190,42 @@ test('a client that disconnects mid-upload gives its slot back; one that leaves 
 // Báo cáo người chơi
 // ---------------------------------------------------------------------------
 
-test('accusations over HTTP: sent with a report, shape vs rule errors, PATCH null removes, queue hides duplicates', async () => {
+/** Báo cáo CŨ gắn lần khai (dữ liệu có từ trước khi tách tab): chèn thẳng vào DB; trả về DTO lần khai đọc lại. */
+async function attachOld(sid: string, report: ReportDto, acc: { accusedId: number; accusedRoleId: number; victimId: number; victimFaction: 'goose' | 'duck' | 'neutral' }): Promise<ReportDto> {
+  await testDb.playerAccusation.create({
+    data: { ...acc, reportId: report.id, reporterId: report.member.id, playedOn: new Date(`${report.playedOn}T00:00:00Z`), createdAt: ctx.now() },
+  });
+  const mine = (await get('/api/reports/mine', sid)).json<ReportDto[]>();
+  return mine.find((r) => r.id === report.id)!;
+}
+
+test('POST/PATCH /api/reports reject an accusation field (even null) with 400; old attached accusations still show, duplicates hidden', async () => {
   const vigilante = await roleByKey(testDb, 'vigilante');
-  const { member: an, sid } = await memberWithSid({ displayName: 'An' });
+  const { sid } = await memberWithSid({ displayName: 'An' });
   const { sid: dungSid } = await memberWithSid({ displayName: 'Dũng' });
   const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
   const binh = await createMember(testDb, { displayName: 'Bình' });
   const cuong = await createMember(testDb, { displayName: 'Cường' });
-  const acc = { accusedId: binh.id, accusedRoleId: vigilante.id, victimId: cuong.id, victimFaction: 'goose' };
+  const acc = { accusedId: binh.id, accusedRoleId: vigilante.id, victimId: cuong.id, victimFaction: 'goose' as const };
 
-  const first = await submit(sid, 2, { accusation: acc });
-  expect(first.accusation).toMatchObject({
-    status: 'pending',
-    accused: { id: binh.id, displayName: 'Bình' },
-    accusedRole: { id: vigilante.id, nameVi: 'Dân phòng', penaltyPoints: 3 },
-    victim: { id: cuong.id, displayName: 'Cường' },
-    victimFaction: 'goose',
-    rejectReason: null,
-  });
-  expect(first).toMatchObject({ accusationDuplicate: false, penaltyOf: null });
+  for (const accusation of [acc, null, 'Bình']) {
+    const res = await post('/api/reports', sid, { roleId: swordsman.id, value: 1, playedOn: '2026-10-22', accusation });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual(errorBody('VALIDATION', 'Báo cáo người chơi gửi ở tab riêng'));
+  }
+  expect(await testDb.statReport.count()).toBe(0);
 
-  // Không phải object → lỗi dạng chung; object sai luật → lời nhắn của service.
-  const badShape = await post('/api/reports', sid, { roleId: swordsman.id, value: 1, playedOn: '2026-10-22', accusation: 'Bình' });
-  expect(badShape.statusCode).toBe(400);
-  expect(badShape.json()).toEqual(INVALID);
-  const self = await post('/api/reports', sid, { roleId: swordsman.id, value: 1, playedOn: '2026-10-22', accusation: { ...acc, accusedId: an.id } });
-  expect(self.statusCode).toBe(400);
-  expect(self.json()).toEqual(errorBody('VALIDATION', 'Không thể tự báo cáo chính mình'));
+  const first = await attachOld(sid, await submit(sid, 2), acc);
+  expect(first.accusation).toMatchObject({ status: 'pending', accused: { id: binh.id, displayName: 'Bình' }, victimFaction: 'goose' });
+  const patched = await patch(`/api/reports/${first.id}`, sid, { accusation: null });
+  expect(patched.statusCode).toBe(400);
+  expect(patched.json()).toEqual(errorBody('VALIDATION', 'Báo cáo người chơi gửi ở tab riêng'));
 
   setNow('2026-10-22T12:01:00Z');
-  const dup = await submit(dungSid, 1, { accusation: acc });
+  const dup = await attachOld(dungSid, await submit(dungSid, 1), acc);
   const queue = (await get('/api/admin/reports?status=pending', modSid)).json<ReportDto[]>();
   expect(queue.find((r) => r.id === first.id)).toMatchObject({ accusation: { id: first.accusation?.id }, accusationDuplicate: false });
   expect(queue.find((r) => r.id === dup.id)).toMatchObject({ accusation: null, accusationDuplicate: true });
-
-  // PATCH null = bỏ báo cáo → báo cáo trùng kế tiếp hiện lên.
-  const removed = await patch(`/api/reports/${first.id}`, sid, { accusation: null });
-  expect(removed.statusCode).toBe(200);
-  expect(removed.json<ReportDto>().accusation).toBeNull();
-  const after = (await get('/api/admin/reports?status=pending', modSid)).json<ReportDto[]>();
-  expect(after.find((r) => r.id === dup.id)).toMatchObject({ accusation: { victim: { displayName: 'Cường' } }, accusationDuplicate: false });
 });
 
 test('review with an accusation over HTTP: the decision is required; approve → penalty row; reject with a reason', async () => {
@@ -1238,11 +1234,11 @@ test('review with an accusation over HTTP: the decision is required; approve →
   const { sid: modSid } = await memberWithSid({ accessLevel: 'mod', displayName: 'Mod' });
   const binh = await createMember(testDb, { displayName: 'Bình', discordId: 'binh-discord' });
   const cuong = await createMember(testDb, { displayName: 'Cường' });
-  const acc = { accusedId: binh.id, accusedRoleId: vigilante.id, victimId: cuong.id, victimFaction: 'duck' };
-  const a = await submit(sid, 2, { accusation: acc });
+  const acc = { accusedId: binh.id, accusedRoleId: vigilante.id, victimId: cuong.id, victimFaction: 'duck' as const };
+  const a = await attachOld(sid, await submit(sid, 2), acc);
   const other = await createMember(testDb, { displayName: 'Dũng' });
   // Khác người bị bắn → vụ khác, cũng được hiện.
-  const b = await submit(sid, 3, { accusation: { ...acc, victimId: other.id } });
+  const b = await attachOld(sid, await submit(sid, 3), { ...acc, victimId: other.id });
 
   const missing = await review(modSid, a.id, { approve: true });
   expect(missing.statusCode).toBe(400);

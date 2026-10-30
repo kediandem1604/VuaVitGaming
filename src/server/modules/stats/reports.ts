@@ -35,9 +35,10 @@
  * nơi đọc `status = 'approved'` tự bỏ lần khai đã huỷ. `listRecentlyApproved` là danh sách
  * quản trị để huỷ: lần khai `approved` của mùa chưa chốt, duyệt gần nhất trước, tối đa 50.
  *
- * Báo cáo người chơi (spec điểm role §6, phần riêng ở `accusations.ts`): gửi kèm khi khai hoặc sửa
- * lần khai còn chờ duyệt (cùng giao dịch với lần khai); mod quyết báo cáo đang hiện cùng lúc với lần
- * khai (`accusation: 'approve' | 'reject'`). Duyệt và huỷ duyệt đều ghi trong một giao dịch khoá
+ * Báo cáo người chơi (spec điểm role §6, phần riêng ở `accusations.ts`): KHÔNG còn gửi kèm lần khai
+ * (spec 2026-10-31 §B — tab riêng, `standalone-accusations.ts`); khai/sửa có trường `accusation` →
+ * `VALIDATION` "Báo cáo người chơi gửi ở tab riêng". Báo cáo cũ đã gắn lần khai vẫn chạy như cũ: mod
+ * quyết báo cáo đang hiện cùng lúc với lần khai (`accusation: 'approve' | 'reject'`). Duyệt và huỷ duyệt đều ghi trong một giao dịch khoá
  * dòng `seasons` (`FOR UPDATE`) rồi kiểm lại `closedAt`, nên mọi lượt duyệt/huỷ cùng mùa xếp hàng
  * với nhau và với chốt mùa — báo cáo trùng không bao giờ trừ điểm hai lần. Mục trừ điểm
  * (`source = 'accusation'`) tạo sẵn ở trạng thái `approved`: không vào hàng chờ, không sửa được,
@@ -49,7 +50,7 @@
 
 import type { Prisma, StatReport } from '@prisma/client';
 import { z } from 'zod';
-import type { AccessLevel, AccusationInputDto, ReportDto, ReviewedReportDto } from '../../../shared/api-types.js';
+import type { AccessLevel, ReportDto, ReviewedReportDto } from '../../../shared/api-types.js';
 import { formatReportValue, reportPoints } from '../../../shared/metric.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
@@ -70,7 +71,6 @@ import { ensureSeason, isSeasonClosed } from '../seasons/service.js';
 import {
   ACCUSATION_SELECT,
   applyAccusationReview,
-  createAccusation,
   hiddenAccusations,
   livePenaltyOfReport,
   pendingAccusationOf,
@@ -78,9 +78,11 @@ import {
   penaltyNoticeOf,
   penaltyRemovedDmText,
   revokePenalty,
+  revokeStandalone,
+  safeDm,
+  standaloneOfPenalty,
   syncAccusationOnEdit,
   toAccusationDto,
-  validateAccusation,
   waitingForEarlierError,
 } from './accusations.js';
 import type { AccusationDecision, HiddenAccusation, PenaltyNotice, PendingAccusation } from './accusations.js';
@@ -123,11 +125,6 @@ export interface ReportInput {
   sessionId?: number | null;
   /** Cắt khoảng trắng, tối đa 300 ký tự; rỗng → null. */
   note?: string | null;
-  /**
-   * Báo cáo người chơi kèm lần khai (chỉ web, spec điểm role §6). Khai mới: vắng mặt hoặc `null` =
-   * không báo cáo. Sửa: vắng mặt = giữ nguyên, `null` = bỏ báo cáo, một báo cáo = đặt/thay.
-   */
-  accusation?: AccusationInputDto | null;
 }
 
 /** Các trường sửa được của lần khai còn chờ duyệt; trường vắng mặt giữ nguyên. */
@@ -160,10 +157,18 @@ const inputSchema = z
     playedOn: z.string(),
     sessionId: idSchema.nullish(),
     note: z.string().nullish(),
-    // Kiểm riêng (`validateAccusation`) để báo lời nhắn cụ thể thay vì "Dữ liệu không hợp lệ".
+    // Không còn nhận (tab riêng); khai báo ở đây để báo lời nhắn cụ thể thay vì "Dữ liệu không hợp lệ".
     accusation: z.unknown().optional(),
   })
   .strict();
+
+/** Lời nhắn khi khai/sửa lần khai còn gửi kèm `accusation` (spec 2026-10-31 §B). */
+export const ACCUSATION_MOVED_MESSAGE = 'Báo cáo người chơi gửi ở tab riêng';
+
+/** Khai/sửa không còn nhận báo cáo người chơi (kể cả `null`) → `VALIDATION`. */
+function rejectAccusationField(p: { accusation?: unknown }): void {
+  if ('accusation' in p) throw appError('VALIDATION', ACCUSATION_MOVED_MESSAGE);
+}
 
 const patchSchema = inputSchema.partial();
 
@@ -285,6 +290,7 @@ async function validateReport(ctx: Ctx, memberId: number, r: Normalised, opts: {
  */
 export async function submitReport(ctx: Ctx, memberId: number, input: ReportInput): Promise<StatReport> {
   const p = parse(inputSchema, input);
+  rejectAccusationField(p);
   const r: Normalised = {
     roleId: p.roleId,
     value: p.value,
@@ -297,26 +303,21 @@ export async function submitReport(ctx: Ctx, memberId: number, input: ReportInpu
 
   await assertActiveMember(ctx, memberId);
   await validateReport(ctx, memberId, r, { dailyCap: true });
-  const accusation = p.accusation == null ? null : await validateAccusation(ctx.db, memberId, p.accusation);
   await ensureSeason(ctx, seasonIdOf(r.playedOn));
 
-  return ctx.db.$transaction(async (tx) => {
-    const created = await tx.statReport.create({
-      data: {
-        memberId,
-        roleId: r.roleId,
-        sessionId: r.sessionId,
-        playedOn: dateOnlyToDb(r.playedOn),
-        value: r.value,
-        extraValue: r.extraValue,
-        penaltyValue: r.penaltyValue,
-        note: r.note,
-        // Ghi rõ để đồng hồ của ctx (không phải giờ thật) quyết định "ngày khai".
-        createdAt: ctx.now(),
-      },
-    });
-    if (accusation) await createAccusation(tx, created, accusation, ctx.now());
-    return created;
+  return ctx.db.statReport.create({
+    data: {
+      memberId,
+      roleId: r.roleId,
+      sessionId: r.sessionId,
+      playedOn: dateOnlyToDb(r.playedOn),
+      value: r.value,
+      extraValue: r.extraValue,
+      penaltyValue: r.penaltyValue,
+      note: r.note,
+      // Ghi rõ để đồng hồ của ctx (không phải giờ thật) quyết định "ngày khai".
+      createdAt: ctx.now(),
+    },
   });
 }
 
@@ -328,6 +329,7 @@ export async function submitReport(ctx: Ctx, memberId: number, input: ReportInpu
  */
 export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: number, patch: ReportPatch): Promise<StatReport> {
   const p = parse(patchSchema, patch);
+  rejectAccusationField(p);
   await assertActiveMember(ctx, memberId);
 
   const existing = isId(reportId) ? await ctx.db.statReport.findUnique({ where: { id: reportId } }) : null;
@@ -344,11 +346,9 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
     note: p.note === undefined ? existing.note : normaliseNote(p.note),
   };
   await validateReport(ctx, memberId, merged, { dailyCap: false });
-  const accusation =
-    p.accusation === undefined ? undefined : p.accusation === null ? null : await validateAccusation(ctx.db, memberId, p.accusation);
   await ensureSeason(ctx, seasonIdOf(merged.playedOn));
 
-  // Lần khai và báo cáo đổi cùng nhau: lần khai vừa được duyệt đúng lúc này → không đụng báo cáo.
+  // Lần khai và báo cáo cũ kèm theo (nếu có) đổi cùng nhau: lần khai vừa được duyệt đúng lúc này → không đụng báo cáo.
   return ctx.db.$transaction(async (tx) => {
     const { count } = await tx.statReport.updateMany({
       where: { id: reportId, memberId, status: 'pending' },
@@ -364,7 +364,7 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
     });
     if (count === 0) throw appError('NOT_PENDING');
     const updated = await tx.statReport.findUniqueOrThrow({ where: { id: reportId } });
-    await syncAccusationOnEdit(tx, updated, accusation, ctx.now());
+    await syncAccusationOnEdit(tx, updated);
     return updated;
   });
 }
@@ -562,6 +562,12 @@ export async function revokeReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
   if (cascade && cascade.accusedId === reviewer.id && reviewer.accessLevel !== 'admin') {
     throw appError('SELF_REVIEW', 'Mod không được gỡ mục trừ điểm của chính mình');
   }
+  // Mục trừ điểm của báo cáo ĐỘC LẬP: huỷ nó thì báo cáo bị huỷ theo (+1 của người gửi mất) — mod là
+  // người gửi thì không được (như huỷ báo cáo của mình).
+  const standalone = report.source === 'accusation' ? await standaloneOfPenalty(ctx.db, reportId) : null;
+  if (standalone && standalone.reporterId === reviewer.id && reviewer.accessLevel !== 'admin') {
+    throw appError('SELF_REVIEW', 'Mod không được huỷ báo cáo của mình');
+  }
   const trimmed = checkReason(rawReason, 'huỷ duyệt');
 
   const seasonId = seasonIdOf(dbToDateOnly(report.playedOn));
@@ -574,19 +580,24 @@ export async function revokeReport(ctx: Ctx, reviewer: Reviewer, reportId: numbe
 
   // Dòng `seasons` phải có để khoá được; lần khai đã duyệt thì mùa đã được tạo, gọi lại vô hại.
   await ensureSeason(ctx, seasonId);
-  const lifted = await ctx.db.$transaction(async (tx) => {
+  const { lifted, standaloneRevoked } = await ctx.db.$transaction(async (tx) => {
     await lockOpenSeason(tx, seasonId);
     const { count } = await tx.statReport.updateMany({
       where: { id: reportId, status: 'approved' },
       data: { status: 'revoked', revokedById: reviewer.id, revokedAt: ctx.now(), rejectReason: trimmed },
     });
     if (count === 0) throw appError('NOT_APPROVED');
-    return cascade ? revokePenalty(tx, cascade.penaltyReportId, { revokerId: reviewer.id, now: ctx.now(), reason: trimmed }) : null;
+    const o = { revokerId: reviewer.id, now: ctx.now(), reason: trimmed };
+    const standaloneRevoked = standalone ? await revokeStandalone(tx, standalone.id, o) : false;
+    return { lifted: cascade ? await revokePenalty(tx, cascade.penaltyReportId, o) : null, standaloneRevoked };
   }, HOT_TX);
 
   const own = report.source === 'accusation' ? await penaltyNoticeOf(ctx.db, reportId) : null;
   if (own) await dmPenalised(ctx, own, 'gỡ trừ điểm', penaltyRemovedDmText(own, trimmed));
   else await notifyRevoked(ctx, report, trimmed);
+  if (own && standalone && standaloneRevoked) {
+    await safeDm(ctx, standalone.reporterDiscordId, 'huỷ báo cáo', `${describeOwnAccusation(own)} đã bị huỷ: ${trimmed}`);
+  }
   if (lifted) await dmPenalised(ctx, lifted, 'gỡ trừ điểm', penaltyRemovedDmText(lifted, trimmed));
 
   await announceIfLeaderChanged(ctx, report.roleId, report.role.nameVi, seasonId, leaderBefore);
@@ -632,6 +643,11 @@ async function notifyRejected(ctx: Ctx, report: ReviewableReport, reason: string
 /** DM người khai lý do bị huỷ duyệt (spec huỷ duyệt §5). Discord lỗi chỉ ghi log — đã huỷ trong DB rồi. */
 async function notifyRevoked(ctx: Ctx, report: ReviewableReport, reason: string): Promise<void> {
   await dmReporter(ctx, report, 'huỷ duyệt', `${describeReport(report)} đã bị huỷ duyệt: ${reason}`);
+}
+
+/** "Báo cáo của bạn ({role}, bắn {người bị bắn}) ngày dd/mm" theo mục trừ điểm — DM người gửi báo cáo độc lập. */
+function describeOwnAccusation(n: PenaltyNotice): string {
+  return `Báo cáo của bạn (${n.roleName}, bắn ${n.victimName}) ngày ${formatVnDay(n.playedOn)}`;
 }
 
 /** "Lần khai {role} ({giá trị}) ngày {dd/mm}" — phần đầu chung của DM từ chối và huỷ duyệt. */
