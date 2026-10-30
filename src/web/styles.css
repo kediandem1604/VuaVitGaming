@@ -1,0 +1,1185 @@
+@import "tailwindcss";
+
+/*
+ * Font Baloo 2 biến thiên 400–800 (OFL, đủ dấu tiếng Việt), đóng gói kèm app từ gói
+ * @fontsource-variable/baloo-2 — chỉ ba bộ chữ Latin, Latin mở rộng và tiếng Việt (spec §9).
+ * Không nạp CSS mặc định của gói: nó còn khai báo bộ Devanagari (~115 KB) mà `unicode-range`
+ * gồm cả U+200D (ký tự nối của emoji như 🐦‍⬛), nên trình duyệt tải nó ở những trang có emoji
+ * ghép. U+200D đã nằm trong bộ Latin (U+2000-206F). Gói không có file CSS riêng cho từng bộ,
+ * nên khai báo ở đây; Vite tìm file `.woff2` trong node_modules và đóng gói kèm bản build.
+ * `unicode-range` chép đúng từ `index.css` của gói (bản 5.3).
+ */
+@font-face {
+  font-family: 'Baloo 2 Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('@fontsource-variable/baloo-2/files/baloo-2-vietnamese-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: 'Baloo 2 Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('@fontsource-variable/baloo-2/files/baloo-2-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Baloo 2 Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('@fontsource-variable/baloo-2/files/baloo-2-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * Bộ nhận diện "Sảnh đêm" (spec §3). Token màu khai báo ở đây phải khớp với
+ * `src/web/lib/palette.ts` — test `tests/web/palette.test.ts` so từng giá trị.
+ * Màu phe (Global Constraints) giữ nguyên: Ngỗng `goose`, Vịt `duck`, Phe thứ 3 `third`.
+ * Chữ trắng không đặt thẳng lên `goose`/`duck` (chỉ ~3.9:1) mà lên bản `-strong`;
+ * chữ màu phe trên nền tối dùng bản `-soft`.
+ */
+@theme {
+  --color-night-950: #0E1130;
+  --color-night-900: #1B1F4A;
+  --color-night-800: #2A3070;
+  --color-night-700: #3A4180;
+  --color-night-600: #7680D4;
+  --color-night-300: #AEB6FF;
+  --color-night-200: #D6DAFF;
+  --color-gold: #FFD23F;
+  --color-gold-ink: #3A2600;
+  --color-goose: #2F80ED;
+  --color-duck: #E5484D;
+  --color-third: #8E4EC6;
+  --color-goose-strong: #1F6FD6;
+  --color-duck-strong: #C9353A;
+  --color-goose-soft: #7CB8FF;
+  --color-duck-soft: #FF8A8F;
+  --color-third-soft: #C9A2F2;
+  --color-ok: #7CF29A;
+  /* Màu nút "Đăng nhập bằng Discord" (màu thương hiệu Discord); chữ trắng đạt 4.6:1. */
+  --color-discord: #5865F2;
+
+  /* Baloo 2 (OFL, đủ dấu tiếng Việt) đóng gói kèm app — xem các `@font-face` ở đầu file. */
+  --font-sans: 'Baloo 2 Variable', system-ui, sans-serif;
+}
+
+@layer base {
+  /* Chỉ có giao diện tối (spec §3.6). */
+  :root {
+    color-scheme: dark;
+
+    /*
+     * Bộ chuyển động thống nhất (spec §5): mọi `transition`/`animation` trong app lấy thời gian và
+     * nhịp từ đây, không ghi số cứng (test `motion.test.tsx` quét). `--ease-spring` chỉ cho nút
+     * lún/nảy nhẹ. `--stagger-step` là bước so le giữa hai dòng danh sách (`.stagger-in`).
+     * Hoạt ảnh nhân vật, vệt sáng khung xương và vạch chuyển trang có nhịp riêng (`--dur-goose-*`,
+     * `--dur-skeleton`, `--dur-nav-progress`).
+     */
+    --dur-fast: 120ms;
+    --dur-base: 200ms;
+    --dur-slow: 320ms;
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+    --ease-in: cubic-bezier(0.4, 0, 1, 1);
+    --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+    --stagger-step: 30ms;
+    --dur-goose-hop: 600ms;
+    --dur-goose-idle: 3s;
+    --dur-goose-blink: 5.2s;
+    --dur-skeleton: 1.2s;
+    --dur-nav-progress: 1.1s;
+    /* Hiệu ứng nền: sao lấp lánh, vòng khung hạng 1 quay, đốm sao phe thứ 3, dơi/ma mùa Halloween. */
+    --dur-twinkle: 6s;
+    --dur-ring: 3.2s;
+    --dur-orbit: 14s;
+    --dur-aura: 2.4s;
+    --dur-bat: 26s;
+    --dur-float: 5s;
+
+    /* Hai quầng sáng cực quang cố định sau nội dung (`body::before`); chủ đề Halloween đổi màu. */
+    --aurora-a: rgb(118 128 212 / 0.22);
+    --aurora-b: rgb(142 78 198 / 0.16);
+    --aurora-c: rgb(47 128 237 / 0.1);
+  }
+
+  /*
+   * Chủ đề Halloween (admin bật cho mọi người bằng nút bóng ma, `lib/theme.ts` đặt `data-theme`
+   * lên `<html>`): đổi bộ màu đêm sang tím than + cam bí ngô. Mọi lớp Tailwind đọc `var(--color-…)` nên cả app
+   * đổi theo, không thêm lớp nào. Tương phản giữ như bản gốc: chữ `night-300` trên `night-800`
+   * ≈ 8.6:1, `gold` (cam) trên `night-800` ≈ 6.9:1, `gold-ink` trên `gold` ≈ 8.1:1, viền
+   * `night-600` trên `night-800`/`night-900` ≥ 3.6:1.
+   */
+  :root[data-theme='halloween'] {
+    --color-night-950: #0D0714;
+    --color-night-900: #1A0F26;
+    --color-night-800: #2B1A3D;
+    --color-night-700: #432A5C;
+    --color-night-600: #9B78C8;
+    --color-night-300: #D6BFF2;
+    --color-night-200: #F0E4FF;
+    --color-gold: #FF9A2E;
+    --color-gold-ink: #2A1200;
+    --aurora-a: rgb(255 122 26 / 0.2);
+    --aurora-b: rgb(142 78 198 / 0.24);
+    --aurora-c: rgb(124 242 154 / 0.07);
+  }
+
+  /*
+   * Giảm chuyển động (spec §5.8): chỉ còn mờ vào/ra `--dur-fast` — mọi thời gian dài hơn rút về
+   * `--dur-fast`, dòng danh sách không so le. Phần tắt dịch chuyển/phóng nằm ở khối
+   * `@media (prefers-reduced-motion: reduce)` cuối file.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --dur-base: var(--dur-fast);
+      --dur-slow: var(--dur-fast);
+      --stagger-step: 0ms;
+    }
+  }
+
+  /*
+   * Nền đêm: `night-900` phủ hai lớp chấm sao mờ lệch nhau (radial-gradient lặp,
+   * không dùng ảnh). Chữ thường `night-200`, độ đậm 500 (spec §3.2).
+   */
+  body {
+    @apply bg-night-900 font-medium text-night-200 antialiased;
+    background-image:
+      radial-gradient(circle, rgb(255 255 255 / 0.18) 1px, transparent 1.6px),
+      radial-gradient(circle, rgb(174 182 255 / 0.12) 1px, transparent 1.6px);
+    background-size:
+      96px 96px,
+      152px 152px;
+    background-position:
+      0 0,
+      48px 76px;
+  }
+
+  /*
+   * Quầng cực quang cố định sau mọi nội dung (z-index −1, không bắt sự kiện trỏ): ba
+   * radial-gradient tĩnh — vẽ một lần, cuộn trang không vẽ lại. Lớp sao thứ ba (`::after`)
+   * chỉ đổi `opacity` (chạy trên compositor) để bầu trời lấp lánh nhẹ.
+   */
+  body::before,
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  body::before {
+    background:
+      radial-gradient(60vmax 40vmax at 12% -8%, var(--aurora-a), transparent 70%),
+      radial-gradient(50vmax 36vmax at 96% 8%, var(--aurora-b), transparent 70%),
+      radial-gradient(70vmax 40vmax at 50% 110%, var(--aurora-c), transparent 70%);
+  }
+
+  body::after {
+    background-image: radial-gradient(circle, rgb(255 255 255 / 0.55) 1px, transparent 1.8px);
+    background-size: 211px 197px;
+    background-position: 31px 17px;
+    opacity: 0.35;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    body::after {
+      animation: twinkle var(--dur-twinkle) ease-in-out infinite alternate;
+    }
+  }
+
+  /*
+   * Viền focus bàn phím cho mọi phần tử bấm được: outline 3px `gold`, cách 2px (spec §3.3).
+   * Ô nhập liệu `field` tự tắt outline này vì đã đổi viền sang `gold` khi focus (xem
+   * `@utility field`) — mỗi phần tử chỉ một chỉ báo focus.
+   */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid var(--color-gold);
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * Hình khối dùng chung (spec §3.3). Tailwind 4 chỉ cho `@apply` các utility nên khai
+ * báo bằng `@utility`; utility nhiều thuộc tính xếp trước utility ít thuộc tính, nên
+ * `panel p-0` hay `chip bg-gold` vẫn ghi đè được từng phần.
+ */
+@utility panel {
+  @apply rounded-2xl border-3 border-night-950 bg-night-800 p-4;
+  /* Mép trên sáng nhẹ + bóng đổ mềm: panel nổi khỏi nền mà không cần ảnh. */
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.06), transparent 38%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 12px 28px -14px rgb(0 0 0 / 0.7);
+}
+
+@utility panel-inset {
+  @apply rounded-xl border-2 border-night-950 bg-night-900 p-3;
+}
+
+/*
+ * Nút khối kiểu game: viền 3px, viền đáy 6px tạo độ dày. Khi nhấn, viền đáy còn 3px
+ * và nút dịch xuống 3px — mép dưới đứng yên nên trông như lún — và co `scale(0.97)` (spec §5.5).
+ * Lún xảy ra tức thời (viền đáy đổi không animate được, nên transform cũng đổi ngay để mép dưới
+ * không nhảy); thả ra thì nút trở về trong `--dur-fast` `--ease-spring` (nảy nhẹ). Máy giảm
+ * chuyển động: không chuyển động cả hai chiều. `disabled` không lún, nền `night-700` chữ `night-300`.
+ *
+ * Rê chuột thì nền **tối** đi 6% (một lớp đen 6% vẽ trên màu nền, dưới chữ — như
+ * brightness 0.94 nhưng chỉ cho nền). Làm sáng thì chữ trắng trên nền Discord tụt còn
+ * ≈ 4.1:1; dùng `filter` thì chữ cũng tối theo (trắng → #F0F0F0, Discord còn 4.48:1).
+ * Nền tối 6%, chữ giữ nguyên: Discord 5.1:1, `btn-danger` 5.7:1, `btn-primary` 8.8:1.
+ */
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl border-3 border-night-950 px-4 py-2 text-base leading-tight font-bold select-none;
+  border-bottom-width: 6px;
+  /* Vệt bóng trên mặt nút kiểu game (không đổi màu chữ, nên tương phản giữ nguyên). */
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / 0.22);
+  transition: transform var(--dur-fast) var(--ease-spring);
+
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      background-image: linear-gradient(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.06));
+    }
+  }
+
+  &:active:not(:disabled) {
+    border-bottom-width: 3px;
+    transform: translateY(3px) scale(0.97);
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+
+  &:disabled {
+    @apply cursor-not-allowed bg-night-700 text-night-300;
+  }
+}
+
+@utility btn-primary {
+  @apply btn bg-gold text-gold-ink;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.4),
+    0 0 18px -4px color-mix(in srgb, var(--color-gold) 60%, transparent);
+}
+
+@utility btn-secondary {
+  @apply btn bg-night-700 text-white;
+}
+
+@utility btn-danger {
+  @apply btn bg-duck-strong text-white;
+}
+
+/*
+ * Ô nhập liệu: chữ 16px để iOS không tự zoom. Focus đổi viền sang `gold` và tắt outline
+ * chung của `@layer base` — một chỉ báo focus duy nhất, không hai vòng vàng lồng nhau.
+ * (Công tắc bật/tắt dùng checkbox ẩn + `peer-focus-visible` trên rãnh vẽ, không đi qua đây.)
+ */
+@utility field {
+  @apply w-full min-w-0 max-w-full rounded-xl border-2 border-night-600 bg-night-900 px-3 py-2 text-base text-white placeholder:text-night-300 focus:border-gold;
+
+  &:focus-visible {
+    outline: none;
+  }
+
+  /*
+   * Safari trên iPhone/iPad vẽ ô ngày/giờ bằng giao diện riêng của hệ thống, có bề rộng tối
+   * thiểu cố định → ô tràn ra ngoài khung trên màn hình hẹp. Chỉ trên iOS (`-webkit-touch-callout`
+   * chỉ Safari iOS hỗ trợ): bỏ giao diện đó (bấm vẫn mở bảng chọn ngày/giờ), giữ chiều cao bằng
+   * ô thường kể cả khi chưa có giá trị, và căn chữ sang trái như các ô khác.
+   */
+  @supports (-webkit-touch-callout: none) {
+    &[type='date'],
+    &[type='time'] {
+      -webkit-appearance: none;
+      appearance: none;
+      min-height: 2.75rem;
+    }
+
+    &::-webkit-date-and-time-value {
+      text-align: left;
+    }
+  }
+
+  /*
+   * `<select>` gốc (trang Quản trị, MembersTab…): bỏ mũi tên hệ thống (vuông, không đổi màu
+   * được) và vẽ mũi tên ▾ `night-300` bằng SVG nền, chừa chỗ bên phải cho nó. Menu thả xuống
+   * vẫn là menu gốc của trình duyệt. Ô nhiều dòng (`multiple`/`size`) không có mũi tên.
+   */
+  &:is(select:not([multiple]):not([size])) {
+    @apply cursor-pointer appearance-none bg-no-repeat pr-9;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23AEB6FF' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 5 5 5-5'/%3E%3C/svg%3E");
+    background-position: right 0.625rem center;
+    background-size: 1rem 1rem;
+  }
+
+  /*
+   * Ô bị tắt (vd ô giá trị ở trang Khai điểm khi chưa chọn role): nền lẫn vào panel
+   * `night-800`, chữ `night-300` (6.2:1), giữ viền `night-600` (3.3:1 trên `night-800`) để
+   * vẫn thấy khung ô.
+   */
+  &:disabled {
+    @apply cursor-not-allowed bg-night-800 text-night-300;
+  }
+
+  /* `<select>` bị tắt: luật mũi tên ở trên đặc hiệu hơn `&:disabled` nên phải nhắc lại con trỏ. */
+  &:is(select:not([multiple]):not([size]):disabled) {
+    @apply cursor-not-allowed;
+  }
+
+}
+
+/*
+ * Khung nổi thả xuống (ô chọn tự làm `Select`, gợi ý của `RolePicker`): bo góc `xl`, nền
+ * `night-800`, viền `night-600`, bóng đổ đậm để tách khỏi panel bên dưới.
+ */
+@utility popover {
+  @apply rounded-xl border-2 border-night-600 bg-night-800 shadow-xl shadow-night-950/70;
+}
+
+/* Viên thuốc bo tròn hẳn; biến thể phe thêm `bg-goose-strong` / `bg-duck-strong` / `bg-third` (chữ trắng). */
+@utility chip {
+  @apply inline-flex items-center gap-1 rounded-full border-2 border-night-950 bg-night-700 px-3 py-1 text-sm leading-tight font-bold text-white whitespace-nowrap;
+}
+
+/* Thẻ nhích lên 2px trong `--dur-base` khi rê chuột — chỉ thiết bị có chuột và máy không giảm chuyển động (spec §3.5, §5.5). */
+@utility lift {
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    transition: transform var(--dur-base) var(--ease-out);
+
+    &:hover {
+      transform: translateY(-2px);
+    }
+  }
+}
+
+/*
+ * Khung xương (spec §4.5): khối bo góc `night-700`, một vệt sáng chạy ngang 1.2s lặp mãi; tắt
+ * khi giảm chuyển động (chỉ còn khối tĩnh). `background-size` 200% để vệt sáng chạy hết khối.
+ */
+@utility skeleton {
+  @apply rounded-lg bg-night-700;
+
+  @media (prefers-reduced-motion: no-preference) {
+    background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.08) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: skeleton-shine var(--dur-skeleton) linear infinite;
+  }
+}
+
+@keyframes skeleton-shine {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/*
+ * Vạch tiến trình chuyển trang (`Layout`, khi chunk trang đích chưa về quá 150ms): dải vàng 3px
+ * dính mép trên, mờ vào `--dur-base`; một vệt chạy ngang lặp mãi — chỉ khi không giảm chuyển
+ * động (giảm thì vạch đứng yên, phủ hết chiều ngang). Không nhận sự kiện trỏ.
+ */
+.nav-progress {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  z-index: 50;
+  height: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
+}
+
+.nav-progress::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--color-gold);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nav-progress::before {
+    right: auto;
+    width: 40%;
+    border-radius: 9999px;
+    animation: nav-progress-run var(--dur-nav-progress) var(--ease-in) infinite;
+  }
+}
+
+@keyframes nav-progress-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/*
+ * Banner ngày nhân điểm (`MultiplierBanner`, dưới thanh điều hướng): nền vàng → cam bí ngô, viền
+ * mực mờ, chữ `gold-ink` (≥ 6.9:1 trên cả hai đầu dải màu, ở cả chủ đề thường lẫn Halloween); mờ
+ * vào `--dur-base` khi hiện.
+ */
+.multiplier-banner {
+  background: linear-gradient(100deg, var(--color-gold), color-mix(in srgb, var(--color-gold) 45%, #ff8a1f));
+  border: 2px solid color-mix(in srgb, var(--color-gold-ink) 25%, transparent);
+  box-shadow: 0 6px 22px -8px color-mix(in srgb, var(--color-gold) 70%, transparent);
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
+}
+
+/*
+ * Khối bọc dữ liệu của `QueryState`: `display: contents` để không chen vào bố cục (gap/grid) của
+ * cha. Khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc (`data-busy="true"`; `aria-busy` nằm ở khung thật), các con mờ
+ * còn 60% trong `--dur-fast` (spec §4.4) — bố cục đứng yên, không nháy trống. Hoạt ảnh danh sách
+ * (`.stagger-in`) đặt ở từng dòng, không ở con trực tiếp này, nên hai thứ không giẫm nhau.
+ */
+.query-block {
+  display: contents;
+}
+
+.query-block > * {
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.query-block[data-busy='true'] > * {
+  opacity: 0.6;
+}
+
+/*
+ * Chữ "nổi" kiểu game (spec §3.2) cho tiêu đề lớn và tên app: viền `night-950` quanh nét
+ * chữ, vẽ dưới phần tô (`paint-order`) nên không ăn vào chữ, cộng một lớp đổ khối xuống
+ * dưới. Tính theo `em` để dùng được ở mọi cỡ, nhưng chỉ dùng cho chữ từ 18px trở lên.
+ */
+@utility text-raised {
+  -webkit-text-stroke: 0.14em var(--color-night-950);
+  paint-order: stroke fill;
+  text-shadow: 0 0.08em 0 var(--color-night-950);
+}
+
+/*
+ * Hoạt ảnh nhân vật (Character, LobbySquad, DuckMark): cả hình nhún nhẹ 2px
+ * (`goose-idle`), mắt chớp thưa (`goose-eyes`), con ngỗng được chạm/rê chuột nhảy lên một
+ * cái (`goose[data-hopping]`, bỏ thuộc tính khi hết hoạt ảnh để nhảy tiếp được). Chỉ chạy
+ * khi máy không bật giảm chuyển động (spec §3.5); `--goose-delay` do từng nhân vật đặt để
+ * các con cùng màn hình không nhún đều một nhịp. `transform-box: fill-box` để co mắt
+ * quanh chính nhóm mắt.
+ */
+.goose {
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .goose[data-hopping] {
+    animation: goose-hop var(--dur-goose-hop) var(--ease-out);
+  }
+
+  .goose-idle {
+    animation: goose-idle var(--dur-goose-idle) ease-in-out infinite;
+    animation-delay: var(--goose-delay, 0s);
+  }
+
+  .goose-eyes {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: goose-blink var(--dur-goose-blink) infinite;
+    animation-delay: var(--goose-delay, 0s);
+  }
+}
+
+/*
+ * Bảng quản trị ưu tiên dễ đọc hơn trang trí (spec §6 Quản trị): nhân vật trong danh sách
+ * role đứng yên, không nhún, không chớp. Đặc hiệu hai lớp nên thắng `.goose-idle`/
+ * `.goose-eyes` ở trên dù máy không giảm chuyển động. Viết bằng `:is()` để hai lớp đó vẫn
+ * chỉ được khai báo một lần, trong khối giảm chuyển động (test Character kiểm tra điều này).
+ */
+.goose-still :is(.goose-idle, .goose-eyes) {
+  animation: none;
+}
+
+@keyframes goose-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35%,
+  55% {
+    transform: translateY(-18px);
+  }
+  80% {
+    transform: translateY(2px);
+  }
+}
+
+@keyframes goose-idle {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes goose-blink {
+  0%,
+  94%,
+  100% {
+    transform: scaleY(1);
+  }
+  97% {
+    transform: scaleY(0.1);
+  }
+}
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * Bộ chuyển động thống nhất (spec §5) — chỉ animate `transform`/`opacity`, mọi thời gian/nhịp
+ * lấy từ biến ở `:root`. Khối giảm chuyển động ở cuối file rút mọi hiệu ứng về mờ `--dur-fast`.
+ * Hoạt ảnh "vào" dùng fill `backwards` (không `both`/`forwards`): giữ khung đầu trong lúc chờ
+ * `animation-delay`, chạy xong trả về kiểu gốc. Giữ `transform` sau khi xong sẽ biến phần tử thành
+ * containing block cho con `position: fixed` (nền Modal bị gói trong trang, nằm dưới header dính).
+ * ---------------------------------------------------------------------------------------------
+ */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Lớp nổi mở: phóng 0.96→1 + mờ vào. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Trang/tab mới: mờ vào + trượt lên 8px. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Dòng danh sách: mờ vào + trượt lên 4px. */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Thông báo/lỗi: trượt xuống 4px + mờ vào. */
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/*
+ * §5.1 Chuyển trang. Có View Transitions: `main` mang tên `page` — khung cũ mờ ra `--dur-fast`,
+ * khung mới mờ vào trượt lên `--dur-base`; header và dock có tên riêng nên đứng yên (ảnh cũ ẩn,
+ * ảnh mới hiện ngay); gốc (`root`, chỉ còn nền sao) không chuyển cảnh. `::view-transition` không
+ * bắt sự kiện trỏ để không chặn bấm trong lúc chuyển cảnh (spec §5.9). Không có View Transitions
+ * (hoặc giảm chuyển động): `.page-enter` gắn lại theo khoá route và chạy `rise-in`.
+ */
+.vt-page {
+  view-transition-name: page;
+}
+
+.vt-header {
+  view-transition-name: site-header;
+}
+
+.vt-dock {
+  view-transition-name: site-dock;
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-old(root),
+::view-transition-old(site-header),
+::view-transition-old(site-dock) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(root),
+::view-transition-new(site-header),
+::view-transition-new(site-dock) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-group(page) {
+  animation-duration: var(--dur-base);
+  animation-timing-function: var(--ease-out);
+}
+
+::view-transition-old(page) {
+  animation: fade-out var(--dur-fast) var(--ease-in) both;
+}
+
+::view-transition-new(page) {
+  animation: rise-in var(--dur-base) var(--ease-out) both;
+}
+
+.page-enter {
+  animation: rise-in var(--dur-base) var(--ease-out) backwards;
+}
+
+/*
+ * §5.2 Lớp nổi (popup `Select`, `Modal`, gợi ý `RolePicker`): `data-state` do `usePresence` đặt —
+ * mở = `pop-in` `--dur-base` `--ease-out`, gốc phóng ở phía mở ra (`data-side`: khung mở xuống
+ * phóng từ mép trên, mở lên phóng từ mép dưới, hộp thoại từ tâm); đóng = `fade-out` `--dur-fast`
+ * `--ease-in`, không nhận sự kiện trỏ (JS còn đặt `inert`), gỡ khỏi DOM bằng hẹn giờ.
+ * `.backdrop-fade` là nền mờ của Modal: chỉ mờ vào/ra.
+ */
+.layer-pop {
+  transform-origin: top center;
+}
+
+.layer-pop[data-side='top'] {
+  transform-origin: bottom center;
+}
+
+.layer-pop[data-side='center'] {
+  transform-origin: center;
+}
+
+.layer-pop[data-state='open'] {
+  animation: pop-in var(--dur-base) var(--ease-out) backwards;
+}
+
+.backdrop-fade[data-state='open'] {
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
+}
+
+.layer-pop[data-state='closed'],
+.backdrop-fade[data-state='closed'] {
+  animation: fade-out var(--dur-fast) var(--ease-in) both;
+  pointer-events: none;
+}
+
+/* §5.3 Tab: vạch chỉ báo trượt (`TabIndicator`, chỉ `transform`); nội dung tab mới mờ vào. */
+.tab-indicator {
+  transform-origin: left center;
+}
+
+/* Chỉ trượt sau lần đo đầu (`data-ready` do `TabIndicator` đặt): lúc tải trang vạch đứng ngay chỗ, không mọc ra từ mép trái. */
+.tab-indicator[data-ready] {
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.tab-enter {
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
+}
+
+/*
+ * §5.4 Danh sách lần hiện đầu (`useStaggerOnce` gắn lớp rồi bỏ sau lượt đầu): 8 dòng đầu mờ +
+ * trượt 4px, so le `--stagger-step`; dòng 9 trở đi hiện ngay. Đặt ở dòng (`> *`), không ở khối
+ * dữ liệu của `QueryState`.
+ */
+.stagger-in > :nth-child(-n + 8) {
+  animation: row-in var(--dur-base) var(--ease-out) backwards;
+}
+
+.stagger-in > :nth-child(2) {
+  animation-delay: calc(var(--stagger-step) * 1);
+}
+
+.stagger-in > :nth-child(3) {
+  animation-delay: calc(var(--stagger-step) * 2);
+}
+
+.stagger-in > :nth-child(4) {
+  animation-delay: calc(var(--stagger-step) * 3);
+}
+
+.stagger-in > :nth-child(5) {
+  animation-delay: calc(var(--stagger-step) * 4);
+}
+
+.stagger-in > :nth-child(6) {
+  animation-delay: calc(var(--stagger-step) * 5);
+}
+
+.stagger-in > :nth-child(7) {
+  animation-delay: calc(var(--stagger-step) * 6);
+}
+
+.stagger-in > :nth-child(8) {
+  animation-delay: calc(var(--stagger-step) * 7);
+}
+
+/* §5.7 Thông báo/lỗi trong form: trượt xuống 4px + mờ vào khi xuất hiện. */
+[role='alert'] {
+  animation: drop-in var(--dur-base) var(--ease-out) backwards;
+}
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * Hiệu ứng trang trí — chỉ `transform`/`opacity` chạy trên compositor, mọi nhịp lấy từ biến ở
+ * `:root`, tắt hết khi máy giảm chuyển động (hình tĩnh vẫn còn).
+ * ---------------------------------------------------------------------------------------------
+ */
+
+@keyframes twinkle {
+  from {
+    opacity: 0.15;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+
+@keyframes aura-twinkle {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Đốm sao quanh chân nhân vật phe thứ 3 (`Character`). */
+@media (prefers-reduced-motion: no-preference) {
+  .aura-twinkle {
+    animation: aura-twinkle var(--dur-aura) ease-in-out infinite;
+  }
+}
+
+/* Vạch sáng mảnh dưới thanh trên: vàng toả ra hai đầu (cam khi Halloween). */
+.header-glow::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  bottom: -2px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-gold) 70%, transparent), transparent);
+  pointer-events: none;
+}
+
+/* Viên thuốc điều hướng đang mở: quầng vàng nhẹ. */
+.nav-active-glow {
+  box-shadow: 0 0 14px -3px color-mix(in srgb, var(--color-gold) 75%, transparent);
+}
+
+/*
+ * Thẻ role (`RoleCard`): phông nền riêng của phe sau nhân vật — Ngỗng: hồ đêm, lau sậy, mây
+ * (xanh); Vịt: trăng máu, cành cây khô, vết cào (đỏ); phe thứ 3: tinh vân, chòm sao, vòng phép
+ * dưới chân (tím) — cùng đèn sân khấu màu phe. Tất cả là ảnh nền tĩnh của `::before` (mỗi phe
+ * một SVG nhúng, trình duyệt giải mã một lần cho cả lưới), không hoạt ảnh. Viền sáng màu phe
+ * hiện khi rê chuột vào ô (lớp `::after` chỉ đổi `opacity`). Ô trống thì phông mờ đi.
+ */
+.role-card {
+  position: relative;
+  --spot: var(--color-goose);
+  --scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 220'%3E %3Cg fill='%23FFFFFF' opacity='0.15'%3E %3Cellipse cx='42' cy='46' rx='26' ry='9'/%3E%3Cellipse cx='60' cy='40' rx='18' ry='9'/%3E %3Cellipse cx='156' cy='70' rx='24' ry='8'/%3E%3Cellipse cx='142' cy='65' rx='14' ry='8'/%3E%3C/g%3E %3Cg fill='%23CFE4FF'%3E%3Ccircle cx='24' cy='20' r='1.2'/%3E%3Ccircle cx='176' cy='28' r='1.4'/%3E%3Ccircle cx='110' cy='14' r='1'/%3E%3Ccircle cx='186' cy='100' r='1'/%3E%3C/g%3E %3Cpath d='M0 146 C30 134 60 138 90 144 C120 150 160 134 200 140 L200 220 L0 220 Z' fill='%230E2A5C' opacity='0.55'/%3E %3Cellipse cx='100' cy='170' rx='94' ry='17' fill='%237CB8FF' opacity='0.2'/%3E %3Cg fill='none' stroke='%23BFDCFF' stroke-width='1.4' stroke-linecap='round' opacity='0.35'%3E %3Cpath d='M24 166 h22 M58 178 h22 M124 180 h24 M156 164 h22'/%3E%3C/g%3E %3Cg stroke='%231E3E78' stroke-width='2.2' stroke-linecap='round' opacity='0.9'%3E %3Cpath d='M10 180 C12 160 12 140 9 122 M20 182 C20 164 22 150 26 134 M186 180 C186 162 188 146 192 130 M176 182 C176 166 174 152 170 140'/%3E%3C/g%3E %3Cg fill='%231E3E78'%3E%3Crect x='6' y='120' width='6' height='16' rx='3'/%3E%3Crect x='23' y='130' width='6' height='14' rx='3'/%3E%3Crect x='189' y='126' width='6' height='15' rx='3'/%3E%3C/g%3E %3Cg fill='%23FFE27A' opacity='0.7'%3E%3Ccircle cx='38' cy='118' r='1.6'/%3E%3Ccircle cx='164' cy='104' r='1.4'/%3E%3Ccircle cx='150' cy='126' r='1.2'/%3E%3Ccircle cx='52' cy='136' r='1.2'/%3E%3C/g%3E %3Cpath d='M166 112 C172 104 182 104 186 98 C184 108 176 114 166 112 Z M20 92 C24 86 32 86 36 82 C34 90 28 94 20 92 Z' fill='%23FFFFFF' opacity='0.22'/%3E %3C/svg%3E");
+}
+
+.role-card[data-faction='duck'] {
+  --spot: var(--color-duck);
+  --scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 220'%3E %3Ccircle cx='150' cy='52' r='40' fill='%23E5484D' opacity='0.10'/%3E %3Ccircle cx='150' cy='52' r='28' fill='%23E5484D' opacity='0.30'/%3E %3Cg fill='%238F2226' opacity='0.45'%3E%3Ccircle cx='140' cy='44' r='5'/%3E%3Ccircle cx='158' cy='60' r='7'/%3E%3Ccircle cx='160' cy='40' r='3'/%3E%3C/g%3E %3Cg fill='none' stroke='%232A0E14' stroke-width='3.2' stroke-linecap='round' opacity='0.85'%3E %3Cpath d='M0 120 C16 112 24 96 26 76 M26 76 C30 66 38 60 46 58 M26 90 C16 84 10 74 10 62 M18 104 C30 104 40 98 46 90'/%3E%3C/g%3E %3Cg fill='none' stroke='%23FF8A8F' stroke-width='1.6' stroke-linecap='round' opacity='0.22'%3E %3Cpath d='M168 108 L190 84 M174 116 L196 92 M180 124 L200 102'/%3E%3C/g%3E %3Cpath d='M0 158 C40 150 70 162 100 158 C130 154 170 146 200 156 L200 220 L0 220 Z' fill='%232A0E14' opacity='0.6'/%3E %3Cg fill='%232A0E14' opacity='0.8'%3E %3Cpath d='M150 158 l2 -14 l2 14 Z M158 156 l3 -22 l3 22 Z M40 160 l2 -12 l2 12 Z'/%3E%3C/g%3E %3Cg fill='%23FF8A8F' opacity='0.35'%3E%3Ccircle cx='30' cy='26' r='1.2'/%3E%3Ccircle cx='96' cy='18' r='1'/%3E%3Ccircle cx='70' cy='40' r='1'/%3E%3C/g%3E %3C/svg%3E");
+}
+
+.role-card[data-faction='neutral'] {
+  --spot: var(--color-third);
+  --scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 220'%3E %3Cellipse cx='60' cy='60' rx='70' ry='34' fill='%238E4EC6' opacity='0.14' transform='rotate(-20 60 60)'/%3E %3Cellipse cx='160' cy='110' rx='50' ry='24' fill='%23C9A2F2' opacity='0.08' transform='rotate(25 160 110)'/%3E %3Cg fill='%23F2E8FF'%3E %3Ccircle cx='18' cy='22' r='1.4'/%3E%3Ccircle cx='52' cy='12' r='1'/%3E%3Ccircle cx='88' cy='30' r='1.2'/%3E%3Ccircle cx='140' cy='16' r='1.6'/%3E %3Ccircle cx='178' cy='40' r='1.1'/%3E%3Ccircle cx='190' cy='90' r='1.3'/%3E%3Ccircle cx='12' cy='100' r='1'/%3E%3Ccircle cx='30' cy='140' r='1.2'/%3E%3Ccircle cx='172' cy='140' r='1'/%3E%3C/g%3E %3Cg fill='none' stroke='%23C9A2F2' stroke-width='0.9' opacity='0.45'%3E%3Cpath d='M140 16 L162 30 L178 40 L170 62 M18 22 L36 40 L52 12'/%3E%3C/g%3E %3Cg fill='%23C9A2F2' opacity='0.6'%3E%3Ccircle cx='162' cy='30' r='1.6'/%3E%3Ccircle cx='170' cy='62' r='1.4'/%3E%3Ccircle cx='36' cy='40' r='1.4'/%3E%3C/g%3E %3Cg fill='none' stroke='%23C9A2F2' opacity='0.35'%3E %3Cellipse cx='100' cy='166' rx='74' ry='14' stroke-width='1.6'/%3E %3Cellipse cx='100' cy='166' rx='58' ry='10' stroke-width='1' stroke-dasharray='4 3'/%3E%3C/g%3E %3Cg stroke='%23C9A2F2' stroke-width='1.6' stroke-linecap='round' opacity='0.4'%3E %3Cpath d='M26 166 l6 0 M168 166 l6 0 M100 152 l0 -5 M100 180 l0 5 M46 155 l4 2 M150 155 l-4 2 M46 177 l4 -2 M150 177 l-4 -2'/%3E%3C/g%3E %3C/svg%3E");
+}
+
+.role-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(9rem 8rem at 50% 6.5rem, color-mix(in srgb, var(--spot) 34%, transparent), transparent),
+    var(--scene) top center / 100% auto no-repeat,
+    linear-gradient(to bottom, color-mix(in srgb, var(--spot) 26%, transparent), transparent 75%);
+  pointer-events: none;
+}
+
+.role-card[data-empty]::before {
+  opacity: 0.45;
+}
+
+.role-card > * {
+  position: relative;
+}
+
+.role-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 2px var(--spot),
+    inset 0 0 22px -6px var(--spot);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+@media (hover: hover) {
+  :hover > .role-card::after,
+  .role-card:hover::after {
+    opacity: 1;
+  }
+}
+
+/*
+ * Khung avatar Top 1-2-3 (`RankAvatar`): vòng kim loại vàng/bạc/đồng quanh avatar, quầng sáng
+ * cùng màu, vương miện trên hạng 1 và số hạng nhỏ góc dưới. Mỗi bảng (`data-board`) thêm quầng
+ * màu phe và hình trang trí riêng sau vòng (`.rank-deco`: nguyệt quế, dao găm, quỹ đạo, đôi
+ * cánh). Hạng 1 có vệt sáng quét vòng quanh khung (`::before` xoay, bị cắt trong vòng), quỹ đạo
+ * phe thứ 3 xoay chậm — chỉ khi không giảm chuyển động.
+ */
+.rank-frame {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-inline: 3px;
+  border-radius: 9999px;
+  padding: 3px;
+  isolation: isolate;
+  --board-glow: rgb(255 210 63 / 0.3);
+}
+
+.rank-frame[data-board='goose'] {
+  --board-glow: rgb(124 184 255 / 0.5);
+}
+
+.rank-frame[data-board='duck'] {
+  --board-glow: rgb(229 72 77 / 0.55);
+}
+
+.rank-frame[data-board='neutral'] {
+  --board-glow: rgb(201 162 242 / 0.55);
+}
+
+.rank-deco {
+  position: absolute;
+  inset: -28%;
+  z-index: -2;
+  width: 156%;
+  height: 156%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Hạng 2 và 3: trang trí nhạt hơn, hạng 1 nổi nhất. */
+.rank-frame:not([data-rank='1']) .rank-deco {
+  opacity: 0.75;
+}
+
+.rank-orbit {
+  transform-box: view-box;
+  transform-origin: 50px 50px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rank-orbit {
+    animation: spin var(--dur-orbit) linear infinite;
+  }
+}
+
+.rank-frame[data-rank='1'] {
+  --ring: conic-gradient(from 210deg, #fff3b0, #ffd23f, #e8a317, #ffd23f, #fff3b0, #e8a317, #fff3b0);
+  --ring-glow: rgb(255 210 63 / 0.6);
+  --pip: #ffd23f;
+}
+
+.rank-frame[data-rank='2'] {
+  --ring: conic-gradient(from 210deg, #ffffff, #c4cad8, #7d8699, #c4cad8, #ffffff, #7d8699, #ffffff);
+  --ring-glow: rgb(196 202 216 / 0.45);
+  --pip: #d9dee8;
+}
+
+.rank-frame[data-rank='3'] {
+  --ring: conic-gradient(from 210deg, #ffd9b8, #e0975a, #9c5a2b, #e0975a, #ffd9b8, #9c5a2b, #ffd9b8);
+  --ring-glow: rgb(224 151 90 / 0.45);
+  --pip: #e0975a;
+}
+
+.rank-ring {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--ring);
+  box-shadow:
+    0 0 0 2px var(--color-night-950),
+    0 0 12px var(--ring-glow),
+    0 0 20px 2px var(--board-glow);
+}
+
+.rank-ring::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(transparent 0 72%, rgb(255 255 255 / 0.9) 82%, transparent 92%);
+}
+
+.rank-frame:not([data-rank='1']) .rank-ring::before {
+  opacity: 0.5;
+  transform: rotate(140deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rank-frame[data-rank='1'] .rank-ring::before {
+    animation: spin var(--dur-ring) linear infinite;
+  }
+}
+
+.rank-crown {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 62%;
+  min-width: 16px;
+  transform: translate(-50%, -66%) rotate(-6deg);
+  filter: drop-shadow(0 1px 0 var(--color-night-950));
+  pointer-events: none;
+}
+
+.rank-pip {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding-inline: 3px;
+  border: 2px solid var(--color-night-950);
+  border-radius: 9999px;
+  background: var(--pip);
+  color: #231a3a;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+/*
+ * Nút bật/tắt chủ đề Halloween ở thanh trên. Đang bật: nền cam `gold` (token đã đổi theo chủ đề),
+ * icon lơ lửng nhè nhẹ.
+ */
+.theme-toggle[aria-pressed='true'] {
+  background-color: var(--color-gold);
+  color: var(--color-gold-ink);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .theme-toggle[aria-pressed='true'] svg {
+    animation: float var(--dur-float) ease-in-out infinite;
+  }
+}
+
+/*
+ * Halloween: phần chỉ hiện khi bật chủ đề (`hw-only`: mũ phù thuỷ trên logo, bí ngô cạnh nhân
+ * vật) và lớp trang trí nền cố định (`HalloweenDecor`): trăng, mạng nhện góc, dơi bay ngang, ma
+ * lơ lửng — sau nội dung, không bắt sự kiện trỏ, `contain: strict` để không ảnh hưởng bố cục.
+ */
+.hw-only {
+  display: none;
+}
+
+:root[data-theme='halloween'] .hw-only {
+  display: inline;
+}
+
+.hw-decor {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.hw-moon {
+  position: absolute;
+  top: 72px;
+  right: 6vw;
+  width: clamp(72px, 12vw, 150px);
+  filter: drop-shadow(0 0 28px rgb(255 214 140 / 0.45));
+}
+
+.hw-web {
+  position: absolute;
+  top: 52px;
+  left: 0;
+  width: clamp(90px, 14vw, 170px);
+  opacity: 0.35;
+}
+
+.hw-bat {
+  position: absolute;
+  left: 0;
+  width: 34px;
+  opacity: 0.85;
+  transform: translateX(-60px);
+}
+
+.hw-bat-2 {
+  top: 34%;
+  width: 24px;
+}
+
+.hw-bat-1 {
+  top: 18%;
+}
+
+.hw-bat-3 {
+  top: 58%;
+  width: 28px;
+}
+
+.hw-bat-4 {
+  top: 9%;
+  width: 20px;
+}
+
+.hw-ghost {
+  position: absolute;
+  bottom: 14%;
+  left: 4vw;
+  width: clamp(40px, 6vw, 64px);
+  opacity: 0.22;
+}
+
+.hw-ghost-2 {
+  left: auto;
+  right: 8vw;
+  bottom: 38%;
+  width: clamp(30px, 4vw, 44px);
+}
+
+@keyframes bat-fly {
+  0% {
+    transform: translate(-60px, 0) scale(1);
+  }
+  25% {
+    transform: translate(25vw, -30px) scale(1.05);
+  }
+  50% {
+    transform: translate(52vw, 10px) scale(0.95);
+  }
+  75% {
+    transform: translate(78vw, -24px) scale(1.05);
+  }
+  100% {
+    transform: translate(calc(100vw + 60px), 0) scale(1);
+  }
+}
+
+@keyframes bat-flap {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.55);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hw-bat {
+    animation: bat-fly var(--dur-bat) linear infinite;
+  }
+
+  .hw-bat-2 {
+    animation-duration: calc(var(--dur-bat) * 1.3);
+    animation-delay: calc(var(--dur-bat) * -0.4);
+  }
+
+  .hw-bat-3 {
+    animation-duration: calc(var(--dur-bat) * 0.85);
+    animation-delay: calc(var(--dur-bat) * -0.7);
+  }
+
+  .hw-bat-4 {
+    animation-duration: calc(var(--dur-bat) * 1.6);
+    animation-delay: calc(var(--dur-bat) * -0.15);
+  }
+
+  .hw-bat-wings {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: bat-flap calc(var(--dur-fast) * 2.5) ease-in-out infinite;
+  }
+
+  .hw-ghost {
+    animation: float var(--dur-float) ease-in-out infinite;
+  }
+
+  .hw-ghost-2 {
+    animation-delay: calc(var(--dur-float) * -0.5);
+  }
+}
+
+/*
+ * §5.8 Giảm chuyển động: mọi hiệu ứng trên chỉ còn mờ vào/ra `--dur-fast` (biến `--dur-base`/
+ * `--dur-slow`/`--stagger-step` đã rút ở `:root`; View Transitions và đếm số bị JS bỏ qua; vệt
+ * sáng khung xương và nhân vật tắt ở khối `no-preference` của chúng). Ở đây đổi mọi hoạt ảnh có
+ * dịch chuyển/phóng sang `fade-in` và tắt vạch tab trượt.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .tab-enter,
+  .layer-pop[data-state='open'],
+  .backdrop-fade[data-state='open'],
+  .stagger-in > :nth-child(-n + 8),
+  [role='alert'] {
+    animation-name: fade-in;
+    animation-duration: var(--dur-fast);
+  }
+
+  .tab-indicator,
+  .tab-indicator[data-ready] {
+    transition: none;
+  }
+}

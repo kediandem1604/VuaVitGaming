@@ -1,0 +1,108 @@
+/**
+ * Lỗi nghiệp vụ dùng chung: mỗi mã có HTTP status và thông báo tiếng Việt mặc định.
+ * Thông báo là thứ người dùng thấy (web, Discord) — không bao giờ chứa chi tiết nội bộ.
+ */
+
+import { INVALID_HIGHLIGHT_MESSAGE } from '../../shared/highlight.js';
+
+export type ErrorCode =
+  | 'NOT_FOUND'
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'VALIDATION'
+  | 'NOT_MEMBER'
+  | 'SESSION_NOT_OPEN'
+  | 'SESSION_FULL'
+  | 'ROUND_CLOSED'
+  | 'SELF_VOTE'
+  | 'NOT_NOMINEE'
+  | 'CATEGORY_NOT_IN_ROUND'
+  | 'ROLE_INACTIVE'
+  | 'VALUE_OUT_OF_RANGE'
+  | 'PLAYED_ON_OUT_OF_WINDOW'
+  | 'SEASON_CLOSED'
+  | 'RATE_LIMITED'
+  | 'NOT_PENDING'
+  | 'NOT_APPROVED'
+  | 'SELF_REVIEW'
+  | 'REASON_REQUIRED'
+  | 'INVALID_IMAGE'
+  | 'HIGHLIGHT_DISABLED'
+  | 'INVALID_HIGHLIGHT'
+  | 'HIGHLIGHT_TOO_LARGE'
+  | 'HIGHLIGHT_BUSY'
+  | 'HIGHLIGHT_CHANNEL_UNAVAILABLE'
+  | 'DISCORD_UNAVAILABLE'
+  | 'BOUNTY_HAS_CLAIMS'
+  | 'BOUNTY_NOT_APPLICABLE'
+  | 'BOUNTY_CLAIM_EXPIRED'
+  | 'BOUNTY_ALREADY_CLAIMED'
+  | 'MULTIPLIER_DAY_TAKEN'
+  | 'MULTIPLIER_DAY_PAST'
+  | 'MULTIPLIER_DAY_LOCKED';
+
+const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
+  NOT_FOUND: { status: 404, message: 'Không tìm thấy' },
+  UNAUTHENTICATED: { status: 401, message: 'Bạn cần đăng nhập' },
+  FORBIDDEN: { status: 403, message: 'Bạn không có quyền làm việc này' },
+  VALIDATION: { status: 400, message: 'Dữ liệu không hợp lệ' },
+  NOT_MEMBER: { status: 403, message: 'Bạn cần vào server Discord trước' },
+  SESSION_NOT_OPEN: { status: 409, message: 'Buổi chơi đã kết thúc hoặc bị huỷ' },
+  SESSION_FULL: { status: 409, message: 'Đã đủ người' },
+  ROUND_CLOSED: { status: 409, message: 'Vote đã đóng' },
+  SELF_VOTE: { status: 400, message: 'Không được tự vote' },
+  NOT_NOMINEE: { status: 400, message: 'Người này không có mặt ở buổi chơi' },
+  CATEGORY_NOT_IN_ROUND: { status: 400, message: 'Hạng mục không thuộc đợt vote này' },
+  ROLE_INACTIVE: { status: 400, message: 'Role này đang tắt' },
+  VALUE_OUT_OF_RANGE: { status: 400, message: 'Giá trị không hợp lệ' },
+  PLAYED_ON_OUT_OF_WINDOW: { status: 400, message: 'Chỉ khai được trận trong 3 ngày gần nhất' },
+  SEASON_CLOSED: { status: 409, message: 'Mùa này đã chốt' },
+  RATE_LIMITED: { status: 429, message: 'Bạn đã khai quá 30 lần hôm nay' },
+  NOT_PENDING: { status: 409, message: 'Lần khai này đã được xử lý' },
+  // Huỷ duyệt một lần khai không còn `approved` (đã bị huỷ, hoặc chưa từng duyệt).
+  NOT_APPROVED: { status: 409, message: 'Lần khai không còn ở trạng thái đã duyệt' },
+  SELF_REVIEW: { status: 403, message: 'Mod không được tự duyệt lần khai của mình' },
+  REASON_REQUIRED: { status: 400, message: 'Cần ghi lý do từ chối' },
+  INVALID_IMAGE: { status: 400, message: 'Ảnh phải là PNG, JPG hoặc WebP, tối đa 1 MB' },
+  HIGHLIGHT_DISABLED: { status: 409, message: 'Chưa bật tính năng highlight' },
+  // Cùng câu với kiểm tra trước khi tải lên ở web (`src/shared/highlight.ts`).
+  INVALID_HIGHLIGHT: { status: 400, message: INVALID_HIGHLIGHT_MESSAGE },
+  // Nơi ném thường ghi rõ giới hạn hiện hành (`highlightLimitMessage`); đây là câu dự phòng.
+  HIGHLIGHT_TOO_LARGE: { status: 400, message: 'Highlight quá lớn' },
+  // Đã đủ số lần tải highlight chạy cùng lúc (giới hạn bộ nhớ của máy chủ).
+  HIGHLIGHT_BUSY: { status: 503, message: 'Máy chủ đang bận tải highlight khác, thử lại sau' },
+  // Lỗi chỉ admin sửa được (quyền của bot, kênh bị xoá) — không bảo người dùng thử lại.
+  HIGHLIGHT_CHANNEL_UNAVAILABLE: {
+    status: 503,
+    message: 'Bot không đăng được vào kênh #highlight (thiếu quyền hoặc kênh đã bị xoá) — báo admin',
+  },
+  DISCORD_UNAVAILABLE: { status: 503, message: 'Không đăng được highlight lên Discord, thử lại sau' },
+  // Mục treo thưởng đã có lần nhận (kể cả bị từ chối) — giữ lịch sử, chỉ cho tắt.
+  BOUNTY_HAS_CLAIMS: { status: 409, message: 'Mục đã có lần nhận — chỉ tắt được, không xoá được' },
+  // Luật nhận treo thưởng (spec treo thưởng §4) — câu đúng nguyên văn spec, web và Discord cùng hiện.
+  BOUNTY_NOT_APPLICABLE: { status: 400, message: 'Mục treo thưởng không áp dụng cho buổi này' },
+  BOUNTY_CLAIM_EXPIRED: { status: 400, message: 'Đã quá hạn nhận (3 ngày sau buổi chơi)' },
+  BOUNTY_ALREADY_CLAIMED: { status: 409, message: 'Bạn đã nhận mục này ở buổi này rồi' },
+  // Ngày nhân điểm (spec ngày nhân điểm §4) — câu đúng nguyên văn spec.
+  MULTIPLIER_DAY_TAKEN: { status: 409, message: 'Ngày này đã có hệ số nhân' },
+  MULTIPLIER_DAY_PAST: { status: 400, message: 'Chỉ đặt được cho hôm nay hoặc sau này' },
+  MULTIPLIER_DAY_LOCKED: { status: 409, message: 'Ngày đã qua không sửa/xoá được' },
+};
+
+export class AppError extends Error {
+  readonly code: ErrorCode;
+  readonly status: number;
+
+  constructor(code: ErrorCode, message?: string) {
+    const defaults = DEFAULTS[code];
+    super(message ?? defaults.message);
+    this.name = 'AppError';
+    this.code = code;
+    this.status = defaults.status;
+  }
+}
+
+/** Tạo AppError; bỏ trống `message` để dùng thông báo mặc định của mã lỗi. */
+export function appError(code: ErrorCode, message?: string): AppError {
+  return new AppError(code, message);
+}

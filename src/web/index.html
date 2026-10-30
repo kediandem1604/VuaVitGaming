@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#1B1F4A" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>GGD Hub</title>
+    <!-- Chủ đề chung nhận từ server lần trước (lib/theme.ts) đặt trước khi vẽ để không nháy màu cũ. -->
+    <script>
+      try {
+        if (localStorage.getItem('ggd-theme') === 'halloween') {
+          document.documentElement.dataset.theme = 'halloween';
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#1A0F26');
+        }
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>
