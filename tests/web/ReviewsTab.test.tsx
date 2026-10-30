@@ -1,13 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { AccusationDto, BountyClaimDto, ReportDto, ReviewedReportDto } from '../../src/shared/api-types';
+import type { AccusationDto, BountyClaimDto, ReportDto, ReviewedReportDto, StandaloneAccusationDto } from '../../src/shared/api-types';
 import {
+  APPROVED_ACCUSATIONS_KEY,
   APPROVED_BOUNTY_CLAIMS_KEY,
   APPROVED_REPORTS_KEY,
   LEADERBOARD_TOTALS_KEY,
+  MY_ACCUSATIONS_KEY,
   MY_BOUNTY_CLAIMS_KEY,
   MY_REPORTS_KEY,
+  PENDING_ACCUSATIONS_KEY,
   PENDING_REPORTS_KEY,
   SESSION_BOUNTIES_KEY,
   TITLES_QUERY_KEY,
@@ -79,6 +82,8 @@ const PENDING_ROUTE = 'GET /api/admin/reports?status=pending';
 const APPROVED_ROUTE = 'GET /api/admin/reports?status=approved';
 const PENDING_BOUNTY_ROUTE = 'GET /api/admin/bounty-claims?status=pending';
 const APPROVED_BOUNTY_ROUTE = 'GET /api/admin/bounty-claims?status=approved';
+const PENDING_ACCUSATIONS_ROUTE = 'GET /api/admin/accusations?status=pending';
+const APPROVED_ACCUSATIONS_ROUTE = 'GET /api/admin/accusations?status=approved';
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -93,6 +98,8 @@ function stubFetch(routes: Record<string, Handler>) {
     [APPROVED_ROUTE]: () => json(200, []),
     [PENDING_BOUNTY_ROUTE]: () => json(200, []),
     [APPROVED_BOUNTY_ROUTE]: () => json(200, []),
+    [PENDING_ACCUSATIONS_ROUTE]: () => json(200, []),
+    [APPROVED_ACCUSATIONS_ROUTE]: () => json(200, []),
     ...routes,
   };
   const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
@@ -387,7 +394,7 @@ test('SEASON_CLOSED shows the server message and refetches the list', async () =
 
   expect(await screen.findByRole('alert')).toHaveTextContent('Mùa đã chốt, không huỷ duyệt được nữa');
   await waitFor(() => expect(listCalls).toBe(2));
-  expect(await within(approvedSection()).findByText('Chưa có lần khai hay treo thưởng nào được duyệt trong mùa đang mở')).toBeInTheDocument();
+  expect(await within(approvedSection()).findByText('Chưa có lần khai, treo thưởng hay báo cáo nào được duyệt trong mùa đang mở')).toBeInTheDocument();
 });
 
 test('approving from the queue refreshes the recently approved list', async () => {
@@ -406,7 +413,7 @@ test('approving from the queue refreshes the recently approved list', async () =
 test('no recently approved report says so', async () => {
   stubFetch({});
   renderTab();
-  expect(await screen.findByText('Chưa có lần khai hay treo thưởng nào được duyệt trong mùa đang mở')).toBeInTheDocument();
+  expect(await screen.findByText('Chưa có lần khai, treo thưởng hay báo cáo nào được duyệt trong mùa đang mở')).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Đã duyệt gần đây (0)' })).toBeInTheDocument();
 });
 
@@ -857,7 +864,7 @@ test('revoking a bounty claim posts the reason, removes the row and refreshes sc
   fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do huỷ duyệt' }), { target: { value: ' Nhầm buổi ' } });
   fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
   await waitFor(() => expect(posted).toEqual({ reason: 'Nhầm buổi' }));
-  expect(await screen.findByText('Chưa có lần khai hay treo thưởng nào được duyệt trong mùa đang mở')).toBeInTheDocument();
+  expect(await screen.findByText('Chưa có lần khai, treo thưởng hay báo cáo nào được duyệt trong mùa đang mở')).toBeInTheDocument();
   for (const key of ['leaderboard', 'leaderboard-factions', 'hall', 'member']) expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: LEADERBOARD_TOTALS_KEY });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_BOUNTY_CLAIMS_KEY });
@@ -882,4 +889,192 @@ test('a gold ×m chip marks multiplied reports in the queue and in "Đã duyệt
 
   const [recent] = await approvedItems();
   expect(within(recent as HTMLElement).getByText('×2')).toHaveClass('bg-gold');
+});
+
+// ---------------------------------------------------------------------------
+// Báo cáo người chơi độc lập (spec 2026-10-31 §B)
+// ---------------------------------------------------------------------------
+
+const standalone = (over: Partial<StandaloneAccusationDto> & Pick<StandaloneAccusationDto, 'id'>): StandaloneAccusationDto => ({
+  status: 'pending',
+  reporter: { id: 11, displayName: 'Ngỗng Mười Một' },
+  accused: { id: 10, displayName: 'Vịt Mười' },
+  accusedRole: { id: 20, nameVi: 'Cảnh sát trưởng', icon: '⭐', faction: 'goose', penaltyPoints: 1 },
+  victim: { id: 9, displayName: 'Ngỗng Chín' },
+  victimFaction: 'goose',
+  playedOn: '2026-10-22',
+  // 12:00Z = 19:00 giờ VN.
+  session: { id: 7, startsAt: '2026-10-22T12:00:00.000Z', modeName: 'Cổ điển' },
+  note: 'Clip ở kênh highlight',
+  rejectReason: null,
+  duplicate: false,
+  createdAt: '2026-10-22T15:10:00.000Z',
+  reviewedBy: null,
+  reviewedAt: null,
+  ...over,
+});
+const STANDALONE_LINE = 'Vịt Mười (⭐ Cảnh sát trưởng) bắn Ngỗng Chín — phe Ngỗng';
+const accusationQueue: StandaloneAccusationDto[] = [standalone({ id: 61 }), standalone({ id: 62, reporter: { id: 12, displayName: 'Đa Đa' }, session: null, note: null, victimFaction: 'neutral' })];
+const accusationSection = () => screen.findByRole('region', { name: /^Báo cáo người chơi chờ duyệt/ });
+const accusationItems = async () => within(await accusationSection()).findAllByRole('listitem');
+
+test('"Báo cáo người chơi chờ duyệt ({n})" is its own section: reporter, case line, date, session, note, Duyệt / Từ chối', async () => {
+  stubFetch({ [PENDING_ROUTE]: () => json(200, queue), [PENDING_ACCUSATIONS_ROUTE]: () => json(200, accusationQueue) });
+  renderTab();
+  const items = await accusationItems();
+  expect(items).toHaveLength(2);
+  expect(screen.getByRole('heading', { name: 'Báo cáo người chơi chờ duyệt (2)' })).toBeInTheDocument();
+  const first = items[0] as HTMLElement;
+  expect(first).toHaveTextContent('Ngỗng Mười Một');
+  expect(first).toHaveTextContent(STANDALONE_LINE);
+  expect(first).toHaveTextContent('22/10/2026');
+  expect(first).toHaveTextContent('Buổi 19:00 22/10/2026 — Cổ điển');
+  expect(first).toHaveTextContent('Clip ở kênh highlight');
+  expect(within(first).getByRole('button', { name: 'Duyệt' })).toBeInTheDocument();
+  expect(within(first).getByRole('button', { name: 'Từ chối' })).toBeInTheDocument();
+  expect(within(first).queryByRole('button', { name: 'Duyệt, bỏ báo cáo' })).not.toBeInTheDocument();
+  expect(items[1]).toHaveTextContent('Đa Đa');
+  expect(items[1]).toHaveTextContent('phe thứ 3');
+  expect(items[1]).toHaveTextContent('Không chọn buổi');
+  // Tách khỏi hàng chờ lần khai: hàng chờ lần khai vẫn chỉ có hai lần khai.
+  const reports = within(screen.getByRole('region', { name: /^Hàng chờ duyệt/ }));
+  expect(await reports.findAllByRole('listitem')).toHaveLength(2);
+  expect(reports.queryByText(STANDALONE_LINE)).not.toBeInTheDocument();
+});
+
+test('an empty player-report queue says so', async () => {
+  stubFetch({});
+  renderTab();
+  expect(await screen.findByText('Không có báo cáo người chơi nào chờ duyệt')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Báo cáo người chơi chờ duyệt (0)' })).toBeInTheDocument();
+});
+
+test('approving a player report posts approve: true, removes it and refreshes scores and lists', async () => {
+  let posted: unknown = null;
+  stubFetch({
+    [PENDING_ACCUSATIONS_ROUTE]: () => json(200, posted === null ? accusationQueue : accusationQueue.slice(1)),
+    'POST /api/admin/accusations/61/review': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  const queryClient = renderTab();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const first = (await accusationItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt' }));
+  await waitFor(() => expect(posted).toEqual({ approve: true }));
+  await waitFor(async () => expect(await accusationItems()).toHaveLength(1));
+  for (const key of ['leaderboard', 'leaderboard-factions', 'hall', 'member']) expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
+  for (const queryKey of [LEADERBOARD_TOTALS_KEY, TITLES_QUERY_KEY, MY_REPORTS_KEY, APPROVED_REPORTS_KEY, APPROVED_ACCUSATIONS_KEY, PENDING_ACCUSATIONS_KEY, MY_ACCUSATIONS_KEY]) {
+    expect(invalidate).toHaveBeenCalledWith({ queryKey });
+  }
+});
+
+test('rejecting a player report needs a reason, then posts it without touching scores', async () => {
+  let posted: unknown = null;
+  const fetchMock = stubFetch({
+    [PENDING_ACCUSATIONS_ROUTE]: () => json(200, accusationQueue),
+    'POST /api/admin/accusations/61/review': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  const queryClient = renderTab();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const first = (await accusationItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Từ chối' }));
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận từ chối' }));
+  expect(within(first).getByRole('alert')).toHaveTextContent('Cần ghi lý do từ chối');
+  expect(postCalls(fetchMock)).toHaveLength(0);
+
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do từ chối' }), { target: { value: '  Không đủ bằng chứng ' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận từ chối' }));
+  await waitFor(() => expect(posted).toEqual({ approve: false, reason: 'Không đủ bằng chứng' }));
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_ACCUSATIONS_KEY });
+  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: LEADERBOARD_TOTALS_KEY });
+});
+
+test('NOT_PENDING on a player report (duplicate / already handled) shows the message and refetches its queue', async () => {
+  let calls = 0;
+  stubFetch({
+    [PENDING_ACCUSATIONS_ROUTE]: () => {
+      calls += 1;
+      return json(200, accusationQueue);
+    },
+    'POST /api/admin/accusations/61/review': () => json(409, { error: { code: 'NOT_PENDING', message: 'Báo cáo này đã được xử lý' } }),
+  });
+  renderTab();
+  const first = (await accusationItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Duyệt' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Báo cáo này đã được xử lý');
+  await waitFor(() => expect(calls).toBe(2));
+});
+
+test('recently approved mixes in approved player reports with a "Báo cáo" label; revoking needs a reason and refreshes scores', async () => {
+  const approvedAccusation = standalone({ id: 71, status: 'approved', reviewedBy: { id: 12, displayName: 'Mod Mười Hai' }, reviewedAt: '2026-10-22T16:00:00.000Z' });
+  let posted: unknown = null;
+  const fetchMock = stubFetch({
+    [APPROVED_ROUTE]: () => json(200, approved),
+    [APPROVED_ACCUSATIONS_ROUTE]: () => json(200, posted === null ? [approvedAccusation] : []),
+    'POST /api/admin/accusations/71/revoke': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return noContent();
+    },
+  });
+  const queryClient = renderTab();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const items = await approvedItems();
+  expect(items).toHaveLength(3);
+  // 16:00Z mới hơn 14:30Z của hai lần khai.
+  const first = items[0] as HTMLElement;
+  expect(within(first).getByText('Báo cáo')).toHaveClass('chip');
+  expect(first).toHaveTextContent('Ngỗng Mười Một');
+  expect(first).toHaveTextContent(STANDALONE_LINE);
+  expect(first).toHaveTextContent('Duyệt bởi Mod Mười Hai lúc 23:00 22/10/2026');
+
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ duyệt' }));
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
+  expect(within(first).getByRole('alert')).toHaveTextContent('Cần ghi lý do huỷ duyệt');
+  expect(postCalls(fetchMock)).toHaveLength(0);
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do huỷ duyệt' }), { target: { value: ' Duyệt nhầm ' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
+  await waitFor(() => expect(posted).toEqual({ reason: 'Duyệt nhầm' }));
+  await waitFor(async () => expect(await approvedItems()).toHaveLength(2));
+  for (const key of ['leaderboard', 'leaderboard-factions', 'hall', 'member']) expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
+  for (const queryKey of [LEADERBOARD_TOTALS_KEY, TITLES_QUERY_KEY, MY_REPORTS_KEY, APPROVED_REPORTS_KEY, MY_ACCUSATIONS_KEY]) expect(invalidate).toHaveBeenCalledWith({ queryKey });
+});
+
+test('NOT_APPROVED when revoking a player report shows the message and refetches the approved player reports', async () => {
+  const approvedAccusation = standalone({ id: 71, status: 'approved', reviewedBy: { id: 12, displayName: 'Mod Mười Hai' }, reviewedAt: '2026-10-22T16:00:00.000Z' });
+  let calls = 0;
+  stubFetch({
+    [APPROVED_ACCUSATIONS_ROUTE]: () => {
+      calls += 1;
+      return json(200, [approvedAccusation]);
+    },
+    'POST /api/admin/accusations/71/revoke': () => json(409, { error: { code: 'NOT_APPROVED', message: 'Báo cáo không còn ở trạng thái đã duyệt' } }),
+  });
+  renderTab();
+  const first = (await approvedItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ duyệt' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do huỷ duyệt' }), { target: { value: 'Nhầm' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
+  expect(await within(first).findByRole('alert')).toHaveTextContent('Báo cáo không còn ở trạng thái đã duyệt');
+  await waitFor(() => expect(calls).toBe(2));
+});
+
+test('revoking a penalty row also refreshes the approved player reports (its standalone report is revoked with it)', async () => {
+  const penaltyRow = approvedReport({ id: 23, source: 'accusation', penaltyOf: { id: 71, status: 'approved', accused: { id: 9, displayName: 'Ngỗng Chín' }, accusedRole: { id: 20, nameVi: 'Cảnh sát trưởng', icon: '⭐', penaltyPoints: 1 }, victim: { id: 10, displayName: 'Vịt Mười' }, victimFaction: 'duck', rejectReason: null } });
+  stubFetch({
+    [APPROVED_ROUTE]: () => json(200, [penaltyRow]),
+    'POST /api/admin/reports/23/revoke': () => noContent(),
+  });
+  const queryClient = renderTab();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const first = (await approvedItems())[0] as HTMLElement;
+  fireEvent.click(within(first).getByRole('button', { name: 'Huỷ duyệt' }));
+  fireEvent.change(within(first).getByRole('textbox', { name: 'Lý do huỷ duyệt' }), { target: { value: 'Nhầm' } });
+  fireEvent.click(within(first).getByRole('button', { name: 'Xác nhận huỷ duyệt' }));
+  await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: APPROVED_ACCUSATIONS_KEY }));
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_ACCUSATIONS_KEY });
 });

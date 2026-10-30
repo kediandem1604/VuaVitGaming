@@ -33,6 +33,14 @@
  * mới duyệt trước, mỗi dòng có Huỷ duyệt. Duyệt/huỷ một lần nhận làm mới cùng bộ cache điểm như huỷ
  * duyệt lần khai, cộng "Treo thưởng của tôi" và thẻ treo thưởng ở trang Hôm nay.
  *
+ * Báo cáo người chơi độc lập (spec 2026-10-31 §B): mục riêng "Báo cáo người chơi chờ duyệt ({n})"
+ * (server chỉ trả báo cáo sớm nhất còn chờ của mỗi vụ) — mỗi dòng người báo cáo, "{người} ({icon}
+ * {role}) bắn {người bị bắn} — phe {phe}", ngày, buổi, ghi chú; nút Duyệt / Từ chối (lý do, cùng
+ * `ReasonForm`). "Đã duyệt gần đây" trộn cả báo cáo đã duyệt (chip "Báo cáo") với Huỷ duyệt (lý do).
+ * Duyệt/huỷ làm mới các bảng điểm (+1 vào "Cả 3 phe" của người gửi, mục trừ điểm của người bị báo
+ * cáo), hàng chờ báo cáo (báo cáo trùng kế tiếp có thể vừa hiện), "Đã duyệt gần đây" (mục trừ điểm
+ * mới / bị huỷ theo) và "Báo cáo của tôi". Báo cáo cũ gắn lần khai vẫn quyết bằng ba nút như trên.
+ *
  * Giao diện Sảnh đêm (spec §6 Quản trị): hai danh sách kiểu bảng (một panel, hàng kẻ
  * `night-700`, chữ 14px); Xác nhận từ chối / Xác nhận huỷ duyệt là `btn-danger` (xác nhận
  * duyệt-bỏ-báo-cáo vẫn là duyệt nên `btn-primary`). Lần khai có highlight kèm link "Xem
@@ -43,24 +51,28 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type ReactNode } from 'react';
-import type { AccusationDto, BountyClaimDto, ReportDto, ReviewedReportDto } from '../../../shared/api-types';
+import type { AccusationDto, BountyClaimDto, ReportDto, ReviewedReportDto, StandaloneAccusationDto } from '../../../shared/api-types';
 import { formatReportValue } from '../../../shared/metric';
 import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { HighlightLink } from '../../components/HighlightLink';
 import { MultiplierChip } from '../../components/MultiplierChip';
 import { QueryState } from '../../components/QueryState';
-import { PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine } from '../../lib/accusations';
+import { PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine, formatStandaloneLine } from '../../lib/accusations';
 import { CLAIM_SOURCE_LABEL, bountyIcon, sessionText } from '../../lib/bounties';
 import { cx } from '../../lib/cx';
 import { useStaggerOnce } from '../../lib/motion';
 import { formatDateLabel, formatTime } from '../../lib/format';
+import { approvedAccusationsQuery, pendingAccusationsQuery } from '../../lib/queries';
 import {
+  APPROVED_ACCUSATIONS_KEY,
   APPROVED_BOUNTY_CLAIMS_KEY,
   APPROVED_REPORTS_KEY,
   LEADERBOARD_TOTALS_KEY,
+  MY_ACCUSATIONS_KEY,
   MY_BOUNTY_CLAIMS_KEY,
   MY_REPORTS_KEY,
+  PENDING_ACCUSATIONS_KEY,
   PENDING_BOUNTY_CLAIMS_KEY,
   PENDING_REPORTS_KEY,
   SESSION_BOUNTIES_KEY,
@@ -87,6 +99,14 @@ const BOUNTY_SCORE_QUERY_KEYS = [
   MY_BOUNTY_CLAIMS_KEY,
   SESSION_BOUNTIES_KEY,
 ] as const;
+/**
+ * Cache làm mới sau khi duyệt hoặc huỷ duyệt một báo cáo người chơi: các bảng điểm (+1 của người gửi
+ * vào "Cả 3 phe", mục trừ điểm của người bị báo cáo), "Đã duyệt gần đây" của lần khai (mục trừ điểm
+ * nằm ở đó), lần khai của mình (có thể chính mình bị trừ — admin) và "Báo cáo của tôi".
+ */
+const ACCUSATION_SCORE_QUERY_KEYS = [...SCORE_QUERY_KEYS, APPROVED_REPORTS_KEY, MY_ACCUSATIONS_KEY] as const;
+/** Mã lỗi cho biết hàng chờ báo cáo người chơi đang xem đã cũ (người khác vừa xử lý / báo cáo trùng / mùa vừa chốt). */
+const STALE_ACCUSATION_PENDING_CODES = new Set(['NOT_PENDING', 'SEASON_CLOSED']);
 /** Mã lỗi cho biết hàng chờ treo thưởng đang xem đã cũ (người khác vừa xử lý, mùa vừa chốt). */
 const STALE_BOUNTY_PENDING_CODES = new Set(['NOT_PENDING', 'SEASON_CLOSED']);
 /** Mã 409 cho biết danh sách "Đã duyệt gần đây" đang xem đã cũ (người khác vừa huỷ, hoặc mùa vừa chốt). */
@@ -113,6 +133,7 @@ export function ReviewsTab() {
   return (
     <>
       <PendingQueue />
+      <AccusationQueue />
       <BountyQueue />
       <RecentlyApproved />
     </>
@@ -175,14 +196,45 @@ function BountyQueue() {
   );
 }
 
-/** Một dòng "Đã duyệt gần đây": lần khai hoặc lần nhận treo thưởng. */
-type ApprovedItem = { kind: 'report'; at: string; report: ReviewedReportDto } | { kind: 'bounty'; at: string; claim: BountyClaimDto };
+function AccusationQueue() {
+  const headingId = useId();
+  const queue = useQuery(pendingAccusationsQuery);
+  const stagger = useStaggerOnce((queue.data?.length ?? 0) > 0);
 
-/** Trộn hai danh sách đã duyệt, mới duyệt trước (sắp ổn định: cùng giờ thì lần khai trước). */
-function mergeApproved(reports: ReviewedReportDto[], claims: BountyClaimDto[]): ApprovedItem[] {
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <ListHeading id={headingId} title="Báo cáo người chơi chờ duyệt" query={queue} />
+      <QueryState query={queue}>
+        {(list) =>
+          list.length === 0 ? (
+            <EmptyState>
+              <p>Không có báo cáo người chơi nào chờ duyệt</p>
+            </EmptyState>
+          ) : (
+            <ul className={cx('panel flex flex-col divide-y divide-night-700 p-0', stagger)}>
+              {list.map((accusation) => (
+                <PendingAccusation key={accusation.id} accusation={accusation} />
+              ))}
+            </ul>
+          )
+        }
+      </QueryState>
+    </section>
+  );
+}
+
+/** Một dòng "Đã duyệt gần đây": lần khai, lần nhận treo thưởng hoặc báo cáo người chơi. */
+type ApprovedItem =
+  | { kind: 'report'; at: string; report: ReviewedReportDto }
+  | { kind: 'bounty'; at: string; claim: BountyClaimDto }
+  | { kind: 'accusation'; at: string; accusation: StandaloneAccusationDto };
+
+/** Trộn ba danh sách đã duyệt, mới duyệt trước (sắp ổn định: cùng giờ thì lần khai, rồi treo thưởng, rồi báo cáo). */
+function mergeApproved(reports: ReviewedReportDto[], claims: BountyClaimDto[], accusations: StandaloneAccusationDto[]): ApprovedItem[] {
   const items: ApprovedItem[] = [
     ...reports.map((report): ApprovedItem => ({ kind: 'report', at: report.reviewedAt, report })),
     ...claims.map((claim): ApprovedItem => ({ kind: 'bounty', at: claim.reviewedAt ?? claim.createdAt, claim })),
+    ...accusations.map((accusation): ApprovedItem => ({ kind: 'accusation', at: accusation.reviewedAt ?? accusation.createdAt, accusation })),
   ];
   return items.sort((x, y) => y.at.localeCompare(x.at));
 }
@@ -191,13 +243,15 @@ function RecentlyApproved() {
   const headingId = useId();
   const reports = useQuery({ queryKey: APPROVED_REPORTS_KEY, queryFn: () => apiGet<ReviewedReportDto[]>('/api/admin/reports?status=approved') });
   const claims = useQuery({ queryKey: APPROVED_BOUNTY_CLAIMS_KEY, queryFn: () => apiGet<BountyClaimDto[]>('/api/admin/bounty-claims?status=approved') });
-  // Một khối cho cả hai truy vấn: có dữ liệu khi cả hai đã về, lỗi khi một trong hai lỗi, Tải lại/Thử lại gọi cả hai.
+  const accusations = useQuery(approvedAccusationsQuery);
+  const all = [reports, claims, accusations] as const;
+  // Một khối cho cả ba truy vấn: có dữ liệu khi cả ba đã về, lỗi khi một trong ba lỗi, Tải lại/Thử lại gọi cả ba.
   const merged = {
-    data: reports.data && claims.data ? mergeApproved(reports.data, claims.data) : undefined,
-    isError: reports.isError || claims.isError,
-    error: reports.error ?? claims.error,
-    isFetching: reports.isFetching || claims.isFetching,
-    refetch: () => Promise.all([reports.refetch(), claims.refetch()]),
+    data: reports.data && claims.data && accusations.data ? mergeApproved(reports.data, claims.data, accusations.data) : undefined,
+    isError: all.some((query) => query.isError),
+    error: reports.error ?? claims.error ?? accusations.error,
+    isFetching: all.some((query) => query.isFetching),
+    refetch: () => Promise.all(all.map((query) => query.refetch())),
   };
 
   return (
@@ -207,15 +261,17 @@ function RecentlyApproved() {
         {(list) =>
           list.length === 0 ? (
             <EmptyState>
-              <p>Chưa có lần khai hay treo thưởng nào được duyệt trong mùa đang mở</p>
+              <p>Chưa có lần khai, treo thưởng hay báo cáo nào được duyệt trong mùa đang mở</p>
             </EmptyState>
           ) : (
             <ul className="panel flex flex-col divide-y divide-night-700 p-0">
               {list.map((item) =>
                 item.kind === 'report' ? (
                   <ApprovedReport key={`report-${item.report.id}`} report={item.report} />
-                ) : (
+                ) : item.kind === 'bounty' ? (
                   <ApprovedBountyClaim key={`bounty-${item.claim.id}`} claim={item.claim} />
+                ) : (
+                  <ApprovedAccusation key={`accusation-${item.accusation.id}`} accusation={item.accusation} />
                 ),
               )}
             </ul>
@@ -361,6 +417,11 @@ function ApprovedReport({ report }: { report: ReviewedReportDto }) {
       queryClient.setQueryData<ReviewedReportDto[]>(APPROVED_REPORTS_KEY, (current) => current?.filter((item) => item.id !== report.id));
       // Mục trừ điểm do báo cáo kèm lần khai này có thể vừa bị huỷ dây chuyền → tải lại danh sách.
       void queryClient.invalidateQueries({ queryKey: APPROVED_REPORTS_KEY });
+      // Huỷ một mục trừ điểm của báo cáo độc lập cũng huỷ báo cáo đó (người gửi mất +1).
+      if (report.source === 'accusation') {
+        void queryClient.invalidateQueries({ queryKey: APPROVED_ACCUSATIONS_KEY });
+        void queryClient.invalidateQueries({ queryKey: MY_ACCUSATIONS_KEY });
+      }
       // Điểm mùa, Top 3 mỗi phe, Tổng điểm theo phe, Đại sảnh, trang thành viên, danh hiệu và lần khai của mình không còn tính lần khai này.
       for (const queryKey of SCORE_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey });
     },
@@ -517,6 +578,134 @@ function ApprovedBountyClaim({ claim }: { claim: BountyClaimDto }) {
       )}
       <ReviewError message={error} />
     </li>
+  );
+}
+
+function PendingAccusation({ accusation }: { accusation: StandaloneAccusationDto }) {
+  const queryClient = useQueryClient();
+  const [rejecting, setRejecting] = useState(false);
+  const reason = useReason('Cần ghi lý do từ chối');
+
+  const review = useMutation({
+    mutationFn: (body: { approve: true } | { approve: false; reason: string }) => apiSend<undefined>('POST', `/api/admin/accusations/${accusation.id}/review`, body),
+    onSuccess: (_, body) => {
+      queryClient.setQueryData<StandaloneAccusationDto[]>(PENDING_ACCUSATIONS_KEY, (current) => current?.filter((item) => item.id !== accusation.id));
+      // Vụ vừa được quyết: báo cáo trùng kế tiếp có thể vừa hiện (bị bác) hoặc bị thay thế (đúng).
+      void queryClient.invalidateQueries({ queryKey: PENDING_ACCUSATIONS_KEY });
+      void queryClient.invalidateQueries({ queryKey: MY_ACCUSATIONS_KEY });
+      if (body.approve) {
+        void queryClient.invalidateQueries({ queryKey: APPROVED_ACCUSATIONS_KEY });
+        for (const queryKey of ACCUSATION_SCORE_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey });
+      }
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && STALE_ACCUSATION_PENDING_CODES.has(error.code)) void queryClient.invalidateQueries({ queryKey: PENDING_ACCUSATIONS_KEY });
+    },
+  });
+
+  const error = (rejecting ? reason.localError : null) ?? (review.isError ? errorMessage(review.error) : null);
+
+  return (
+    <li className="flex flex-col gap-2 px-4 py-3 text-sm">
+      <AccusationSummary accusation={accusation} meta={`Gửi lúc ${formatTime(accusation.createdAt)} ${formatDateLabel(new Date(accusation.createdAt))}`} />
+      {rejecting ? (
+        <ReasonForm
+          reason={reason}
+          label="Lý do từ chối"
+          submitLabel="Xác nhận từ chối"
+          cancelLabel="Huỷ"
+          pending={review.isPending}
+          onSubmit={(trimmed) => review.mutate({ approve: false, reason: trimmed })}
+          onCancel={() => {
+            review.reset();
+            reason.clearError();
+            setRejecting(false);
+          }}
+        />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-primary" disabled={review.isPending} onClick={() => review.mutate({ approve: true })}>
+            {review.isPending ? 'Đang gửi…' : 'Duyệt'}
+          </button>
+          <button type="button" className="btn-secondary" disabled={review.isPending} onClick={() => setRejecting(true)}>
+            Từ chối
+          </button>
+        </div>
+      )}
+      <ReviewError message={error} />
+    </li>
+  );
+}
+
+function ApprovedAccusation({ accusation }: { accusation: StandaloneAccusationDto }) {
+  const queryClient = useQueryClient();
+  const [revoking, setRevoking] = useState(false);
+  const reason = useReason('Cần ghi lý do huỷ duyệt');
+
+  const revoke = useMutation({
+    mutationFn: (trimmed: string) => apiSend<undefined>('POST', `/api/admin/accusations/${accusation.id}/revoke`, { reason: trimmed }),
+    onSuccess: () => {
+      queryClient.setQueryData<StandaloneAccusationDto[]>(APPROVED_ACCUSATIONS_KEY, (current) => current?.filter((item) => item.id !== accusation.id));
+      // Mục trừ điểm kèm theo bị huỷ cùng lúc (rời "Đã duyệt gần đây"), +1 của người gửi mất theo.
+      for (const queryKey of ACCUSATION_SCORE_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && STALE_APPROVED_CODES.has(error.code)) void queryClient.invalidateQueries({ queryKey: APPROVED_ACCUSATIONS_KEY });
+    },
+  });
+
+  const error = reason.localError ?? (revoke.isError ? errorMessage(revoke.error) : null);
+  const reviewedAt = accusation.reviewedAt ? ` lúc ${formatTime(accusation.reviewedAt)} ${formatDateLabel(new Date(accusation.reviewedAt))}` : '';
+
+  return (
+    <li className="flex flex-col gap-2 px-4 py-3 text-sm">
+      <AccusationSummary accusation={accusation} label meta={`Duyệt bởi ${accusation.reviewedBy?.displayName ?? '—'}${reviewedAt}`} />
+      {revoking ? (
+        <ReasonForm
+          reason={reason}
+          label="Lý do huỷ duyệt"
+          submitLabel="Xác nhận huỷ duyệt"
+          cancelLabel="Thôi"
+          pending={revoke.isPending}
+          onSubmit={(trimmed) => revoke.mutate(trimmed)}
+          onCancel={() => {
+            revoke.reset();
+            reason.clearError();
+            setRevoking(false);
+          }}
+        />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-secondary" disabled={revoke.isPending} onClick={() => setRevoking(true)}>
+            Huỷ duyệt
+          </button>
+        </div>
+      )}
+      <ReviewError message={error} />
+    </li>
+  );
+}
+
+/**
+ * Phần chung của một dòng báo cáo người chơi: người báo cáo (kèm chip "Báo cáo" khi `label` — dòng nằm
+ * lẫn với lần khai ở "Đã duyệt gần đây"), ngày chơi, "{người} ({icon} {role}) bắn {người bị bắn} — phe
+ * {phe}", buổi (hoặc "Không chọn buổi"), dòng phụ `meta`, ghi chú.
+ */
+function AccusationSummary({ accusation, meta, label = false }: { accusation: StandaloneAccusationDto; meta: ReactNode; label?: boolean }) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-base font-bold text-white">{accusation.reporter.displayName}</span>
+        {label && <span className="chip bg-duck-soft px-2.5 py-0.5 text-night-950">Báo cáo</span>}
+        <time dateTime={accusation.playedOn} className="ml-auto text-night-300 tabular-nums">
+          {formatDateLabel(accusation.playedOn)}
+        </time>
+      </div>
+      <p className="text-lg leading-tight font-extrabold break-words text-white">{formatStandaloneLine(accusation)}</p>
+      <p className="text-night-300">{accusation.session ? `Buổi ${sessionText(accusation.session)}` : 'Không chọn buổi'}</p>
+      <p className="text-night-300">{meta}</p>
+      {accusation.note && <p className="break-words text-night-200">{accusation.note}</p>}
+    </>
   );
 }
 

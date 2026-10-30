@@ -5,9 +5,9 @@
  */
 
 import { queryOptions } from '@tanstack/react-query';
-import type { HeldRoleDto, MultiplierDayDto, RoleDto, SeasonDto, SessionBountiesDto } from '../../shared/api-types';
+import type { HeldRoleDto, MemberOptionDto, MultiplierDayDto, RoleDto, SeasonDto, SessionBountiesDto, StandaloneAccusationDto } from '../../shared/api-types';
 import { apiGet } from '../api';
-import { MULTIPLIER_UPCOMING_KEY, SESSION_BOUNTIES_KEY } from './queryKeys';
+import { APPROVED_ACCUSATIONS_KEY, MULTIPLIER_UPCOMING_KEY, MY_ACCUSATIONS_KEY, PENDING_ACCUSATIONS_KEY, SESSION_BOUNTIES_KEY } from './queryKeys';
 
 /** Danh sách mùa (mới nhất trước; mùa hiện tại luôn có) — Đại sảnh, Bảng xếp hạng. */
 export const seasonsQuery = queryOptions({ queryKey: ['seasons'] as const, queryFn: () => apiGet<SeasonDto[]>('/api/seasons') });
@@ -39,3 +39,27 @@ export const upcomingMultipliersQuery = queryOptions({
 export function multiplierOn(days: readonly MultiplierDayDto[] | undefined, date: string): number {
   return days?.find((item) => item.day === date)?.multiplier ?? 1;
 }
+
+/** Thành viên đang hoạt động cho các ô chọn người (báo cáo người chơi). */
+export const memberOptionsQuery = queryOptions({ queryKey: ['members', 'options'] as const, queryFn: () => apiGet<MemberOptionDto[]>('/api/members/options') });
+
+/** Số báo cáo người chơi gần nhất hiện ở "Báo cáo của tôi". */
+export const MY_ACCUSATIONS_LIMIT = 50;
+
+/** "Báo cáo của tôi" — báo cáo người chơi độc lập của chính mình, mới nhất trước. */
+export const myAccusationsQuery = queryOptions({
+  queryKey: MY_ACCUSATIONS_KEY,
+  queryFn: () => apiGet<StandaloneAccusationDto[]>(`/api/accusations/mine?limit=${MY_ACCUSATIONS_LIMIT}`),
+});
+
+/** Hàng chờ "Báo cáo người chơi chờ duyệt": mỗi vụ chỉ báo cáo sớm nhất còn chờ, cũ nhất trước (server lọc). */
+export const pendingAccusationsQuery = queryOptions({
+  queryKey: PENDING_ACCUSATIONS_KEY,
+  queryFn: () => apiGet<StandaloneAccusationDto[]>('/api/admin/accusations?status=pending'),
+});
+
+/** Báo cáo người chơi đã duyệt của các mùa đang mở, mới duyệt trước — trộn vào "Đã duyệt gần đây". */
+export const approvedAccusationsQuery = queryOptions({
+  queryKey: APPROVED_ACCUSATIONS_KEY,
+  queryFn: () => apiGet<StandaloneAccusationDto[]>('/api/admin/accusations?status=approved'),
+});

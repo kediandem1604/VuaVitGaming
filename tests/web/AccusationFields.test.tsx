@@ -3,12 +3,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { MeDto, MemberOptionDto, RoleDto } from '../../src/shared/api-types';
-import { AccusationFields, EMPTY_ACCUSATION_DRAFT, parseAccusationDraft, type AccusationDraft } from '../../src/web/components/AccusationFields';
+import { AccusationPickers, EMPTY_ACCUSATION_DRAFT, parseAccusationDraft, type AccusationDraft } from '../../src/web/components/AccusationFields';
 
 /**
- * Ô "Báo cáo người chơi" của form khai điểm (spec điểm role §6): tick thì hiện bốn ô chọn, danh
- * sách người loại chính mình / người bị báo cáo, chỉ role đang bật có chỉ số phạt, và bước kiểm
- * bốn trường trước khi gửi.
+ * Bốn ô chọn của form "Báo cáo người chơi" (tab riêng, spec 2026-10-31 §B): danh sách người loại
+ * chính mình / người bị báo cáo, chỉ role đang bật có chỉ số phạt, và bước kiểm bốn trường trước khi gửi.
  */
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn'> & Partial<RoleDto>): RoleDto => ({
@@ -71,13 +70,12 @@ const baseRoutes = {
   'GET /api/members/options': () => json(200, members),
 };
 
-/** Form giả giữ state như `ReportForm`: ô tick và bản nháp bốn trường; in bản nháp ra để test đọc. */
-function Harness({ initialChecked = false, initialDraft = EMPTY_ACCUSATION_DRAFT }: { initialChecked?: boolean; initialDraft?: AccusationDraft }) {
-  const [checked, setChecked] = useState(initialChecked);
+/** Form giả giữ bản nháp bốn trường như form Báo cáo người chơi; in bản nháp ra để test đọc. */
+function Harness({ initialDraft = EMPTY_ACCUSATION_DRAFT }: { initialDraft?: AccusationDraft }) {
   const [draft, setDraft] = useState(initialDraft);
   return (
     <>
-      <AccusationFields id="acc" roles={roles} checked={checked} onCheckedChange={setChecked} draft={draft} onDraftChange={setDraft} />
+      <AccusationPickers roles={roles} draft={draft} onDraftChange={setDraft} />
       <output data-testid="draft">{JSON.stringify(draft)}</output>
     </>
   );
@@ -101,26 +99,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test('unticked: only the checkbox, no pickers, and the member list is not fetched', () => {
-  const fetchMock = stubFetch(baseRoutes);
-  renderFields();
-
-  expect(screen.getByRole('checkbox', { name: 'Báo cáo người chơi' })).not.toBeChecked();
-  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-  expect(screen.queryByText(/Báo cáo đúng/)).not.toBeInTheDocument();
-  expect(fetchMock).not.toHaveBeenCalledWith('/api/members/options', expect.anything());
-});
-
-test('ticking shows four pickers with the hint; members exclude me, roles are enabled penalty roles grouped by faction', async () => {
+test('four pickers, no checkbox; members exclude me, roles are enabled penalty roles grouped by faction', async () => {
   stubFetch(baseRoutes);
   renderFields();
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Báo cáo người chơi' }));
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
 
   const accused = await screen.findByRole('combobox', { name: 'Người bị báo cáo' });
   expect(combobox('Role của họ')).toBeInTheDocument();
   expect(combobox('Họ bắn trúng ai')).toBeInTheDocument();
   expect(combobox('Phe của người bị bắn')).toBeInTheDocument();
-  expect(screen.getByText('Báo cáo đúng: bạn +1 điểm, người bị báo cáo bị trừ điểm phạt của role đó.')).toBeInTheDocument();
   // Chưa chọn gì: nút ghi chữ mờ.
   expect(accused).toHaveTextContent('Chọn người…');
 
@@ -149,7 +136,7 @@ test('ticking shows four pickers with the hint; members exclude me, roles are en
 
 test('the victim list excludes the accused, and a victim equal to a newly picked accused is cleared', async () => {
   stubFetch(baseRoutes);
-  renderFields({ initialChecked: true });
+  renderFields();
 
   const accused = await screen.findByRole('combobox', { name: 'Người bị báo cáo' });
   fireEvent.click(combobox('Họ bắn trúng ai'));
@@ -170,27 +157,22 @@ test('the victim list excludes the accused, and a victim equal to a newly picked
   expect(combobox('Họ bắn trúng ai')).toHaveTextContent('Đa Đa');
 });
 
-test('unticking keeps the pickers hidden and leaves the draft untouched for a later re-tick', async () => {
+test('a prefilled draft shows its four choices', async () => {
   stubFetch(baseRoutes);
-  renderFields({ initialChecked: true, initialDraft: { accusedId: 10, accusedRoleId: 21, victimId: 11, victimFaction: 'goose' } });
+  renderFields({ initialDraft: { accusedId: 10, accusedRoleId: 21, victimId: 11, victimFaction: 'goose' } });
   expect(await screen.findByRole('combobox', { name: 'Người bị báo cáo' })).toHaveTextContent('Vịt Mười');
   expect(combobox('Role của họ')).toHaveTextContent('🔫 Dân phòng');
   expect(combobox('Họ bắn trúng ai')).toHaveTextContent('Ngỗng Mười Một');
   expect(combobox('Phe của người bị bắn')).toHaveTextContent('Ngỗng');
-
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Báo cáo người chơi' }));
-  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   expect(draft()).toEqual({ accusedId: 10, accusedRoleId: 21, victimId: 11, victimFaction: 'goose' });
 });
 
 test('a failing member list shows the error with a retry button instead of the pickers', async () => {
   stubFetch({ ...baseRoutes, 'GET /api/members/options': () => json(500, { error: { code: 'INTERNAL', message: 'Lỗi máy chủ' } }) });
-  renderFields({ initialChecked: true });
+  renderFields();
   expect(await screen.findByRole('alert')).toHaveTextContent('Lỗi máy chủ');
   expect(screen.getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-  // Ô tick vẫn đó để bỏ báo cáo và khai không kèm.
-  expect(screen.getByRole('checkbox', { name: 'Báo cáo người chơi' })).toBeChecked();
 });
 
 test('parseAccusationDraft refuses an incomplete draft with the server wording and returns the input when complete', () => {

@@ -30,3 +30,9 @@ export const SESSION_BOUNTIES_KEY = ['session-bounties'] as const;
 export const MULTIPLIER_UPCOMING_KEY = ['multiplier-days', 'upcoming'] as const;
 /** Danh sách ngày nhân điểm của tab Quản trị → Cài đặt (kèm ngày đã qua của mùa đang mở). */
 export const ADMIN_MULTIPLIER_DAYS_KEY = ['admin', 'multiplier-days'] as const;
+/** "Báo cáo của tôi" (tab Báo cáo người chơi ở trang Khai điểm) — tab Duyệt điểm làm mới sau khi duyệt/huỷ. */
+export const MY_ACCUSATIONS_KEY = ['accusations', 'mine'] as const;
+/** Mục "Báo cáo người chơi chờ duyệt" của tab Duyệt điểm — tab Báo cáo người chơi làm mới sau khi gửi. */
+export const PENDING_ACCUSATIONS_KEY = ['admin', 'accusations', 'pending'] as const;
+/** Báo cáo người chơi đã duyệt trong mục "Đã duyệt gần đây" của tab Duyệt điểm. */
+export const APPROVED_ACCUSATIONS_KEY = ['admin', 'accusations', 'approved'] as const;

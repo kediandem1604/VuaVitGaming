@@ -1,11 +1,19 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { AccusationDto, BountyClaimDto, HighlightConfigDto, MeDto, MemberOptionDto, ReportDto, RoleDto, SessionDto } from '../../src/shared/api-types';
+import type { AccusationDto, BountyClaimDto, HighlightConfigDto, MeDto, MemberOptionDto, ReportDto, RoleDto, SessionDto, StandaloneAccusationDto } from '../../src/shared/api-types';
 import { vnTodayIso } from '../../src/web/lib/format';
 import { PENDING_REPORTS_KEY } from '../../src/web/lib/queryKeys';
 import { ReportPage } from '../../src/web/pages/ReportPage';
+
+/**
+ * Đồng hồ cố định 12:00 giờ VN (chỉ giả `Date`, hẹn giờ vẫn thật): ngày chơi mặc định đổi lúc 6:00
+ * sáng (spec 2026-10-31 §A) nên test không được phụ thuộc giờ máy chạy.
+ */
+const NOON_VN = new Date('2026-10-31T12:00:00+07:00');
+vi.useFakeTimers({ toFake: ['Date'] });
+vi.setSystemTime(NOON_VN);
 
 const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'nameEn' | 'icon' | 'metricLabel' | 'maxPerGame'> & Partial<RoleDto>): RoleDto => ({
   description: '',
@@ -191,14 +199,14 @@ const accusation = (over: Partial<AccusationDto> = {}): AccusationDto => ({
   ...over,
 });
 const ACCUSATION_LINE = 'Báo cáo: Vịt Mười (Cảnh sát trưởng) bắn Ngỗng Mười Một — phe Ngỗng';
-const ACCUSATION_CHECKBOX = 'Báo cáo người chơi';
 const ACCUSATION_INCOMPLETE = 'Báo cáo cần đủ người bị báo cáo, role, người bị bắn và phe';
 
 const baseRoutes: Record<string, Handler> = {
   'GET /api/roles': () => json(200, roles),
   'GET /api/reports/mine': () => json(200, mine),
   'GET /api/reports/highlight-config': () => json(200, highlightConfig()),
-  'GET /api/sessions': () => json(200, [session]),
+  // Mặc định không có buổi (không thì buổi mặc định được chọn sẵn vào mọi lần gửi); test về buổi tự thêm.
+  'GET /api/sessions': () => json(200, []),
   'GET /api/me': () => json(200, me),
   'GET /api/members/options': () => json(200, memberOptions),
 };
@@ -237,6 +245,7 @@ async function pickRole(query: string, name: RegExp) {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.setSystemTime(NOON_VN);
 });
 
 test('a diacritic-less query finds Kiếm sĩ and selecting it labels the value with its metric', async () => {
@@ -332,7 +341,7 @@ test('a revoked report shows the "Bị huỷ duyệt" chip with its reason and c
 });
 
 test('the date input is bounded to the last three days and lists that day\'s sessions', async () => {
-  const fetchMock = stubFetch(baseRoutes);
+  const fetchMock = stubFetch({ ...baseRoutes, 'GET /api/sessions': () => json(200, [session]) });
   renderPage();
 
   const date = await screen.findByLabelText('Ngày chơi');
@@ -351,6 +360,7 @@ test('submitting posts the report, shows the success message and resets value an
   let posted: unknown = null;
   stubFetch({
     ...baseRoutes,
+    'GET /api/sessions': () => json(200, [session]),
     'POST /api/reports': (init) => {
       posted = JSON.parse(String(init?.body));
       return json(201, report({ id: 4, status: 'pending', value: 5, note: 'Ghi chú' }));
@@ -1009,73 +1019,30 @@ test('a highlight refused from the list shows the message next to that report; a
 });
 
 // ---------------------------------------------------------------------------
-// Báo cáo người chơi (spec điểm role §6)
+// Báo cáo người chơi đã tách khỏi form khai (spec 2026-10-31 §B)
 // ---------------------------------------------------------------------------
 
-test('ticking "Báo cáo người chơi" adds four pickers; a complete accusation is posted with the report and the box resets', async () => {
-  let posted: unknown = null;
+test('the report form has no accusation part and never sends `accusation`', async () => {
+  let posted: Record<string, unknown> | null = null;
   stubFetch({
     ...baseRoutes,
     'POST /api/reports': (init) => {
-      posted = JSON.parse(String(init?.body));
-      return json(201, report({ id: 4, status: 'pending', value: 5, accusation: accusation() }));
-    },
-  });
-  renderPage();
-  await pickRole('kiem', /Kiếm sĩ/);
-  fireEvent.change(screen.getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '5' } });
-  // Chưa tick: không có ô chọn nào của báo cáo (ô buổi chơi là <select> gốc).
-  expect(screen.queryByRole('combobox', { name: 'Người bị báo cáo' })).not.toBeInTheDocument();
-
-  const checkbox = screen.getByRole('checkbox', { name: ACCUSATION_CHECKBOX });
-  fireEvent.click(checkbox);
-  await pickOption(screen, 'Người bị báo cáo', 'Vịt Mười');
-  await pickOption(screen, 'Role của họ', '⭐ Cảnh sát trưởng');
-  await pickOption(screen, 'Họ bắn trúng ai', 'Ngỗng Mười Một');
-  await pickOption(screen, 'Phe của người bị bắn', 'Ngỗng');
-  expect(screen.getByText('Báo cáo đúng: bạn +1 điểm, người bị báo cáo bị trừ điểm phạt của role đó.')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
-
-  expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
-  expect(posted).toEqual({ roleId: 61, value: 5, playedOn: today, accusation: { accusedId: 10, accusedRoleId: 20, victimId: 11, victimFaction: 'goose' } });
-  // Form về mặc định: ô tick bỏ, ô chọn ẩn.
-  expect(checkbox).not.toBeChecked();
-  expect(screen.queryByRole('combobox', { name: 'Người bị báo cáo' })).not.toBeInTheDocument();
-  // Lần khai mới ghi khung báo cáo và trạng thái của nó.
-  const first = screen.getAllByRole('listitem')[0] as HTMLElement;
-  expect(first).toHaveTextContent(ACCUSATION_LINE);
-  expect(first).toHaveTextContent('Báo cáo đang chờ duyệt');
-});
-
-test('an incomplete accusation is refused locally; unticking sends the report without any accusation', async () => {
-  let posted: unknown = null;
-  const fetchMock = stubFetch({
-    ...baseRoutes,
-    'POST /api/reports': (init) => {
-      posted = JSON.parse(String(init?.body));
+      posted = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return json(201, report({ id: 4, status: 'pending', value: 5 }));
     },
   });
   renderPage();
   await pickRole('kiem', /Kiếm sĩ/);
   fireEvent.change(screen.getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '5' } });
-  fireEvent.click(screen.getByRole('checkbox', { name: ACCUSATION_CHECKBOX }));
-  await pickOption(screen, 'Người bị báo cáo', 'Vịt Mười');
-  await pickOption(screen, 'Role của họ', '⭐ Cảnh sát trưởng');
-
-  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent(ACCUSATION_INCOMPLETE);
-  expect(calls(fetchMock, 'POST')).toHaveLength(0);
-
-  // Bỏ tick: lời báo biến mất, gửi không kèm `accusation` dù hai ô đã chọn.
-  fireEvent.click(screen.getByRole('checkbox', { name: ACCUSATION_CHECKBOX }));
-  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.queryByRole('checkbox', { name: 'Báo cáo người chơi' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('combobox', { name: 'Người bị báo cáo' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
   expect(await screen.findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
   expect(posted).toEqual({ roleId: 61, value: 5, playedOn: today });
+  expect(posted).not.toHaveProperty('accusation');
 });
 
-test('my reports show the accusation box with its status, the duplicate note, and the "Bị trừ điểm" penalty row', async () => {
+test('my reports still show an old attached accusation box with its status, the duplicate note, and the "Bị trừ điểm" penalty row', async () => {
   const list: ReportDto[] = [
     report({ id: 14, status: 'pending', accusation: accusation(), accusationDuplicate: true }),
     report({ id: 13, status: 'approved', value: 5, bonusPoints: 1, points: 6, accusation: accusation({ status: 'approved' }) }),
@@ -1128,81 +1095,287 @@ test('my reports show the accusation box with its status, the duplicate note, an
   expect(within(approved).queryByText('Bị trừ điểm')).not.toBeInTheDocument();
 });
 
-test('editing a pending report with an accusation prefills the box; unticking patches accusation: null, a new one patches its fields', async () => {
-  const bodies: unknown[] = [];
-  const withAccusation = report({ id: 3, status: 'pending', accusation: accusation() });
-  stubFetch({
-    ...baseRoutes,
-    'GET /api/reports/mine': () => json(200, [withAccusation, report({ id: 2, status: 'pending', value: 6 })]),
-    'PATCH /api/reports/3': (init) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return json(200, { ...withAccusation, accusation: null });
-    },
-    'PATCH /api/reports/2': (init) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return json(200, report({ id: 2, status: 'pending', value: 6, accusation: accusation({ victim: { id: 9, displayName: 'Tôi' }, victimFaction: 'duck' }) }));
-    },
-  });
-  renderPage();
-  const [first, second] = (await screen.findAllByRole('listitem')) as [HTMLElement, HTMLElement];
-
-  fireEvent.click(within(first).getByRole('button', { name: 'Sửa' }));
-  const checkbox = within(first).getByRole('checkbox', { name: ACCUSATION_CHECKBOX });
-  expect(checkbox).toBeChecked();
-  expect(await within(first).findByRole('combobox', { name: 'Người bị báo cáo' })).toHaveTextContent('Vịt Mười');
-  expect(within(first).getByRole('combobox', { name: 'Role của họ' })).toHaveTextContent('⭐ Cảnh sát trưởng');
-  expect(within(first).getByRole('combobox', { name: 'Họ bắn trúng ai' })).toHaveTextContent('Ngỗng Mười Một');
-  expect(within(first).getByRole('combobox', { name: 'Phe của người bị bắn' })).toHaveTextContent('Ngỗng');
-  fireEvent.click(checkbox);
-  fireEvent.click(within(first).getByRole('button', { name: 'Lưu' }));
-  await waitFor(() => expect(bodies).toEqual([{ value: 4, playedOn: today, note: null, accusation: null }]));
-  expect(await within(first).findByText('4 mạng chém')).toBeInTheDocument();
-  expect(first).not.toHaveTextContent('Báo cáo:');
-
-  // Lần khai chưa có báo cáo: tick và chọn đủ bốn → gửi báo cáo mới (người bị bắn có thể là tôi).
-  fireEvent.click(within(second).getByRole('button', { name: 'Sửa' }));
-  expect(within(second).getByRole('checkbox', { name: ACCUSATION_CHECKBOX })).not.toBeChecked();
-  fireEvent.click(within(second).getByRole('checkbox', { name: ACCUSATION_CHECKBOX }));
-  await pickOption(within(second), 'Người bị báo cáo', 'Vịt Mười');
-  await pickOption(within(second), 'Role của họ', '⭐ Cảnh sát trưởng');
-  fireEvent.click(within(second).getByRole('button', { name: 'Lưu' }));
-  expect(await within(second).findByRole('alert')).toHaveTextContent(ACCUSATION_INCOMPLETE);
-  expect(bodies).toHaveLength(1);
-  await pickOption(within(second), 'Họ bắn trúng ai', 'Tôi');
-  await pickOption(within(second), 'Phe của người bị bắn', 'Vịt');
-  fireEvent.click(within(second).getByRole('button', { name: 'Lưu' }));
-  await waitFor(() => expect(bodies).toHaveLength(2));
-  expect(bodies[1]).toEqual({ value: 6, playedOn: today, note: null, accusation: { accusedId: 10, accusedRoleId: 20, victimId: 9, victimFaction: 'duck' } });
-  expect(await within(second).findByText('Báo cáo: Vịt Mười (Cảnh sát trưởng) bắn Tôi — phe Vịt')).toBeInTheDocument();
-});
-
-test('editing a report whose accusation is unchanged omits accusation (keeps its place in the case); a changed field sends it', async () => {
-  const bodies: unknown[] = [];
+test('editing a pending report with an old attached accusation keeps it read-only and never patches `accusation`', async () => {
+  const bodies: Record<string, unknown>[] = [];
   const withAccusation = report({ id: 3, status: 'pending', accusation: accusation() });
   stubFetch({
     ...baseRoutes,
     'GET /api/reports/mine': () => json(200, [withAccusation]),
     'PATCH /api/reports/3': (init) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return json(200, withAccusation);
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return json(200, { ...withAccusation, value: 5 });
     },
   });
   renderPage();
   const first = (await screen.findAllByRole('listitem'))[0] as HTMLElement;
 
-  // Chỉ sửa giá trị: báo cáo vẫn tick, không đổi → không gửi `accusation`.
   fireEvent.click(within(first).getByRole('button', { name: 'Sửa' }));
-  expect(await within(first).findByRole('combobox', { name: 'Người bị báo cáo' })).toHaveTextContent('Vịt Mười');
+  expect(within(first).queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(within(first).queryByRole('combobox', { name: 'Người bị báo cáo' })).not.toBeInTheDocument();
   fireEvent.change(within(first).getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '5' } });
   fireEvent.click(within(first).getByRole('button', { name: 'Lưu' }));
   await waitFor(() => expect(bodies).toEqual([{ value: 5, playedOn: today, note: null }]));
+  expect(bodies[0]).not.toHaveProperty('accusation');
+  // Khung báo cáo cũ vẫn hiện sau khi lưu.
+  expect(await within(first).findByText(ACCUSATION_LINE)).toBeInTheDocument();
+});
 
-  // Đổi phe người bị bắn → gửi báo cáo mới.
-  fireEvent.click(await within(first).findByRole('button', { name: 'Sửa' }));
-  await pickOption(within(first), 'Phe của người bị bắn', 'Vịt');
-  fireEvent.click(within(first).getByRole('button', { name: 'Lưu' }));
-  await waitFor(() => expect(bodies).toHaveLength(2));
-  expect(bodies[1]).toEqual({ value: 4, playedOn: today, note: null, accusation: { accusedId: 10, accusedRoleId: 20, victimId: 11, victimFaction: 'duck' } });
+// ---------------------------------------------------------------------------
+// Ngày chơi và buổi mặc định (spec 2026-10-31 §A)
+// ---------------------------------------------------------------------------
+
+/** Buổi chơi `id` lúc `hh:mm` giờ VN của ngày `date`. */
+const sessionAt = (id: number, date: string, vnTime: string, over: Partial<SessionDto> = {}): SessionDto => ({
+  ...session,
+  id,
+  startsAt: new Date(`${date}T${vnTime}:00+07:00`).toISOString(),
+  ...over,
+});
+
+/** Tuyến buổi chơi trả theo `?date=`. */
+const sessionsByDate = (byDate: Record<string, SessionDto[]>): Handler => (_init, url) => json(200, byDate[new URL(url, 'http://x').searchParams.get('date') ?? ''] ?? []);
+
+test('before 6:00 VN the played-on date defaults to yesterday; from 6:00 it is today', async () => {
+  // 05:59 giờ VN ngày 31/10 → ngày chơi mặc định 30/10 (trận khuya), giới hạn vẫn theo hôm nay.
+  vi.setSystemTime(new Date('2026-10-31T05:59:00+07:00'));
+  stubFetch(baseRoutes);
+  renderPage();
+  const date = await screen.findByLabelText('Ngày chơi');
+  expect(date).toHaveValue('2026-10-30');
+  expect(date).toHaveAttribute('max', '2026-10-31');
+  cleanup();
+
+  vi.setSystemTime(new Date('2026-10-31T06:00:00+07:00'));
+  renderPage();
+  expect(await screen.findByLabelText('Ngày chơi')).toHaveValue('2026-10-31');
+});
+
+test('the session defaults to the latest one already started that day; changing the date re-picks it unless chosen by hand', async () => {
+  // 20:30 giờ VN: buổi 19:00 đã bắt đầu, buổi 21:00 chưa, buổi 20:00 bị huỷ → chọn 19:00.
+  vi.setSystemTime(new Date(`${today}T20:30:00+07:00`));
+  const [y = 0, m = 0, d = 0] = today.split('-').map(Number);
+  const yesterday = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  let posted: unknown = null;
+  stubFetch({
+    ...baseRoutes,
+    'GET /api/sessions': sessionsByDate({
+      [today]: [sessionAt(21, today, '21:00'), sessionAt(19, today, '19:00'), sessionAt(20, today, '20:00', { status: 'cancelled' })],
+      // Hôm qua: cả hai buổi đã qua → buổi muộn nhất.
+      [yesterday]: [sessionAt(31, yesterday, '19:00'), sessionAt(32, yesterday, '22:00')],
+    }),
+    'POST /api/reports': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return json(201, report({ id: 4, status: 'pending', value: 5 }));
+    },
+  });
+  renderPage();
+  const select = await screen.findByRole('combobox', { name: 'Buổi chơi (không bắt buộc)' });
+  await waitFor(() => expect(select).toHaveValue('19'));
+
+  // Đổi ngày khi chưa tự chọn buổi → buổi mặc định của ngày mới.
+  fireEvent.change(screen.getByLabelText('Ngày chơi'), { target: { value: yesterday } });
+  await waitFor(() => expect(select).toHaveValue('32'));
+
+  // Tự chọn buổi rồi đổi ngày → không chọn buổi (buổi của ngày cũ không còn hợp lệ).
+  fireEvent.change(select, { target: { value: '31' } });
+  fireEvent.change(screen.getByLabelText('Ngày chơi'), { target: { value: today } });
+  await screen.findByRole('option', { name: /21:00/ });
+  expect(select).toHaveValue('');
+
+  // Gửi với buổi mặc định.
+  cleanup();
+  renderPage();
+  await pickRole('kiem', /Kiếm sĩ/);
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Số mạng chém' }), { target: { value: '5' } });
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Buổi chơi (không bắt buộc)' })).toHaveValue('19'));
+  fireEvent.click(screen.getByRole('button', { name: 'Gửi khai điểm' }));
+  await waitFor(() => expect(posted).toEqual({ roleId: 61, value: 5, playedOn: today, sessionId: 19 }));
+});
+
+// ---------------------------------------------------------------------------
+// Tab "Báo cáo người chơi" (spec 2026-10-31 §B)
+// ---------------------------------------------------------------------------
+
+const ACCUSATIONS_ROUTE = 'GET /api/accusations/mine';
+const ACCUSATION_HINT = 'Báo cáo đúng: bạn +1 điểm (Tổng cả 3 phe), người bị báo cáo bị trừ điểm phạt của role đó.';
+
+const standalone = (over: Partial<StandaloneAccusationDto> & Pick<StandaloneAccusationDto, 'id' | 'status'>): StandaloneAccusationDto => ({
+  reporter: { id: 9, displayName: 'Tôi' },
+  accused: { id: 10, displayName: 'Vịt Mười' },
+  accusedRole: { id: 20, nameVi: 'Cảnh sát trưởng', icon: '⭐', faction: 'goose', penaltyPoints: 1 },
+  victim: { id: 11, displayName: 'Ngỗng Mười Một' },
+  victimFaction: 'goose',
+  playedOn: today,
+  session: null,
+  note: null,
+  rejectReason: null,
+  duplicate: false,
+  createdAt: `${today}T15:00:00.000Z`,
+  reviewedBy: null,
+  reviewedAt: null,
+  ...over,
+});
+const STANDALONE_LINE = 'Vịt Mười (⭐ Cảnh sát trưởng) bắn Ngỗng Mười Một — phe Ngỗng';
+
+/** Hiện `?…` của URL hiện tại để test đọc. */
+function LocationProbe() {
+  return <output data-testid="search">{useLocation().search}</output>;
+}
+
+const renderAt = (entry: string) => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[entry]}>
+        <ReportPage />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return queryClient;
+};
+
+test('two tabs right under the title: Khai điểm by default, ?tab= follows clicks and arrow keys', async () => {
+  stubFetch({ ...baseRoutes, [ACCUSATIONS_ROUTE]: () => json(200, []) });
+  renderAt('/khai-diem');
+
+  const tablist = screen.getByRole('tablist', { name: 'Khai điểm' });
+  const [reportTab, accusationTab] = within(tablist).getAllByRole('tab') as [HTMLElement, HTMLElement];
+  expect(reportTab).toHaveTextContent('Khai điểm');
+  expect(accusationTab).toHaveTextContent('Báo cáo người chơi');
+  expect(reportTab).toHaveAttribute('aria-selected', 'true');
+  expect(accusationTab).toHaveAttribute('tabindex', '-1');
+  expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', reportTab.id);
+  expect(await screen.findByRole('heading', { name: 'Khai một trận' })).toBeInTheDocument();
+  // Tiêu đề trang ngay trước dải tab.
+  expect(screen.getByRole('heading', { level: 1, name: 'Khai điểm' }).nextElementSibling).toBe(tablist);
+  expect(tablist.querySelector('[data-tab-indicator]')).toHaveAttribute('data-for', reportTab.id);
+
+  fireEvent.click(accusationTab);
+  expect(screen.getByTestId('search')).toHaveTextContent('?tab=bao-cao');
+  expect(accusationTab).toHaveAttribute('aria-selected', 'true');
+  expect(await screen.findByRole('heading', { name: 'Báo cáo của tôi' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Khai một trận' })).not.toBeInTheDocument();
+
+  fireEvent.keyDown(accusationTab, { key: 'ArrowRight' });
+  expect(reportTab).toHaveAttribute('aria-selected', 'true');
+  expect(reportTab).toHaveFocus();
+  expect(screen.getByTestId('search')).toHaveTextContent('?tab=khai-diem');
+  fireEvent.keyDown(reportTab, { key: 'End' });
+  expect(accusationTab).toHaveFocus();
+  fireEvent.keyDown(accusationTab, { key: 'Home' });
+  expect(reportTab).toHaveAttribute('aria-selected', 'true');
+});
+
+test('?tab=bao-cao opens the player-report tab; an unknown tab falls back to Khai điểm', async () => {
+  stubFetch({ ...baseRoutes, [ACCUSATIONS_ROUTE]: () => json(200, []) });
+  renderAt('/khai-diem?tab=bao-cao');
+  expect(screen.getByRole('tab', { name: 'Báo cáo người chơi' })).toHaveAttribute('aria-selected', 'true');
+  expect(await screen.findByText('Bạn chưa gửi báo cáo người chơi nào')).toBeInTheDocument();
+  cleanup();
+  renderAt('/khai-diem?tab=xyz');
+  expect(screen.getByRole('tab', { name: 'Khai điểm' })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('the player-report form defaults the day and session, refuses an incomplete report locally and posts a complete one', async () => {
+  vi.setSystemTime(new Date(`${today}T21:30:00+07:00`));
+  let posted: unknown = null;
+  const fetchMock = stubFetch({
+    ...baseRoutes,
+    'GET /api/sessions': sessionsByDate({ [today]: [sessionAt(7, today, '21:00')] }),
+    [ACCUSATIONS_ROUTE]: () => json(200, [standalone({ id: 1, status: 'approved' })]),
+    'POST /api/accusations': (init) => {
+      posted = JSON.parse(String(init?.body));
+      return json(201, standalone({ id: 2, status: 'pending', note: 'Clip ở kênh highlight', session: { id: 7, startsAt: sessionAt(7, today, '21:00').startsAt, modeName: 'Cổ điển (Classic)' } }));
+    },
+  });
+  renderAt('/khai-diem?tab=bao-cao');
+
+  const form = (await screen.findByRole('heading', { name: 'Báo cáo một người chơi' })).closest('section') as HTMLElement;
+  expect(within(form).getByLabelText('Ngày chơi')).toHaveValue(today);
+  await waitFor(() => expect(within(form).getByRole('combobox', { name: 'Buổi chơi (không bắt buộc)' })).toHaveValue('7'));
+  expect(within(form).getByText(ACCUSATION_HINT)).toBeInTheDocument();
+
+  await pickOption(within(form), 'Người bị báo cáo', 'Vịt Mười');
+  await pickOption(within(form), 'Role của họ', '⭐ Cảnh sát trưởng');
+  fireEvent.click(within(form).getByRole('button', { name: 'Gửi báo cáo' }));
+  expect(await within(form).findByRole('alert')).toHaveTextContent(ACCUSATION_INCOMPLETE);
+  expect(calls(fetchMock, 'POST')).toHaveLength(0);
+
+  await pickOption(within(form), 'Họ bắn trúng ai', 'Ngỗng Mười Một');
+  await pickOption(within(form), 'Phe của người bị bắn', 'Ngỗng');
+  expect(within(form).queryByRole('alert')).not.toBeInTheDocument();
+  const note = within(form).getByRole('textbox', { name: 'Ghi chú' });
+  expect(note).toHaveAttribute('maxLength', '300');
+  fireEvent.change(note, { target: { value: '  Clip ở kênh highlight ' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Gửi báo cáo' }));
+
+  expect(await within(form).findByText('Đã gửi, chờ mod duyệt')).toBeInTheDocument();
+  expect(posted).toEqual({ playedOn: today, sessionId: 7, note: 'Clip ở kênh highlight', accusedId: 10, accusedRoleId: 20, victimId: 11, victimFaction: 'goose' });
+  // Form về trống (ngày + buổi giữ nguyên), báo cáo mới lên đầu "Báo cáo của tôi".
+  expect(within(form).getByRole('combobox', { name: 'Người bị báo cáo' })).toHaveTextContent('Chọn người…');
+  expect(note).toHaveValue('');
+  const mineSection = screen.getByRole('heading', { name: 'Báo cáo của tôi' }).closest('section') as HTMLElement;
+  const items = within(mineSection).getAllByRole('listitem');
+  expect(items).toHaveLength(2);
+  expect(items[0]).toHaveTextContent(STANDALONE_LINE);
+  expect(items[0]).toHaveTextContent('Đang chờ duyệt');
+  expect(items[0]).toHaveTextContent('Clip ở kênh highlight');
+  expect(items[0]).toHaveTextContent('Buổi 21:00');
+  expect(fetchMock).toHaveBeenCalledWith('/api/accusations/mine?limit=50', expect.anything());
+});
+
+test('the player-report form shows server errors verbatim and says when the case was already reported', async () => {
+  let reply = json(429, { error: { code: 'RATE_LIMITED', message: 'Bạn đã gửi quá 10 báo cáo hôm nay' } });
+  stubFetch({
+    ...baseRoutes,
+    [ACCUSATIONS_ROUTE]: () => json(200, []),
+    'POST /api/accusations': () => reply,
+  });
+  renderAt('/khai-diem?tab=bao-cao');
+  const form = (await screen.findByRole('heading', { name: 'Báo cáo một người chơi' })).closest('section') as HTMLElement;
+  await pickOption(within(form), 'Người bị báo cáo', 'Vịt Mười');
+  await pickOption(within(form), 'Role của họ', '⭐ Cảnh sát trưởng');
+  await pickOption(within(form), 'Họ bắn trúng ai', 'Ngỗng Mười Một');
+  await pickOption(within(form), 'Phe của người bị bắn', 'Ngỗng');
+  fireEvent.click(within(form).getByRole('button', { name: 'Gửi báo cáo' }));
+  expect(await within(form).findByRole('alert')).toHaveTextContent('Bạn đã gửi quá 10 báo cáo hôm nay');
+  // Lỗi không xoá bốn ô đã chọn.
+  expect(within(form).getByRole('combobox', { name: 'Người bị báo cáo' })).toHaveTextContent('Vịt Mười');
+
+  reply = json(201, standalone({ id: 3, status: 'superseded', rejectReason: 'Đã có người báo cáo trước' }));
+  fireEvent.click(within(form).getByRole('button', { name: 'Gửi báo cáo' }));
+  expect(await within(form).findByText('Đã gửi — vụ này đã có người báo cáo trước')).toBeInTheDocument();
+  expect(within(form).queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('"Báo cáo của tôi" shows each status in the spec wording, plus the duplicate note', async () => {
+  stubFetch({
+    ...baseRoutes,
+    [ACCUSATIONS_ROUTE]: () =>
+      json(200, [
+        standalone({ id: 6, status: 'pending', duplicate: true }),
+        standalone({ id: 5, status: 'pending' }),
+        standalone({ id: 4, status: 'approved' }),
+        standalone({ id: 3, status: 'rejected', rejectReason: 'Không đủ bằng chứng' }),
+        standalone({ id: 2, status: 'superseded', rejectReason: 'Đã có người báo cáo trước' }),
+        standalone({ id: 1, status: 'revoked', rejectReason: 'Duyệt nhầm' }),
+      ]),
+  });
+  renderAt('/khai-diem?tab=bao-cao');
+  const mineSection = (await screen.findByRole('heading', { name: 'Báo cáo của tôi' })).closest('section') as HTMLElement;
+  const items = (await within(mineSection).findAllByRole('listitem')) as HTMLElement[];
+  expect(items.map((item) => within(item).getByText(/chờ duyệt|Báo cáo đúng|bị bác|báo cáo trước|bị huỷ/).textContent)).toEqual([
+    'Đang chờ duyệt',
+    'Đang chờ duyệt',
+    'Báo cáo đúng · bạn +1 điểm',
+    'Báo cáo bị bác: Không đủ bằng chứng',
+    'Đã có người báo cáo trước',
+    'Đã bị huỷ: Duyệt nhầm',
+  ]);
+  expect(items[0]).toHaveTextContent('Báo cáo của bạn trùng với một báo cáo khác đang chờ');
+  expect(items[1]).not.toHaveTextContent('trùng');
+  expect(items[0]).toHaveTextContent(STANDALONE_LINE);
 });
 
 // ---------------------------------------------------------------------------
