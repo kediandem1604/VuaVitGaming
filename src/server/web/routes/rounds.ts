@@ -10,7 +10,7 @@
 
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { RoundDto, SessionRoundsDto } from '../../../shared/api-types.js';
+import type { ReportDto, RoundDto, SessionRoundsDto } from '../../../shared/api-types.js';
 import { appError } from '../../lib/errors.js';
 import {
   ROUND_IMAGE_MAX_BYTES,
@@ -24,8 +24,9 @@ import {
   replaceRoundImage,
   updateRound,
 } from '../../modules/rounds/service.js';
+import { getReportDto, submitRoundReport } from '../../modules/stats/reports.js';
 import { currentMember, requireMember, requireMod } from '../auth-plugin.js';
-import { idParams } from '../schemas.js';
+import { idParams, int32Id } from '../schemas.js';
 
 /** Content-type được nhận ở hai route tải ảnh ván (guard JSON trong app.ts dùng cùng danh sách). */
 export const ROUND_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/octet-stream'];
@@ -42,12 +43,36 @@ const IMAGE_RATE_LIMIT = { max: 600, timeWindow: '1 minute' };
 
 const createQuery = z.object({ winnerFaction: z.string().optional() });
 
+/**
+ * Khai theo ván (spec ván §5): như body khai điểm nhưng không có `playedOn`/`sessionId` (server lấy theo
+ * buổi của ván). Chỉ kiểm DẠNG — giới hạn chỉ số, ván còn nhận khai, trùng… do service báo.
+ */
+const roundReportBody = z
+  .object({
+    roleId: int32Id,
+    value: z.number(),
+    extraValue: z.number().optional(),
+    penaltyValue: z.number().optional(),
+    note: z.string().nullish(),
+    // Có mặt → service báo "Báo cáo người chơi gửi ở tab riêng" (như `POST /api/reports`).
+    accusation: z.unknown().optional(),
+  })
+  .strict();
+
 export async function roundRoutes(app: FastifyInstance): Promise<void> {
   app.addContentTypeParser([...ROUND_IMAGE_TYPES], { parseAs: 'buffer', bodyLimit: IMAGE_BODY_LIMIT }, (_request, body, done) => done(null, body));
 
   app.get('/api/sessions/:id/rounds', { preHandler: requireMember }, async (request): Promise<SessionRoundsDto> => {
     const { id } = idParams.parse(request.params);
     return listSessionRounds(app.ctx, id, currentMember(request).id);
+  });
+
+  app.post('/api/rounds/:id/reports', { preHandler: requireMember }, async (request, reply) => {
+    const { id } = idParams.parse(request.params);
+    const input = roundReportBody.parse(request.body);
+    const created = await submitRoundReport(app.ctx, currentMember(request).id, id, input);
+    const dto: ReportDto = await getReportDto(app.ctx, created.id);
+    return reply.code(201).send(dto);
   });
 
   app.get('/api/rounds/:id/image', { preHandler: requireMember, config: { rateLimit: IMAGE_RATE_LIMIT } }, async (request, reply) => {

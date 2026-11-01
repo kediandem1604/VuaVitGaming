@@ -413,7 +413,12 @@ test('listRecentlyApproved includes last month until it closes', async () => {
   const octA = await approved({ playedOn: '2026-10-30', value: 5 });
   const octB = await approved({ playedOn: '2026-10-31', value: 2 });
   setNow('2026-11-02T05:00:01Z');
-  const nov = await approved({ playedOn: '2026-11-01', value: 4 });
+  // Khai theo ngày cho mùa 11 nay bị chặn (khai theo ván) — lần khai có từ trước, ghi thẳng vào DB.
+  const legacy = await testDb.statReport.create({
+    data: { memberId: member.id, roleId: duck.id, playedOn: dateOnlyToDb('2026-11-01'), value: 4, createdAt: ctx.now() },
+  });
+  await reviewReport(ctx, asReviewer(mod), legacy.id, { approve: true });
+  const nov = legacy.id;
   // Mùa 09 chưa có dòng (coi là chưa chốt) nhưng không phải mùa hiện tại/mùa trước → không hiện.
   await testDb.statReport.create({
     data: {

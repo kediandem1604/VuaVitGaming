@@ -4,6 +4,7 @@
  */
 
 import { INVALID_HIGHLIGHT_MESSAGE } from '../../shared/highlight.js';
+import { ROUND_REPORT_CLOSED_MESSAGE, ROUND_REPORT_DUPLICATE_MESSAGE } from '../../shared/rounds.js';
 
 export type ErrorCode =
   | 'NOT_FOUND'
@@ -41,7 +42,9 @@ export type ErrorCode =
   | 'MULTIPLIER_DAY_PAST'
   | 'MULTIPLIER_DAY_LOCKED'
   | 'OFFLINE_VOTE_CLOSED'
-  | 'ROUND_HAS_REPORTS';
+  | 'ROUND_HAS_REPORTS'
+  | 'ROUND_REPORT_DUPLICATE'
+  | 'ROUND_REPORT_CLOSED';
 
 const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   NOT_FOUND: { status: 404, message: 'Không tìm thấy' },
@@ -93,6 +96,10 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   OFFLINE_VOTE_CLOSED: { status: 409, message: 'Đã hết hạn vote' },
   // Ván đấu (spec ván §4): còn lần khai chờ duyệt/đã duyệt thì không xoá được ván.
   ROUND_HAS_REPORTS: { status: 409, message: 'Ván đã có lần khai — không xoá được' },
+  // Khai theo ván (spec ván §5): một lần khai còn hiệu lực mỗi (ván, người); ván không có / buổi huỷ /
+  // quá hạn 3 ngày / mùa chưa dùng luật ván.
+  ROUND_REPORT_DUPLICATE: { status: 409, message: ROUND_REPORT_DUPLICATE_MESSAGE },
+  ROUND_REPORT_CLOSED: { status: 409, message: ROUND_REPORT_CLOSED_MESSAGE },
 };
 
 export class AppError extends Error {

@@ -19,9 +19,9 @@ export const COMMAND = { report: 'baocao', leaderboard: 'bxh', profile: 'hoso' }
 
 /**
  * Tên tuỳ chọn của `/baocao` (và `role` của `/bxh`). `extraValue` là chỉ số phụ (spec chỉ số phụ
- * §6), `penaltyValue` là chỉ số phạt (spec điểm role §5).
+ * §6), `penaltyValue` là chỉ số phạt (spec điểm role §5), `round` là số ván (spec ván §5).
  */
-export const OPTION = { role: 'role', value: 'so_lieu', extraValue: 'so_lieu_phu', penaltyValue: 'so_lieu_phat', day: 'ngay', note: 'ghi_chu' } as const;
+export const OPTION = { role: 'role', value: 'so_lieu', round: 'van', extraValue: 'so_lieu_phu', penaltyValue: 'so_lieu_phat', day: 'ngay', note: 'ghi_chu' } as const;
 
 /** Discord cho tối đa 25 gợi ý autocomplete. */
 const MAX_CHOICES = 25;
@@ -29,6 +29,8 @@ const MAX_CHOICES = 25;
 const CHOICE_NAME_MAX = 100;
 /** Ghi chú lần khai tối đa 300 ký tự (như `reports.ts`). */
 const NOTE_MAX = 300;
+/** Số ván tối đa nhận ở `/baocao van` (spec ván §5). */
+const ROUND_MAX = 50;
 /** `maxPerGame` (và `extraMaxPerGame`, `penaltyMaxPerGame`) của role nằm trong 1–100 nên giá trị khai không bao giờ quá 100. */
 const VALUE_MAX = 100;
 
@@ -40,8 +42,9 @@ const FACTION_COLOUR: Record<Faction, number> = { goose: 0x2f80ed, duck: 0xe5484
 // ---------------------------------------------------------------------------
 
 /**
- * Ba lệnh chỉ dùng trong server (`dm_permission: false`): `/baocao role so_lieu
- * [so_lieu_phu] [so_lieu_phat] [ngay] [ghi_chu]`, `/bxh role`, `/hoso`. Tuỳ chọn bắt buộc
+ * Ba lệnh chỉ dùng trong server (`dm_permission: false`): `/baocao role so_lieu [van]
+ * [so_lieu_phu] [so_lieu_phat] [ngay] [ghi_chu]`, `/bxh role`, `/hoso`. `van` (1–50) không bắt buộc ở
+ * Discord để mùa cũ vẫn khai theo ngày; handler bắt buộc khi ngày chơi thuộc mùa luật ván. Tuỳ chọn bắt buộc
  * đứng trước tuỳ chọn không bắt buộc (Discord yêu cầu) nên `so_lieu_phu` đứng ngay sau
  * `so_lieu`, rồi `so_lieu_phat`; `role` có autocomplete. Role nào có chỉ số phụ/phạt do
  * `submitReport` quyết — ở đây chỉ giới hạn 0–100 như `so_lieu`.
@@ -69,6 +72,13 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           required: true,
           min_value: 0,
           max_value: VALUE_MAX,
+        },
+        {
+          type: ApplicationCommandOptionType.Integer,
+          name: OPTION.round,
+          description: 'Số ván trong buổi (Ván 1, 2, …) — bắt buộc từ tháng 11/2026',
+          min_value: 1,
+          max_value: ROUND_MAX,
         },
         {
           type: ApplicationCommandOptionType.Integer,

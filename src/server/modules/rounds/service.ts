@@ -275,7 +275,8 @@ export async function updateRound(ctx: Ctx, actorId: number, roundId: number, ra
   await ensureSeason(ctx, seasonId);
   await ctx.db.$transaction(async (tx) => {
     await lockOpenSeason(tx, seasonId);
-    await tx.gameRound.update({ where: { id: roundId }, data: { winnerFaction: faction } });
+    // `select` hẹp: không kéo ảnh (tới 5 MB) về khi đang giữ khoá dòng mùa.
+    await tx.gameRound.update({ where: { id: roundId }, data: { winnerFaction: faction }, select: { id: true } });
     await tx.gameRoundWinner.deleteMany({ where: { roundId } });
     if (winnerIds.length > 0) await tx.gameRoundWinner.createMany({ data: winnerIds.map((memberId) => ({ roundId, memberId })) });
   }, HOT_TX);
@@ -319,7 +320,7 @@ export async function deleteRound(ctx: Ctx, roundId: number): Promise<void> {
       const live = await tx.statReport.count({ where: { roundId, status: { in: ['pending', 'approved'] } } });
       if (live > 0) throw appError('ROUND_HAS_REPORTS');
       await tx.statReport.updateMany({ where: { roundId }, data: { roundId: null } });
-      await tx.gameRound.delete({ where: { id: roundId } });
+      await tx.gameRound.delete({ where: { id: roundId }, select: { id: true } });
     });
   } catch (err) {
     // Lần khai mới chen vào đúng lúc xoá (đã ghi xong trước câu DELETE): khoá ngoại RESTRICT chặn.

@@ -9,7 +9,8 @@
  * - Menu vote (`vote:*`): bỏ (hoặc đổi) phiếu qua `castVote`; tin vote giữ nguyên tới khi đóng đợt.
  * - Menu treo thưởng (`bounty:claim:*`): nhận từng mục đã chọn qua `claimBounty` (cùng luật với web),
  *   trả lời ẩn một dòng cho mỗi mục.
- * - `/baocao`: khai điểm (`submitReport`), trả lời ẩn; không nhập `ngay` → ngày chơi mặc định (trước
+ * - `/baocao`: khai điểm (`submitReport`; có `van` hoặc ngày thuộc mùa luật ván → `submitRoundReport` vào ván
+ *   số `van` của buổi mặc định của ngày chơi), trả lời ẩn; không nhập `ngay` → ngày chơi mặc định (trước
  *   06:00 giờ VN là hôm qua) kèm buổi mặc định nếu có (`src/shared/report-day.ts`, như web). `/bxh`: embed top 10 của role mùa
  *   này, công khai. `/hoso`: mã thành viên, role đang giữ, link web, trả lời ẩn.
  * - Autocomplete `role`: trả gợi ý ngay (không defer — Discord không cho defer autocomplete).
@@ -35,7 +36,8 @@ import { castVote } from '../modules/mvp/votes.js';
 import { listRoles } from '../modules/roles/service.js';
 import { setAttendance } from '../modules/sessions/service.js';
 import { getHeldRoles, getRoleLeaderboard } from '../modules/stats/leaderboard.js';
-import { isId, submitReport } from '../modules/stats/reports.js';
+import { isId, submitReport, submitRoundReport } from '../modules/stats/reports.js';
+import { isRoundSeason } from '../../shared/rounds.js';
 import { COMMAND, OPTION, filterRoleChoices, leaderboardEmbed, parseDayInput, profileText } from './commands.js';
 import { parseCustomId } from './custom-ids.js';
 import type { CustomIdData } from './custom-ids.js';
@@ -303,14 +305,44 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
       await interaction.editReply('Ngày không hợp lệ (dùng dd/MM hoặc YYYY-MM-DD)');
       return;
     }
-    const sessionId = typedDay === '' ? await defaultSessionId(ctx, playedOn) : null;
-
     // `so_lieu` là bắt buộc; thiếu (client bị sửa) → NaN để service từ chối như giá trị sai.
     const value = interaction.options.getInteger(OPTION.value) ?? Number.NaN;
     // `so_lieu_phu` không bắt buộc; bỏ trống → 0 (như web).
     const extraValue = interaction.options.getInteger(OPTION.extraValue) ?? 0;
     // `so_lieu_phat` cũng không bắt buộc; bỏ trống → 0.
     const penaltyValue = interaction.options.getInteger(OPTION.penaltyValue) ?? 0;
+    const note = interaction.options.getString(OPTION.note);
+
+    // Khai theo ván (spec ván §5): có `van`, hoặc ngày chơi thuộc mùa luật ván (khi đó `van` là bắt buộc).
+    const roundNumber = interaction.options.getInteger(OPTION.round);
+    if (roundNumber !== null || isRoundSeason(seasonIdOf(playedOn))) {
+      if (roundNumber === null) {
+        await interaction.editReply('Từ tháng 11 khai điểm theo ván — thêm tuỳ chọn van');
+        return;
+      }
+      // Buổi = buổi mặc định của ngày chơi (mốc 6:00 khi bỏ trống `ngay`, như web).
+      const session = await defaultSession(ctx, playedOn);
+      if (!session) {
+        await interaction.editReply(`Không có buổi chơi nào ngày ${formatVnDay(playedOn)}`);
+        return;
+      }
+      const sessionLabel = `buổi ${formatVnTime(session.startsAt)} ${formatVnDay(session.startsAt)}`;
+      const round = await ctx.db.gameRound.findUnique({
+        where: { sessionId_number: { sessionId: session.id, number: roundNumber } },
+        select: { id: true },
+      });
+      if (!round) {
+        await interaction.editReply(`Không tìm thấy ván ${roundNumber} của ${sessionLabel}`);
+        return;
+      }
+      const report = await submitRoundReport(ctx, member.id, round.id, { roleId: role.id, value, extraValue, penaltyValue, note });
+      await interaction.editReply(
+        `Đã gửi: ${role.icon} ${role.nameVi} — ${formatReportValue(report, role)} ván ${roundNumber} ${sessionLabel}. Chờ mod duyệt nhé!`,
+      );
+      return;
+    }
+
+    const sessionId = typedDay === '' ? ((await defaultSession(ctx, playedOn))?.id ?? null) : null;
     const report = await submitReport(ctx, member.id, {
       roleId: role.id,
       value,
@@ -318,7 +350,7 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
       penaltyValue,
       playedOn,
       sessionId,
-      note: interaction.options.getString(OPTION.note),
+      note,
     });
     await interaction.editReply(
       `Đã gửi: ${role.icon} ${role.nameVi} — ${formatReportValue(report, role)} ngày ${formatVnDay(playedOn)}. Chờ mod duyệt nhé!`,
@@ -328,14 +360,14 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
   }
 }
 
-/** Buổi mặc định (`pickDefaultSession`) trong các buổi bắt đầu ngày VN `playedOn`, hoặc null. */
-async function defaultSessionId(ctx: Ctx, playedOn: string): Promise<number | null> {
+/** Buổi mặc định (`pickDefaultSession`) trong các buổi không huỷ bắt đầu ngày VN `playedOn`, hoặc null. */
+async function defaultSession(ctx: Ctx, playedOn: string): Promise<{ id: number; startsAt: Date } | null> {
   const { start, end } = vnDayRange(playedOn);
   const sessions = await ctx.db.gameSession.findMany({
     where: { startsAt: { gte: start, lt: end }, status: { not: 'cancelled' } },
     select: { id: true, startsAt: true, status: true },
   });
-  return pickDefaultSession(sessions, ctx.now(), playedOn)?.id ?? null;
+  return pickDefaultSession(sessions, ctx.now(), playedOn);
 }
 
 /** `/bxh`: top 10 của role trong mùa hiện tại, embed công khai (không cần hồ sơ người gõ). */

@@ -15,7 +15,8 @@ import type {
 } from '../../../src/server/bot/interactions.js';
 import type { Ctx } from '../../../src/server/ctx.js';
 import { listRoles } from '../../../src/server/modules/roles/service.js';
-import { reviewReport, submitReport } from '../../../src/server/modules/stats/reports.js';
+import { createRound } from '../../../src/server/modules/rounds/service.js';
+import { reviewReport, submitReport, submitRoundReport } from '../../../src/server/modules/stats/reports.js';
 import type { RoleDto } from '../../../src/shared/api-types.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
@@ -61,20 +62,23 @@ test('definitions are valid for Discord', () => {
   }
 
   const [baocao, bxh, hoso] = defs;
-  expect(baocao?.options).toHaveLength(6);
-  // `so_lieu_phu` (chỉ số phụ, không bắt buộc) đứng ngay sau `so_lieu` (spec chỉ số phụ §6);
-  // `so_lieu_phat` (chỉ số phạt, không bắt buộc) đứng ngay sau `so_lieu_phu` (spec điểm role §5).
-  expect(baocao?.options?.map((o) => o.name)).toEqual(['role', 'so_lieu', 'so_lieu_phu', 'so_lieu_phat', 'ngay', 'ghi_chu']);
+  expect(baocao?.options).toHaveLength(7);
+  // `van` (số ván, spec ván §5) đứng ngay sau `so_lieu` — không bắt buộc ở Discord để mùa cũ vẫn khai theo
+  // ngày; handler bắt buộc khi ngày thuộc mùa luật ván. Rồi `so_lieu_phu` (chỉ số phụ, spec chỉ số phụ §6)
+  // và `so_lieu_phat` (chỉ số phạt, spec điểm role §5).
+  expect(baocao?.options?.map((o) => o.name)).toEqual(['role', 'so_lieu', 'van', 'so_lieu_phu', 'so_lieu_phat', 'ngay', 'ghi_chu']);
   expect(baocao?.options?.[0]).toMatchObject({ type: ApplicationCommandOptionType.String, required: true, autocomplete: true });
   expect(baocao?.options?.[1]).toMatchObject({ type: ApplicationCommandOptionType.Integer, required: true, min_value: 0, max_value: 100 });
-  expect(baocao?.options?.[2]).toMatchObject({ type: ApplicationCommandOptionType.Integer, min_value: 0, max_value: 100 });
+  expect(baocao?.options?.[2]).toMatchObject({ type: ApplicationCommandOptionType.Integer, min_value: 1, max_value: 50 });
   expect(baocao?.options?.[2]?.required ?? false).toBe(false);
   expect(baocao?.options?.[3]).toMatchObject({ type: ApplicationCommandOptionType.Integer, min_value: 0, max_value: 100 });
   expect(baocao?.options?.[3]?.required ?? false).toBe(false);
-  expect(baocao?.options?.[4]).toMatchObject({ type: ApplicationCommandOptionType.String });
+  expect(baocao?.options?.[4]).toMatchObject({ type: ApplicationCommandOptionType.Integer, min_value: 0, max_value: 100 });
   expect(baocao?.options?.[4]?.required ?? false).toBe(false);
-  expect(baocao?.options?.[5]).toMatchObject({ type: ApplicationCommandOptionType.String, max_length: 300 });
+  expect(baocao?.options?.[5]).toMatchObject({ type: ApplicationCommandOptionType.String });
   expect(baocao?.options?.[5]?.required ?? false).toBe(false);
+  expect(baocao?.options?.[6]).toMatchObject({ type: ApplicationCommandOptionType.String, max_length: 300 });
+  expect(baocao?.options?.[6]?.required ?? false).toBe(false);
 
   expect(bxh?.options).toHaveLength(1);
   expect(bxh?.options?.[0]).toMatchObject({ type: ApplicationCommandOptionType.String, name: 'role', required: true, autocomplete: true });
@@ -576,6 +580,112 @@ test('/baocao answers rule violations with the business message', async () => {
   expect(inactive.lastText).toBe('Role này đang tắt');
 
   expect(await reports()).toEqual([]);
+  expect(errors).not.toHaveBeenCalled();
+});
+
+// ---------------------------------------------------------------------------
+// /baocao van (spec ván §5)
+// ---------------------------------------------------------------------------
+
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png-body')]);
+
+/** Buổi lúc `at` có `n` ván (ván 1 Vịt thắng); trả về buổi và id các ván theo số. */
+async function sessionWithRounds(at: string, n: number, status: 'scheduled' | 'cancelled' = 'scheduled') {
+  const creator =
+    (await testDb.member.findFirst({ where: { accessLevel: 'mod' } })) ?? (await createMember(testDb, { accessLevel: 'mod', displayName: 'Mod' }));
+  const s = await createSession(testDb, { startsAt: new Date(at), createdById: creator.id, status });
+  const ids: number[] = [];
+  for (let k = 0; k < n; k++) ids.push((await createRound(ctx, creator.id, s.id, PNG, k === 0 ? 'duck' : null)).id);
+  return { session: s, rounds: ids };
+}
+
+test('/baocao mùa luật ván: bắt buộc van, khai vào ván của buổi mặc định', async () => {
+  // Buổi 21:00 và 23:00 ngày 05/11 giờ VN; 23:30 05/11 → buổi mặc định là buổi 23:00.
+  await sessionWithRounds('2026-11-05T14:00:00Z', 2);
+  const late = await sessionWithRounds('2026-11-05T16:00:00Z', 2);
+  setNow('2026-11-05T16:30:00Z');
+
+  const noRound = baocao({ role: 'swordsman', so_lieu: 2 });
+  await handleInteraction(ctx, noRound);
+  expect(noRound.lastText).toBe('Từ tháng 11 khai điểm theo ván — thêm tuỳ chọn van');
+
+  const i = baocao({ role: 'swordsman', so_lieu: 2, van: 2, ghi_chu: 'ván cuối' });
+  await handleInteraction(ctx, i);
+  expect(i.steps).toEqual([
+    { step: 'defer', ephemeral: true },
+    { step: 'edit', content: 'Đã gửi: ⚔️ Kiếm sĩ — 2 mạng chém ván 2 buổi 23:00 05/11. Chờ mod duyệt nhé!' },
+  ]);
+  expect(await reports()).toEqual([
+    expect.objectContaining({
+      roundId: late.rounds[1],
+      sessionId: late.session.id,
+      playedOn: new Date('2026-11-05T00:00:00Z'),
+      value: 2,
+      note: 'ván cuối',
+      status: 'pending',
+    }),
+  ]);
+
+  // Khai lại cùng ván → câu của service.
+  const dup = baocao({ role: 'goose', so_lieu: 0, van: 2 });
+  await handleInteraction(ctx, dup);
+  expect(dup.lastText).toBe('Bạn đã khai ván này rồi');
+
+  const missing = baocao({ role: 'swordsman', so_lieu: 1, van: 3 });
+  await handleInteraction(ctx, missing);
+  expect(missing.lastText).toBe('Không tìm thấy ván 3 của buổi 23:00 05/11');
+  expect(await reports()).toHaveLength(1);
+  expect(errors).not.toHaveBeenCalled();
+});
+
+test('/baocao van với ngay: buổi mặc định của ngày đó; không có buổi → câu riêng', async () => {
+  setNow('2026-11-06T05:00:00Z'); // 12:00 ngày 06/11 giờ VN
+  const s = await sessionWithRounds('2026-11-05T14:00:00Z', 1);
+  // Buổi bị huỷ cùng ngày không được chọn.
+  await sessionWithRounds('2026-11-05T15:00:00Z', 0, 'cancelled');
+
+  const i = baocao({ role: 'swordsman', so_lieu: 1, van: 1, ngay: '05/11' });
+  await handleInteraction(ctx, i);
+  expect(i.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 1 mạng chém ván 1 buổi 21:00 05/11. Chờ mod duyệt nhé!');
+  expect((await reports())[0]).toMatchObject({ roundId: s.rounds[0], sessionId: s.session.id });
+
+  // Hôm nay (06/11) chưa có buổi.
+  const none = baocao({ role: 'swordsman', so_lieu: 1, van: 1 });
+  await handleInteraction(ctx, none);
+  expect(none.lastText).toBe('Không có buổi chơi nào ngày 06/11');
+  const noneDay = baocao({ role: 'swordsman', so_lieu: 1, van: 1, ngay: '04/11' });
+  await handleInteraction(ctx, noneDay);
+  expect(noneDay.lastText).toBe('Không có buổi chơi nào ngày 04/11');
+  expect(await reports()).toHaveLength(1);
+  expect(errors).not.toHaveBeenCalled();
+});
+
+test('/baocao mùa cũ (≤ 2026-10) không có van vẫn khai theo ngày', async () => {
+  setNow('2026-11-02T05:00:00Z');
+  const i = baocao({ role: 'swordsman', so_lieu: 3, ngay: '31/10' });
+  await handleInteraction(ctx, i);
+  expect(i.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 3 mạng chém ngày 31/10. Chờ mod duyệt nhé!');
+  expect((await reports())[0]).toMatchObject({ roundId: null, playedOn: new Date('2026-10-31T00:00:00Z') });
+});
+
+test('web và Discord cùng khai một ván song song → đúng một lần khai', async () => {
+  const s = await sessionWithRounds('2026-11-05T14:00:00Z', 1);
+  setNow('2026-11-05T15:00:00Z');
+  // Lệnh đầu (thiếu van) chỉ để người gõ (u1) có hồ sơ trước — web khai được cùng lúc.
+  await handleInteraction(ctx, baocao({ role: 'swordsman', so_lieu: 0 }));
+  const me = await presser();
+  const swordsman = await roleByKey(testDb, 'swordsman');
+
+  const discord = baocao({ role: 'swordsman', so_lieu: 2, van: 1 });
+  const [web] = await Promise.allSettled([
+    submitRoundReport(ctx, me.id, s.rounds[0]!, { roleId: swordsman.id, value: 1 }),
+    handleInteraction(ctx, discord),
+  ]);
+  expect(await reports()).toHaveLength(1);
+  const discordOk = discord.lastText?.startsWith('Đã gửi:') ?? false;
+  expect(web!.status === 'fulfilled').toBe(!discordOk);
+  if (discordOk) expect((web as PromiseRejectedResult).reason).toMatchObject({ code: 'ROUND_REPORT_DUPLICATE' });
+  else expect(discord.lastText).toBe('Bạn đã khai ván này rồi');
   expect(errors).not.toHaveBeenCalled();
 });
 

@@ -32,3 +32,9 @@ export function roundReportPoints(r: ReportValues, role: MetricRole, multiplier:
   const plus = won ? 1 + (r.value * role.points + r.extraValue * (role.extraPoints ?? 0)) * multiplier : 0;
   return plus - r.penaltyValue * (role.penaltyPoints ?? 0) + r.bonusPoints;
 }
+
+/** Lỗi khai theo ván (spec ván §5) — câu đúng nguyên văn spec, web và Discord cùng hiện. */
+export const ROUND_REPORT_DUPLICATE_MESSAGE = 'Bạn đã khai ván này rồi';
+export const ROUND_REPORT_CLOSED_MESSAGE = 'Ván này không còn nhận khai';
+/** `POST /api/reports` (khai theo ngày) cho ngày thuộc mùa ≥ `ROUND_SCORING_FROM`. */
+export const DAY_REPORTS_REPLACED_MESSAGE = 'Từ tháng 11 khai điểm theo ván — chọn buổi và ván để khai';

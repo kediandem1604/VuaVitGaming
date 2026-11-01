@@ -6,7 +6,7 @@ import { dateOnlyToDb } from '../../../src/server/lib/time.js';
 import { createWebSession } from '../../../src/server/modules/auth/sessions.js';
 import type { OAuthClient } from '../../../src/server/modules/auth/oauth.js';
 import { buildApp } from '../../../src/server/web/app.js';
-import type { RoundDto, SessionRoundsDto } from '../../../src/shared/api-types.js';
+import type { ReportDto, RoundDto, SessionRoundsDto } from '../../../src/shared/api-types.js';
 import { makeTestCtx } from '../../helpers/ctx.js';
 import { resetDb, testDb } from '../../helpers/db.js';
 import { createMember, createSession, roleByKey } from '../../helpers/factories.js';
@@ -152,4 +152,50 @@ test('sửa và xoá ván qua API; trang buổi cho mọi thành viên', async (
   expect(blocked.json()).toMatchObject({ error: { code: 'ROUND_HAS_REPORTS' } });
   await testDb.statReport.deleteMany({});
   expect((await del(adminSid)).statusCode).toBe(204);
+});
+
+const json = (method: 'POST' | 'PATCH', url: string, sid: string | undefined, payload: unknown) =>
+  app.inject({ method, url, cookies: cookies(sid), headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+
+test('khai theo ván qua API: 201 ReportDto có round; trùng 409; body có ngày/buổi 400; PATCH không đổi ván', async () => {
+  const round = (await addRound(modSid, PNG, 'image/png', '?winnerFaction=duck')).json<RoundDto>();
+  const duck = await roleByKey(testDb, 'duck');
+  const url = `/api/rounds/${round.id}/reports`;
+  expect((await json('POST', url, undefined, { roleId: duck.id, value: 1 })).statusCode).toBe(401);
+  expect((await json('POST', url, memberSid, { roleId: duck.id, value: 1, playedOn: '2026-11-05' })).statusCode).toBe(400);
+  expect((await json('POST', url, memberSid, { roleId: duck.id, value: 1, sessionId: session.id })).statusCode).toBe(400);
+
+  const res = await json('POST', url, memberSid, { roleId: duck.id, value: 2, note: 'ok' });
+  expect(res.statusCode).toBe(201);
+  const dto = res.json<ReportDto>();
+  expect(dto).toMatchObject({
+    status: 'pending',
+    playedOn: '2026-11-05',
+    sessionId: session.id,
+    value: 2,
+    note: 'ok',
+    round: { id: round.id, number: 1, sessionId: session.id, winnerFaction: 'duck', won: true },
+  });
+
+  const dup = await json('POST', url, memberSid, { roleId: duck.id, value: 0 });
+  expect(dup.statusCode).toBe(409);
+  expect(dup.json()).toEqual({ error: { code: 'ROUND_REPORT_DUPLICATE', message: 'Bạn đã khai ván này rồi' } });
+  const missing = await json('POST', '/api/rounds/999999/reports', memberSid, { roleId: duck.id, value: 0 });
+  expect(missing.json()).toEqual({ error: { code: 'ROUND_REPORT_CLOSED', message: 'Ván này không còn nhận khai' } });
+
+  // Sửa: đổi giá trị được, gửi roundId → 400.
+  const patched = await json('PATCH', `/api/reports/${dto.id}`, memberSid, { value: 1 });
+  expect(patched.statusCode).toBe(200);
+  expect(patched.json<ReportDto>()).toMatchObject({ value: 1, round: { id: round.id } });
+  const other = (await addRound(modSid)).json<RoundDto>();
+  expect((await json('PATCH', `/api/reports/${dto.id}`, memberSid, { roundId: other.id })).statusCode).toBe(400);
+  expect((await testDb.statReport.findUniqueOrThrow({ where: { id: dto.id } })).roundId).toBe(round.id);
+});
+
+test('POST /api/reports theo ngày cho ngày mùa luật ván → 400 VALIDATION với câu của spec', async () => {
+  const duck = await roleByKey(testDb, 'duck');
+  const res = await json('POST', '/api/reports', memberSid, { roleId: duck.id, value: 1, playedOn: '2026-11-04' });
+  expect(res.statusCode).toBe(400);
+  expect(res.json()).toEqual({ error: { code: 'VALIDATION', message: 'Từ tháng 11 khai điểm theo ván — chọn buổi và ván để khai' } });
+  expect(await testDb.statReport.count()).toBe(0);
 });

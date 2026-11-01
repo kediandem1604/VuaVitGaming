@@ -45,15 +45,25 @@
  * (`source = 'accusation'`) tạo sẵn ở trạng thái `approved`: không vào hàng chờ, không sửa được,
  * không tính vào giới hạn 30 lần/ngày; huỷ duyệt lần khai người báo cáo kéo theo huỷ nó.
  *
+ * Khai theo ván (spec ván §5, `submitRoundReport`): cùng bộ kiểm tra trên, nhưng ngày chơi = ngày VN của
+ * buổi của ván và buổi = buổi của ván (không nhận từ người khai); ván không có, buổi bị huỷ, ngày của buổi
+ * ngoài cửa sổ 3 ngày hoặc thuộc mùa chưa dùng luật ván → `ROUND_REPORT_CLOSED` "Ván này không còn nhận
+ * khai". Mỗi (ván, người) chỉ một lần khai `self` còn `pending`/`approved` — chỉ mục UNIQUE một phần
+ * `stat_reports_round_member_active_key` bảo đảm cả khi gửi song song (web + Discord), vi phạm →
+ * `ROUND_REPORT_DUPLICATE` "Bạn đã khai ván này rồi". Sửa lần khai theo ván không đổi được ván/ngày/buổi.
+ * Khai theo NGÀY cho ngày thuộc mùa ≥ `ROUND_SCORING_FROM` → `VALIDATION` "Từ tháng 11 khai điểm theo
+ * ván — chọn buổi và ván để khai" (lần khai theo ngày có từ trước vẫn sửa được nếu không đổi ngày).
+ *
  * Giới hạn 30 lần/ngày là đếm-rồi-ghi (không khoá): hai lần khai cùng một mili giây có
  * thể lọt thành 31 — chấp nhận được cho một giới hạn chống spam.
  */
 
-import type { Prisma, StatReport } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { StatReport } from '@prisma/client';
 import { z } from 'zod';
-import type { AccessLevel, ReportDto, ReviewedReportDto } from '../../../shared/api-types.js';
+import type { AccessLevel, ReportDto, ReviewedReportDto, RoundReportInput } from '../../../shared/api-types.js';
 import { formatReportValue, reportPoints } from '../../../shared/metric.js';
-import { roundReportPoints, roundWon } from '../../../shared/rounds.js';
+import { DAY_REPORTS_REPLACED_MESSAGE, isRoundSeason, roundReportPoints, roundWon } from '../../../shared/rounds.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import {
@@ -174,6 +184,9 @@ function rejectAccusationField(p: { accusation?: unknown }): void {
 
 const patchSchema = inputSchema.partial();
 
+/** Body khai theo ván: như khai điểm, không có `playedOn`/`sessionId` (lấy theo buổi của ván); vẫn `.strict()`. */
+const roundInputSchema = inputSchema.omit({ playedOn: true, sessionId: true });
+
 const accusationDecisionSchema = z.enum(['approve', 'reject']).optional();
 
 const decisionSchema = z.discriminatedUnion('approve', [
@@ -200,6 +213,8 @@ interface Normalised {
   penaltyValue: number;
   playedOn: string;
   sessionId: number | null;
+  /** Ván (khai theo ván) — khi có thì `playedOn`/`sessionId` đã lấy theo buổi của ván. */
+  roundId: number | null;
   note: string | null;
 }
 
@@ -234,7 +249,12 @@ export async function assertActiveMember(ctx: Ctx, memberId: number): Promise<vo
  * 3 ngày → mùa chưa chốt → (giới hạn ngày, chỉ khi `dailyCap`) → ghi chú → buổi khớp ngày.
  * Mọi mốc "hôm nay" lấy từ `ctx.now()` theo giờ VN.
  */
-async function validateReport(ctx: Ctx, memberId: number, r: Normalised, opts: { dailyCap: boolean }): Promise<void> {
+async function validateReport(
+  ctx: Ctx,
+  memberId: number,
+  r: Normalised,
+  opts: { dailyCap: boolean; blockRoundSeasonDay: boolean },
+): Promise<void> {
   const role = await ctx.db.role.findUnique({
     where: { id: r.roleId },
     select: { active: true, maxPerGame: true, extraMaxPerGame: true, penaltyMaxPerGame: true },
@@ -261,7 +281,14 @@ async function validateReport(ctx: Ctx, memberId: number, r: Normalised, opts: {
 
   // Chuỗi `YYYY-MM-DD` so sánh theo từ điển đúng bằng so sánh ngày.
   const today = toVnDate(ctx.now());
-  if (r.playedOn < addDaysVn(today, -WINDOW_DAYS) || r.playedOn > today) throw appError('PLAYED_ON_OUT_OF_WINDOW');
+  if (r.playedOn < addDaysVn(today, -WINDOW_DAYS) || r.playedOn > today) {
+    // Khai theo ván: ngày chơi là ngày của buổi — quá hạn nghĩa là ván đã thôi nhận khai.
+    throw appError(r.roundId !== null ? 'ROUND_REPORT_CLOSED' : 'PLAYED_ON_OUT_OF_WINDOW');
+  }
+  // Mùa luật ván không nhận khai theo ngày nữa (spec ván §5).
+  if (r.roundId === null && opts.blockRoundSeasonDay && isRoundSeason(seasonIdOf(r.playedOn))) {
+    throw appError('VALIDATION', DAY_REPORTS_REPLACED_MESSAGE);
+  }
 
   if (await isSeasonClosed(ctx, seasonIdOf(r.playedOn))) throw appError('SEASON_CLOSED');
 
@@ -300,27 +327,80 @@ export async function submitReport(ctx: Ctx, memberId: number, input: ReportInpu
     penaltyValue: p.penaltyValue ?? 0,
     playedOn: checkPlayedOn(p.playedOn),
     sessionId: p.sessionId ?? null,
+    roundId: null,
     note: normaliseNote(p.note),
   };
 
   await assertActiveMember(ctx, memberId);
-  await validateReport(ctx, memberId, r, { dailyCap: true });
-  await ensureSeason(ctx, seasonIdOf(r.playedOn));
+  return createValidated(ctx, memberId, r);
+}
 
-  return ctx.db.statReport.create({
-    data: {
-      memberId,
-      roleId: r.roleId,
-      sessionId: r.sessionId,
-      playedOn: dateOnlyToDb(r.playedOn),
-      value: r.value,
-      extraValue: r.extraValue,
-      penaltyValue: r.penaltyValue,
-      note: r.note,
-      // Ghi rõ để đồng hồ của ctx (không phải giờ thật) quyết định "ngày khai".
-      createdAt: ctx.now(),
-    },
+/**
+ * Khai theo ván `roundId` (spec ván §5, `POST /api/rounds/:id/reports` và `/baocao van`): ván phải còn nhận
+ * khai (`openRoundOf`), rồi cùng bộ kiểm tra như khai theo ngày với `playedOn` = ngày VN của buổi và
+ * `sessionId` = buổi của ván. Đã có lần khai còn hiệu lực ở ván → `ROUND_REPORT_DUPLICATE` (do chỉ mục
+ * UNIQUE một phần quyết, nên hai lần gửi song song chỉ một lần được ghi).
+ */
+export async function submitRoundReport(ctx: Ctx, memberId: number, roundId: number, input: RoundReportInput): Promise<StatReport> {
+  const p = parse(roundInputSchema, input);
+  rejectAccusationField(p);
+  await assertActiveMember(ctx, memberId);
+  const round = await openRoundOf(ctx, roundId);
+  return createValidated(ctx, memberId, {
+    roleId: p.roleId,
+    value: p.value,
+    extraValue: p.extraValue ?? 0,
+    penaltyValue: p.penaltyValue ?? 0,
+    playedOn: round.playedOn,
+    sessionId: round.sessionId,
+    roundId,
+    note: normaliseNote(p.note),
   });
+}
+
+/**
+ * Ván còn nhận khai không: có ván, buổi không bị huỷ, ngày VN của buổi thuộc mùa luật ván (cửa sổ 3 ngày
+ * kiểm ở `validateReport`). Không → `ROUND_REPORT_CLOSED`. Trả về buổi và ngày chơi của lần khai.
+ */
+async function openRoundOf(ctx: Ctx, roundId: number): Promise<{ sessionId: number; playedOn: string }> {
+  const round = isId(roundId)
+    ? await ctx.db.gameRound.findUnique({ where: { id: roundId }, select: { sessionId: true, session: { select: { startsAt: true, status: true } } } })
+    : null;
+  if (!round || round.session.status === 'cancelled') throw appError('ROUND_REPORT_CLOSED');
+  // Ngày chơi = ngày VN của buổi: hệ số ngày nhân của lần khai theo ván tính theo ngày này ở cả
+  // `toReportDto` (theo `playedOn`) lẫn `leaderboard.ts` (theo buổi) — hai nơi PHẢI khớp nhau.
+  const playedOn = toVnDate(round.session.startsAt);
+  if (!isRoundSeason(seasonIdOf(playedOn))) throw appError('ROUND_REPORT_CLOSED');
+  return { sessionId: round.sessionId, playedOn };
+}
+
+/** Kiểm tra (có giới hạn 30 lần/ngày) rồi ghi lần khai mới `pending`; trùng ván → `ROUND_REPORT_DUPLICATE`. */
+async function createValidated(ctx: Ctx, memberId: number, r: Normalised): Promise<StatReport> {
+  await validateReport(ctx, memberId, r, { dailyCap: true, blockRoundSeasonDay: true });
+  await ensureSeason(ctx, seasonIdOf(r.playedOn));
+  try {
+    return await ctx.db.statReport.create({
+      data: {
+        memberId,
+        roleId: r.roleId,
+        sessionId: r.sessionId,
+        roundId: r.roundId,
+        playedOn: dateOnlyToDb(r.playedOn),
+        value: r.value,
+        extraValue: r.extraValue,
+        penaltyValue: r.penaltyValue,
+        note: r.note,
+        // Ghi rõ để đồng hồ của ctx (không phải giờ thật) quyết định "ngày khai".
+        createdAt: ctx.now(),
+      },
+    });
+  } catch (err) {
+    // Chỉ mục UNIQUE một phần (ván, người) là ràng buộc duy nhất lần khai mới có thể vi phạm.
+    if (r.roundId !== null && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw appError('ROUND_REPORT_DUPLICATE');
+    }
+    throw err;
+  }
 }
 
 /**
@@ -338,16 +418,26 @@ export async function updateOwnReport(ctx: Ctx, memberId: number, reportId: numb
   if (!existing || existing.memberId !== memberId) throw appError('NOT_FOUND');
   if (existing.status !== 'pending') throw appError('NOT_PENDING');
 
+  const existingDay = dbToDateOnly(existing.playedOn);
+  const playedOn = p.playedOn === undefined ? existingDay : checkPlayedOn(p.playedOn);
+  const sessionId = p.sessionId === undefined ? existing.sessionId : p.sessionId;
+  if (existing.roundId !== null) {
+    // Lần khai theo ván: ván, ngày và buổi cố định (gửi lại đúng giá trị đang có thì được).
+    if (playedOn !== existingDay || sessionId !== existing.sessionId) throw appError('VALIDATION');
+    await openRoundOf(ctx, existing.roundId);
+  }
   const merged: Normalised = {
     roleId: p.roleId ?? existing.roleId,
     value: p.value ?? existing.value,
     extraValue: p.extraValue ?? existing.extraValue,
     penaltyValue: p.penaltyValue ?? existing.penaltyValue,
-    playedOn: p.playedOn === undefined ? dbToDateOnly(existing.playedOn) : checkPlayedOn(p.playedOn),
-    sessionId: p.sessionId === undefined ? existing.sessionId : p.sessionId,
+    playedOn,
+    sessionId,
+    roundId: existing.roundId,
     note: p.note === undefined ? existing.note : normaliseNote(p.note),
   };
-  await validateReport(ctx, memberId, merged, { dailyCap: false });
+  // Lần khai theo ngày của mùa luật ván có từ trước vẫn sửa được — chỉ chặn đổi sang ngày khác.
+  await validateReport(ctx, memberId, merged, { dailyCap: false, blockRoundSeasonDay: playedOn !== existingDay });
   await ensureSeason(ctx, seasonIdOf(merged.playedOn));
 
   // Lần khai và báo cáo cũ kèm theo (nếu có) đổi cùng nhau: lần khai vừa được duyệt đúng lúc này → không đụng báo cáo.
@@ -391,6 +481,7 @@ const REVIEW_ROLE_SELECT = {
 const REVIEWABLE_INCLUDE = {
   member: { select: { discordId: true } },
   role: { select: REVIEW_ROLE_SELECT },
+  round: { select: { number: true } },
 } satisfies Prisma.StatReportInclude;
 
 type ReviewableReport = Prisma.StatReportGetPayload<{ include: typeof REVIEWABLE_INCLUDE }>;
@@ -652,10 +743,14 @@ function describeOwnAccusation(n: PenaltyNotice): string {
   return `Báo cáo của bạn (${n.roleName}, bắn ${n.victimName}) ngày ${formatVnDay(n.playedOn)}`;
 }
 
-/** "Lần khai {role} ({giá trị}) ngày {dd/mm}" — phần đầu chung của DM từ chối và huỷ duyệt. */
+/**
+ * "Lần khai {role} ({giá trị}) [ván {n} ]ngày {dd/mm}" — phần đầu chung của DM từ chối và huỷ duyệt; lần khai
+ * theo ván nêu số ván.
+ */
 function describeReport(report: ReviewableReport): string {
   return (
     `Lần khai ${report.role.nameVi} (${formatReportValue(report, report.role)}) ` +
+    (report.round ? `ván ${report.round.number} ` : '') +
     `ngày ${formatVnDay(dbToDateOnly(report.playedOn))}`
   );
 }
@@ -738,6 +833,7 @@ function toReportDto(
   const hiddenAs = r.accusation ? hidden.get(r.accusation.id) : undefined;
   const duplicate = hiddenAs !== undefined;
   // Mục trừ điểm do báo cáo không có phần cộng nào để nhân — luôn 1 (không hiện chip ×m).
+  // Lần khai theo ván: `playedOn` = ngày VN của buổi (`openRoundOf`) — PHẢI khớp hệ số `leaderboard.ts` lấy theo buổi.
   const multiplier = r.source === 'self' ? (multipliers.get(dbToDateOnly(r.playedOn)) ?? 1) : 1;
   const won = r.round ? roundWon(r.role.faction, r.round.winnerFaction, r.round.winners.some((w) => w.memberId === r.member.id)) : false;
   return {

@@ -168,7 +168,11 @@ test('report played Oct 31 approved Nov 2 counts for 2026-10', async () => {
   expect(hallRole(await getHall(ctx, '2026-11'), 'duck')).toMatchObject({ holder: null, previous: null });
 
   // Trận ngày 01/11 duyệt cùng lúc tính cho mùa 11.
-  await approved(b.id, { value: 2, playedOn: '2026-11-01' });
+  // (Khai theo ngày cho mùa 11 nay bị chặn — đây là lần khai có từ trước, ghi thẳng vào DB.)
+  const legacy = await testDb.statReport.create({
+    data: { memberId: b.id, roleId: duck.id, value: 2, playedOn: dateOnlyToDb('2026-11-01'), createdAt: ctx.now() },
+  });
+  await reviewReport(ctx, modR(), legacy.id, { approve: true });
   expect((await getRoleLeaderboard(ctx, duck.id, '2026-11')).map((x) => [x.memberId, x.score])).toEqual([[b.id, 2]]);
   expect((await getRoleLeaderboard(ctx, duck.id, '2026-10')).map((x) => [x.memberId, x.score])).toEqual([[a.id, 3]]);
   expect(notifier.announcements.at(-1)).toBe('👑 Bình đã hoá thân Vịt mùa 2026-11!');

@@ -299,7 +299,8 @@ async function roundCells(
       {
         winnerFaction: r.winnerFaction,
         winners: new Set(r.winners.map((w) => w.memberId)),
-        // Hệ số của ngày VN của buổi (= ngày chơi của lần khai theo ván).
+        // Hệ số của ngày VN của buổi (= ngày chơi của lần khai theo ván). PHẢI khớp `toReportDto` (reports.ts,
+        // lấy theo `playedOn`): `submitRoundReport` luôn ghi `played_on` = ngày VN của buổi của ván.
         multiplier: byDay.get(dateOnlyToDb(toVnDate(r.session.startsAt)).getTime()) ?? 1,
       },
     ]),

@@ -822,6 +822,19 @@ export interface RoundDto {
   reports: RoundReportDto[];
 }
 
+/**
+ * Body `POST /api/rounds/:id/reports` (khai theo ván, spec ván §5): như khai điểm nhưng không có
+ * `playedOn`/`sessionId` — server lấy theo buổi của ván. Trả về 201 `ReportDto` (có `round`). Sửa/xoá dùng
+ * `PATCH /api/reports/:id` (không đổi được ván, ngày, buổi).
+ */
+export interface RoundReportInput {
+  roleId: number;
+  value: number;
+  extraValue?: number;
+  penaltyValue?: number;
+  note?: string | null;
+}
+
 /** Trang buổi (`GET /api/sessions/:id/rounds`): buổi và các ván theo số tăng dần. */
 export interface SessionRoundsDto {
   session: { id: number; startsAt: string; modeName: string; status: SessionStatus };

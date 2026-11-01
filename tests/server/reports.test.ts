@@ -927,14 +927,19 @@ test('editing is not counted against the daily cap and follows the season of the
 
   // Đầu tháng: khai cho ngày cuối tháng trước tạo (và kiểm tra) mùa trước.
   setNow('2026-11-02T05:00:00Z'); // 12:00 ngày 02/11 VN: cửa sổ 30/10 → 02/11
-  const r = await submit({ playedOn: '2026-11-01' });
+  // Khai theo ngày cho mùa 11 nay bị chặn (khai theo ván): lần khai theo ngày mùa 11 có từ trước, ghi thẳng.
+  const legacyNov = () =>
+    testDb.statReport.create({ data: { memberId: member.id, roleId: duck.id, value: 3, playedOn: dateOnlyToDb('2026-11-01'), createdAt: ctx.now() } });
+  await ensureSeason(ctx, '2026-11');
+  const r0 = await legacyNov();
+  await updateOwnReport(ctx, member.id, r0.id, { value: 2 });
   expect((await testDb.season.findMany({ orderBy: { id: 'asc' } })).map((s) => s.id)).toEqual(['2026-10', '2026-11']);
   await testDb.season.deleteMany({ where: { id: '2026-10' } });
-  await updateOwnReport(ctx, member.id, r.id, { playedOn: '2026-10-31' });
+  await updateOwnReport(ctx, member.id, r0.id, { playedOn: '2026-10-31' });
   expect((await testDb.season.findMany({ orderBy: { id: 'asc' } })).map((s) => s.id)).toEqual(['2026-10', '2026-11']);
 
   // Mùa 10 chốt: không kéo lần khai ở mùa 11 về mùa 10 nữa, nhưng lần khai mùa 11 vẫn sửa được.
-  await updateOwnReport(ctx, member.id, r.id, { playedOn: '2026-11-01' });
+  const r = await legacyNov();
   await testDb.season.update({ where: { id: '2026-10' }, data: { closedAt: ctx.now() } });
   await expect(updateOwnReport(ctx, member.id, r.id, { playedOn: '2026-10-31' })).rejects.toMatchObject({ code: 'SEASON_CLOSED' });
   await expect(updateOwnReport(ctx, member.id, r.id, { value: 5 })).resolves.toMatchObject({ value: 5, playedOn: dateOnlyToDb('2026-11-01') });
