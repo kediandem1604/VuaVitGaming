@@ -10,9 +10,11 @@
     <!-- Chủ đề chung nhận từ server lần trước (lib/theme.ts) đặt trước khi vẽ để không nháy màu cũ. -->
     <script>
       try {
-        if (localStorage.getItem('ggd-theme') === 'halloween') {
-          document.documentElement.dataset.theme = 'halloween';
-          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#1A0F26');
+        var theme = localStorage.getItem('ggd-theme');
+        var colours = { halloween: '#1A0F26', christmas: '#0B241C' };
+        if (Object.prototype.hasOwnProperty.call(colours, theme)) {
+          document.documentElement.dataset.theme = theme;
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', colours[theme]);
         }
       } catch {}
     </script>

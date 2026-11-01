@@ -37,7 +37,8 @@ import { arriveNavigation, usePendingNavigation } from '../lib/navPending';
 import { Avatar } from './Avatar';
 import { DuckMark } from './DuckMark';
 import { MultiplierBanner } from './MultiplierBanner';
-import { ThemeToggle } from './HalloweenDecor';
+import { ChristmasLights } from './ChristmasDecor';
+import { ThemeToggle } from './ThemeDecor';
 import { PrefetchNavLink } from './PrefetchLink';
 import { Delayed } from './Skeleton';
 
@@ -190,6 +191,8 @@ export function Layout({ me, children }: LayoutProps) {
             </p>
           )}
         </div>
+        {/* Dây đèn nháy treo dưới mép thanh trên — chỉ hiện khi bật chủ đề Giáng sinh. */}
+        <ChristmasLights />
       </header>
 
       {/* Banner ngày nhân điểm (spec ngày nhân điểm §5): ngoài header dính để không chiếm chỗ khi cuộn. */}

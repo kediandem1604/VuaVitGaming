@@ -48,14 +48,14 @@ test('Quản trị appears in both navs for mod/admin only', () => {
   expect(screen.getAllByRole('link', { name: /Quản trị/ })).toHaveLength(2);
 });
 
-test('only admins get the Halloween toggle (it changes the theme for everyone)', () => {
+test('only admins get the theme toggle (it changes the theme for everyone)', () => {
   for (const accessLevel of ['member', 'mod'] as const) {
     renderLayout({ ...me, accessLevel });
-    expect(screen.queryByRole('button', { name: 'Chủ đề Halloween' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Chủ đề giao diện' })).not.toBeInTheDocument();
     cleanup();
   }
   renderLayout({ ...me, accessLevel: 'admin' });
-  expect(screen.getByRole('button', { name: 'Chủ đề Halloween' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Chủ đề giao diện' })).toBeInTheDocument();
 });
 
 test('the brand link shows the duck mark without changing its name', () => {

@@ -107,6 +107,7 @@ export function Character({ role, holderName, variant, size = 120, nameplate = t
       <svg viewBox="0 0 120 160" className="relative block h-full w-full overflow-visible" aria-hidden="true">
         {drawn && figure}
         {!empty && <Pumpkin />}
+        {!empty && <Gift />}
         {nameplate && <Nameplate text={text} muted={empty} />}
         {nameplate && dimmed && <PreviousTag />}
       </svg>
@@ -145,6 +146,18 @@ function Pumpkin() {
       <path d="M14 139.5 L14 154.5" stroke={PALETTE.ink} strokeWidth={1.2} opacity={0.4} />
       <path d="M9 144 L11.5 146 L9 147 Z M19 144 L16.5 146 L19 147 Z" fill="#3A1A00" />
       <path d="M8.5 149.5 Q14 154 19.5 149.5 L17 150.5 L15.5 149.6 L14 151 L12.5 149.6 L11 150.5 Z" fill="#3A1A00" />
+    </g>
+  );
+}
+
+/** Hộp quà thắt nơ cạnh chân trái — chỉ hiện khi bật chủ đề Giáng sinh (`xm-only`). */
+function Gift() {
+  return (
+    <g className="xm-only" data-part="gift">
+      <rect x="5" y="141" width="18" height="14" rx="1.5" fill="#D7263D" stroke={PALETTE.ink} strokeWidth={2.5} />
+      <rect x="3.5" y="137" width="21" height="5.5" rx="1.2" fill="#E8394F" stroke={PALETTE.ink} strokeWidth={2.2} />
+      <rect x="12.4" y="137.6" width="3.2" height="16.6" fill="#FFC94A" />
+      <path d="M14 137 C10 131 6 133 9 136.5 Z M14 137 C18 131 22 133 19 136.5 Z" fill="#FFC94A" stroke={PALETTE.ink} strokeWidth={1.4} strokeLinejoin="round" />
     </g>
   );
 }

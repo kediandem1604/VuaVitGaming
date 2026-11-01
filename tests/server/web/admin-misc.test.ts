@@ -315,12 +315,17 @@ test('everyone reads the shared theme; only admins change it', async () => {
   expect((await get('/api/theme', memberSid)).json<ThemeDto>()).toEqual({ theme: 'halloween' });
   expect((await get('/api/theme')).json<ThemeDto>()).toEqual({ theme: 'halloween' });
 
-  for (const body of [{ theme: 'christmas' }, { theme: 1 }, { theme: 'night', extra: 1 }, {}, undefined]) {
+  const christmas = await put('/api/admin/theme', adminSid, { theme: 'christmas' });
+  expect(christmas.statusCode).toBe(200);
+  expect(christmas.json<ThemeDto>()).toEqual({ theme: 'christmas' });
+  expect((await get('/api/theme', memberSid)).json<ThemeDto>()).toEqual({ theme: 'christmas' });
+
+  for (const body of [{ theme: 'tết' }, { theme: 1 }, { theme: 'night', extra: 1 }, {}, undefined]) {
     const bad = await put('/api/admin/theme', adminSid, body);
     expect(bad.statusCode, JSON.stringify(body)).toBe(400);
     expect(bad.json(), JSON.stringify(body)).toEqual(INVALID);
   }
-  expect((await get('/api/theme')).json<ThemeDto>()).toEqual({ theme: 'halloween' });
+  expect((await get('/api/theme')).json<ThemeDto>()).toEqual({ theme: 'christmas' });
 
   expect((await put('/api/admin/theme', adminSid, { theme: 'night' })).json<ThemeDto>()).toEqual({ theme: 'night' });
   expect((await get('/api/theme')).json<ThemeDto>()).toEqual({ theme: 'night' });

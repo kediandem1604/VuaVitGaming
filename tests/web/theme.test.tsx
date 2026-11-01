@@ -4,16 +4,20 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ReactNode } from 'react';
 import { afterEach, expect, test, vi } from 'vitest';
-import { HalloweenDecor, ThemeToggle } from '../../src/web/components/HalloweenDecor';
+import { ThemeDecor, ThemeToggle } from '../../src/web/components/ThemeDecor';
 import { RankAvatar } from '../../src/web/components/RankAvatar';
 import { contrastRatio } from '../../src/web/lib/palette';
 import { applyTheme, THEME_KEY } from '../../src/web/lib/theme';
 
 /**
- * Chủ đề Halloween chung: admin bật/tắt trên server, mọi máy theo `GET /api/theme`, đặt
- * `data-theme` của `<html>` và nhớ trong `localStorage` (cho lần vẽ đầu). Lớp trang trí chỉ có
- * khi bật, bộ màu Halloween giữ đủ tương phản như Sảnh đêm. Khung avatar Top 1-2-3.
+ * Chủ đề chung (Sảnh đêm, Halloween, Giáng sinh): admin đổi trên server bằng một nút xoay vòng,
+ * mọi máy theo `GET /api/theme`, đặt `data-theme` của `<html>` và nhớ trong `localStorage` (cho
+ * lần vẽ đầu). Lớp trang trí của mỗi chủ đề chỉ có khi chủ đề đó bật, bộ màu nào cũng giữ đủ
+ * tương phản như Sảnh đêm. Khung avatar Top 1-2-3.
  */
+
+/** Tên nút đổi chủ đề (một nút, xoay vòng ba chủ đề). */
+const TOGGLE = 'Chủ đề giao diện';
 
 const CSS = readFileSync(resolve(__dirname, '../../src/web/styles.css'), 'utf8');
 
@@ -33,28 +37,32 @@ afterEach(() => {
   localStorage.clear();
 });
 
-test('every page follows the theme the server says', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ theme: 'halloween' })));
-  render(withClient(<HalloweenDecor />));
-  expect(document.querySelector('.hw-decor')).toBeNull();
+test.each([
+  ['halloween', '.hw-decor', '.xm-decor'],
+  ['christmas', '.xm-decor', '.hw-decor'],
+] as const)('every page follows the server: %s shows only its own decor', async (theme, own, other) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ theme })));
+  render(withClient(<ThemeDecor />));
+  expect(document.querySelector(own)).toBeNull();
 
-  await waitFor(() => expect(document.documentElement.dataset.theme).toBe('halloween'));
+  await waitFor(() => expect(document.documentElement.dataset.theme).toBe(theme));
   expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe('/api/theme');
-  expect(localStorage.getItem(THEME_KEY)).toBe('halloween');
-  expect(document.querySelector('.hw-decor')).toHaveAttribute('aria-hidden', 'true');
+  expect(localStorage.getItem(THEME_KEY)).toBe(theme);
+  expect(document.querySelector(own)).toHaveAttribute('aria-hidden', 'true');
+  expect(document.querySelector(other)).toBeNull();
 });
 
 test('a network error keeps the theme the page already has', async () => {
   applyTheme('halloween');
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
-  render(withClient(<HalloweenDecor />));
+  render(withClient(<ThemeDecor />));
   await waitFor(() => expect(fetch).toHaveBeenCalled());
   await act(async () => new Promise((r) => setTimeout(r, 0)));
   expect(document.documentElement.dataset.theme).toBe('halloween');
   expect(document.querySelector('.hw-decor')).not.toBeNull();
 });
 
-test('the admin toggle switches the theme for everyone through the server', async () => {
+test('the admin toggle cycles Sảnh đêm → Halloween → Giáng sinh → Sảnh đêm for everyone through the server', async () => {
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
     init?.method === 'PUT' ? json(JSON.parse(String(init.body))) : json({ theme: 'night' }),
   );
@@ -63,13 +71,13 @@ test('the admin toggle switches the theme for everyone through the server', asyn
     withClient(
       <>
         <ThemeToggle />
-        <HalloweenDecor />
+        <ThemeDecor />
       </>,
     ),
   );
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/theme', expect.anything()));
-  const toggle = screen.getByRole('button', { name: 'Chủ đề Halloween' });
-  expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  const toggle = screen.getByRole('button', { name: TOGGLE });
+  expect(toggle.title).toMatch(/Halloween/);
 
   let resolvePut: () => void = () => undefined;
   const putDone = new Promise<void>((r) => (resolvePut = r));
@@ -80,47 +88,88 @@ test('the admin toggle switches the theme for everyone through the server', asyn
   fireEvent.click(toggle);
   // Đổi ngay trên máy admin, không chờ server trả lời.
   await waitFor(() => expect(document.documentElement.dataset.theme).toBe('halloween'));
-  expect(toggle).toHaveAttribute('aria-pressed', 'true');
   expect(toggle).toBeDisabled();
   resolvePut();
   await waitFor(() => expect(toggle).toBeEnabled());
-  const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT');
-  expect(put?.[0]).toBe('/api/admin/theme');
-  expect(JSON.parse(String(put?.[1]?.body))).toEqual({ theme: 'halloween' });
-  expect(localStorage.getItem(THEME_KEY)).toBe('halloween');
+  expect(document.querySelector('.hw-decor')).not.toBeNull();
+  expect(toggle.title).toMatch(/Giáng sinh/);
+
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle).toBeEnabled());
+  expect(document.documentElement.dataset.theme).toBe('christmas');
+  expect(document.querySelector('.xm-decor')).not.toBeNull();
+  expect(document.querySelector('.hw-decor')).toBeNull();
+  expect(localStorage.getItem(THEME_KEY)).toBe('christmas');
+  expect(toggle.title).toMatch(/Sảnh đêm/);
 
   fireEvent.click(toggle);
   await waitFor(() => expect(toggle).toBeEnabled());
   expect(document.documentElement.dataset.theme).toBeUndefined();
-  expect(document.querySelector('.hw-decor')).toBeNull();
+  expect(document.querySelector('.xm-decor')).toBeNull();
+
+  const sent = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+  expect(sent.map(([url]) => url)).toEqual(['/api/admin/theme', '/api/admin/theme', '/api/admin/theme']);
+  expect(sent.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+    { theme: 'halloween' },
+    { theme: 'christmas' },
+    { theme: 'night' },
+  ]);
+});
+
+test.each([
+  ['night', '#1B1F4A'],
+  ['halloween', '#1A0F26'],
+  ['christmas', '#0B241C'],
+] as const)('the mobile browser bar takes the %s background', (theme, colour) => {
+  document.head.innerHTML = '<meta name="theme-color" content="#000000" />';
+  applyTheme(theme);
+  expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', colour);
+  document.head.innerHTML = '';
 });
 
 test('a failed change goes back to the previous theme', async () => {
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
     init?.method === 'PUT'
       ? json({ error: { code: 'FORBIDDEN', message: 'Bạn không có quyền làm việc này' } }, 403)
-      : json({ theme: 'night' }),
+      : json({ theme: 'christmas' }),
   );
   vi.stubGlobal('fetch', fetchMock);
+  applyTheme('christmas');
   render(withClient(<ThemeToggle />));
-  const toggle = screen.getByRole('button', { name: 'Chủ đề Halloween' });
+  const toggle = screen.getByRole('button', { name: TOGGLE });
 
   fireEvent.click(toggle);
   await waitFor(() => expect(toggle).toBeEnabled());
-  expect(document.documentElement.dataset.theme).toBeUndefined();
-  expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(document.documentElement.dataset.theme).toBe('christmas');
+  expect(toggle.title).toMatch(/Sảnh đêm/);
 });
 
-test('index.html applies the saved theme before the first paint with the same storage key', () => {
+test.each([
+  ['halloween', 'halloween', '#1A0F26'],
+  ['christmas', 'christmas', '#0B241C'],
+  ['night', undefined, '#1B1F4A'],
+  ['tết', undefined, '#1B1F4A'],
+] as const)('index.html paints a saved "%s" theme before the first paint', (saved, dataTheme, colour) => {
   const html = readFileSync(resolve(__dirname, '../../src/web/index.html'), 'utf8');
-  expect(html).toContain(`localStorage.getItem('${THEME_KEY}') === 'halloween'`);
+  const inline = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  expect(inline, 'index.html thiếu đoạn script đặt chủ đề').toBeDefined();
+  document.head.innerHTML = '<meta name="theme-color" content="#1B1F4A" />';
+  localStorage.setItem(THEME_KEY, saved);
+
+  new Function(inline!)();
+
+  expect(document.documentElement.dataset.theme).toBe(dataTheme);
+  expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', colour);
+  document.head.innerHTML = '';
 });
 
-test('the Halloween palette keeps the contrast the night palette guarantees', () => {
-  const block = CSS.slice(CSS.indexOf(":root[data-theme='halloween'] {"));
+test.each(['halloween', 'christmas'])('the %s palette keeps the contrast the night palette guarantees', (theme) => {
+  const at = CSS.indexOf(`:root[data-theme='${theme}'] {`);
+  expect(at, `styles.css thiếu bộ màu ${theme}`).toBeGreaterThan(-1);
+  const block = CSS.slice(at, CSS.indexOf('}', at));
   const token = (name: string) => {
     const match = block.match(new RegExp(`--color-${name}:\\s*(#[0-9A-Fa-f]{6})`));
-    expect(match, `chủ đề Halloween thiếu --color-${name}`).not.toBeNull();
+    expect(match, `chủ đề ${theme} thiếu --color-${name}`).not.toBeNull();
     return match![1]!;
   };
   expect(contrastRatio('#FFFFFF', token('night-800'))).toBeGreaterThanOrEqual(4.5);

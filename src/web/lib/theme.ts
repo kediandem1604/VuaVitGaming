@@ -1,7 +1,8 @@
 /**
- * Chủ đề giao diện chung cho mọi người: `night` (Sảnh đêm, mặc định) hoặc `halloween`. Admin
- * chọn trên server (`PUT /api/admin/theme`); mọi máy đọc `GET /api/theme` (làm mới mỗi phút và
- * khi quay lại tab) rồi đặt `data-theme` của `<html>` — `styles.css` đổi bộ token màu theo đó.
+ * Chủ đề giao diện chung cho mọi người: `night` (Sảnh đêm, mặc định), `halloween` hoặc `christmas`.
+ * Admin chọn trên server (`PUT /api/admin/theme`, nút xoay vòng `THEME_CYCLE`); mọi máy đọc
+ * `GET /api/theme` (làm mới mỗi phút và khi quay lại tab) rồi đặt `data-theme` của `<html>`
+ * (bỏ trống với `night`) — `styles.css` đổi bộ token màu theo đó.
  *
  * Chủ đề nhận được lần trước được nhớ trong `localStorage`: `index.html` có một đoạn script nhỏ
  * đặt `data-theme` từ đó trước khi vẽ trang đầu (không nháy màu cũ), server trả về thì theo server.
@@ -17,8 +18,20 @@ export type Theme = ThemeName;
 /** Khoá trong `localStorage` — `index.html` đọc cùng khoá này. */
 export const THEME_KEY = 'ggd-theme';
 
-/** Màu thanh trình duyệt di động (`<meta name="theme-color">`) theo nền `night-900` của từng chủ đề. */
-const THEME_COLOR: Record<Theme, string> = { night: '#1B1F4A', halloween: '#1A0F26' };
+/**
+ * Màu thanh trình duyệt di động (`<meta name="theme-color">`) theo nền `night-900` của từng chủ đề.
+ * `index.html` chép lại hai màu có trang trí cho lần vẽ đầu.
+ */
+const THEME_COLOR: Record<Theme, string> = { night: '#1B1F4A', halloween: '#1A0F26', christmas: '#0B241C' };
+
+/** Thứ tự nút đổi chủ đề của admin: mỗi lần bấm sang chủ đề kế tiếp, hết vòng thì quay lại. */
+export const THEME_CYCLE: readonly Theme[] = ['night', 'halloween', 'christmas'];
+
+export const THEME_LABEL: Record<Theme, string> = { night: 'Sảnh đêm', halloween: 'Halloween', christmas: 'Giáng sinh' };
+
+export function nextTheme(theme: Theme): Theme {
+  return THEME_CYCLE[(THEME_CYCLE.indexOf(theme) + 1) % THEME_CYCLE.length] ?? 'night';
+}
 
 /** Admin đổi chủ đề thì các máy khác thấy trong vòng một phút (hoặc ngay khi quay lại tab). */
 const THEME_REFRESH_MS = 60_000;
@@ -33,13 +46,14 @@ export const themeQuery = queryOptions({
 const listeners = new Set<() => void>();
 
 function current(): Theme {
-  return document.documentElement.dataset.theme === 'halloween' ? 'halloween' : 'night';
+  const theme = document.documentElement.dataset.theme;
+  return theme === 'halloween' || theme === 'christmas' ? theme : 'night';
 }
 
 /** Đặt chủ đề cho trang này (không gửi lên server) và nhớ cho lần mở sau. */
 export function applyTheme(theme: Theme): void {
-  if (theme === 'halloween') document.documentElement.dataset.theme = 'halloween';
-  else delete document.documentElement.dataset.theme;
+  if (theme === 'night') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[theme]);
   try {
     localStorage.setItem(THEME_KEY, theme);

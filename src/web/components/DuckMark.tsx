@@ -1,7 +1,7 @@
 /**
  * Logo đầu ngỗng trắng kiểu game (spec §4.4) cạnh chữ "GGD Hub" ở thanh trên: đầu tròn
  * trắng viền `ink` đậm, mắt đen to có đốm sáng, mỏ cam `beak`. Mắt thỉnh thoảng chớp
- * (`goose-eyes` trong styles.css). Cùng hình với `public/favicon.svg` — sửa một bên thì
+ * (`goose-eyes` trong styles.css); đội mũ phù thuỷ khi Halloween, mũ Noel khi Giáng sinh. Cùng hình với `public/favicon.svg` — sửa một bên thì
  * sửa cả bên kia. Chỉ trang trí: tên link vẫn là chữ "GGD Hub".
  */
 
@@ -29,6 +29,12 @@ export function DuckMark({ className }: { className?: string }) {
         strokeWidth={1.6}
         strokeLinejoin="round"
       />
+      {/* Mũ Noel chỉ hiện khi bật chủ đề Giáng sinh (`xm-only`): chóp đỏ rủ sang phải, quả bông và vành trắng. */}
+      <g className="xm-only">
+        <path d="M7 6.5 C8 0 15 -4 21 -3.5 C26 -3 29.5 0 30 5 C27.5 2.5 25.5 2 24.5 6.5 Z" fill="#D7263D" stroke={PALETTE.ink} strokeWidth={1.6} strokeLinejoin="round" />
+        <circle cx="30" cy="6" r="2.6" fill={PALETTE.white} stroke={PALETTE.ink} strokeWidth={1.4} />
+        <rect x="4.5" y="5" width="23" height="4.6" rx="2.3" fill={PALETTE.white} stroke={PALETTE.ink} strokeWidth={1.6} />
+      </g>
       {/* Mũ phù thuỷ chỉ hiện khi bật chủ đề Halloween (`hw-only`). */}
       <g className="hw-only">
         <path d="M5 8 C10 6 14 0 22 -6 C20 -1 21 3 25 8 Z" fill="#432A5C" stroke={PALETTE.ink} strokeWidth={1.6} strokeLinejoin="round" />

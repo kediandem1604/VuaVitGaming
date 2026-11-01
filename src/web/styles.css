@@ -100,6 +100,11 @@
     --dur-aura: 2.4s;
     --dur-bat: 26s;
     --dur-float: 5s;
+    /* Mùa Giáng sinh: tuyết rơi, xe trượt bay ngang, đèn nháy, sao toả sáng. */
+    --dur-snow: 16s;
+    --dur-sleigh: 38s;
+    --dur-lights: 1.8s;
+    --dur-star: 4s;
 
     /* Hai quầng sáng cực quang cố định sau nội dung (`body::before`); chủ đề Halloween đổi màu. */
     --aurora-a: rgb(118 128 212 / 0.22);
@@ -127,6 +132,27 @@
     --aurora-a: rgb(255 122 26 / 0.2);
     --aurora-b: rgb(142 78 198 / 0.24);
     --aurora-c: rgb(124 242 154 / 0.07);
+  }
+
+  /*
+   * Chủ đề Giáng sinh (nút chủ đề bấm thêm một lần sau Halloween): rừng thông đêm tuyết — nền
+   * xanh thông, chữ trắng tuyết ngả xanh, điểm nhấn `gold` vàng ánh nến; đỏ Noel chỉ dùng ở trang
+   * trí để không lẫn với màu phe Vịt. Tương phản: chữ `night-300` trên `night-800` ≈ 9.9:1,
+   * `gold` trên `night-800` ≈ 8.7:1, `gold-ink` trên `gold` ≈ 11:1, viền `night-600` ≥ 5.5:1.
+   */
+  :root[data-theme='christmas'] {
+    --color-night-950: #071A13;
+    --color-night-900: #0B241C;
+    --color-night-800: #12352A;
+    --color-night-700: #1C4A3A;
+    --color-night-600: #6FB592;
+    --color-night-300: #BFE6D2;
+    --color-night-200: #E6FFF1;
+    --color-gold: #FFC94A;
+    --color-gold-ink: #2B1A00;
+    --aurora-a: rgb(46 160 98 / 0.22);
+    --aurora-b: rgb(215 38 61 / 0.14);
+    --aurora-c: rgb(255 201 74 / 0.08);
   }
 
   /*
@@ -1004,16 +1030,17 @@
 }
 
 /*
- * Nút bật/tắt chủ đề Halloween ở thanh trên. Đang bật: nền cam `gold` (token đã đổi theo chủ đề),
+ * Nút đổi chủ đề ở thanh trên (xoay vòng Sảnh đêm → Halloween → Giáng sinh). Đang ở chủ đề có
+ * trang trí: nền `gold` (cam khi Halloween, vàng nến khi Giáng sinh — token đã đổi theo chủ đề),
  * icon lơ lửng nhè nhẹ.
  */
-.theme-toggle[aria-pressed='true'] {
+.theme-toggle:not([data-theme-on='night']) {
   background-color: var(--color-gold);
   color: var(--color-gold-ink);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .theme-toggle[aria-pressed='true'] svg {
+  .theme-toggle:not([data-theme-on='night']) svg {
     animation: float var(--dur-float) ease-in-out infinite;
   }
 }
@@ -1158,6 +1185,183 @@
 
   .hw-ghost-2 {
     animation-delay: calc(var(--dur-float) * -0.5);
+  }
+}
+
+/*
+ * Giáng sinh: phần chỉ hiện khi bật chủ đề (`xm-only`: mũ Noel trên logo, hộp quà cạnh nhân vật;
+ * `.xm-lights`: dây đèn dưới thanh trên) và lớp trang trí nền cố định (`ChristmasDecor`): sao
+ * sáng, tuyết rơi, xe trượt tuyết, người tuyết và cây thông mờ — sau nội dung, không bắt sự kiện
+ * trỏ, `contain: strict`. Không chạy hoạt ảnh thì tuyết nằm rải rác ở chỗ đứng (`--x`, `--y`).
+ */
+.xm-only {
+  display: none;
+}
+
+:root[data-theme='christmas'] .xm-only {
+  display: inline;
+}
+
+.xm-lights {
+  display: none;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  width: 100%;
+  height: 30px;
+  pointer-events: none;
+}
+
+:root[data-theme='christmas'] .xm-lights {
+  display: block;
+}
+
+.xm-decor {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.xm-star {
+  position: absolute;
+  top: 80px;
+  right: 6vw;
+  width: clamp(56px, 9vw, 110px);
+  filter: drop-shadow(0 0 24px rgb(255 214 120 / 0.55));
+}
+
+.xm-flake {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  opacity: 0.8;
+}
+
+.xm-flake-sway {
+  display: block;
+}
+
+.xm-sleigh {
+  position: absolute;
+  top: 16%;
+  left: 0;
+  width: clamp(96px, 13vw, 160px);
+  opacity: 0.7;
+  transform: translateX(-220px);
+}
+
+.xm-snowman {
+  position: absolute;
+  bottom: 12%;
+  left: 3vw;
+  width: clamp(40px, 5.5vw, 68px);
+  opacity: 0.3;
+}
+
+.xm-tree {
+  position: absolute;
+  bottom: 10%;
+  right: 4vw;
+  width: clamp(48px, 7vw, 86px);
+  opacity: 0.32;
+}
+
+@keyframes xm-fall {
+  from {
+    transform: translateY(calc(-1 * var(--y) - 30px));
+  }
+  to {
+    transform: translateY(calc(100vh - var(--y) + 30px));
+  }
+}
+
+@keyframes xm-sway {
+  from {
+    transform: translateX(-10px);
+  }
+  to {
+    transform: translateX(10px);
+  }
+}
+
+@keyframes xm-sleigh {
+  0% {
+    transform: translate(-220px, 0);
+  }
+  30% {
+    transform: translate(30vw, -26px);
+  }
+  60%,
+  100% {
+    transform: translate(calc(100vw + 40px), -50px);
+  }
+}
+
+@keyframes xm-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes xm-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .xm-flake {
+    animation: xm-fall calc(var(--dur-snow) * var(--speed, 1)) linear infinite;
+    animation-delay: calc(var(--dur-snow) * var(--speed, 1) * var(--phase, 0) * -1);
+  }
+
+  .xm-flake-sway {
+    animation: xm-sway calc(var(--dur-snow) / 5) ease-in-out infinite alternate;
+    animation-delay: calc(var(--dur-snow) * var(--phase, 0) * -1);
+  }
+
+  .xm-sleigh {
+    animation: xm-sleigh var(--dur-sleigh) linear infinite;
+    animation-delay: calc(var(--dur-sleigh) * -0.08);
+  }
+
+  .xm-star,
+  .xm-tree-star {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: xm-pulse var(--dur-star) ease-in-out infinite;
+  }
+
+  .xm-bulb,
+  .xm-nose {
+    animation: xm-twinkle var(--dur-lights) ease-in-out infinite;
+  }
+
+  .xm-bulb-1 {
+    animation-delay: calc(var(--dur-lights) * -0.25);
+  }
+
+  .xm-bulb-2 {
+    animation-delay: calc(var(--dur-lights) * -0.5);
+  }
+
+  .xm-bulb-3 {
+    animation-delay: calc(var(--dur-lights) * -0.75);
+  }
+
+  .xm-snowman {
+    animation: float var(--dur-float) ease-in-out infinite;
   }
 }
 

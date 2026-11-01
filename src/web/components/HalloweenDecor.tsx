@@ -1,32 +1,10 @@
 /**
- * Nút bật/tắt chủ đề Halloween cho mọi người (thanh trên, chỉ admin thấy) và lớp trang trí nền
- * khi chủ đề đang bật: trăng tròn, mạng nhện góc trái, bốn con dơi bay ngang, hai bóng ma lơ
- * lửng. `HalloweenDecor` nằm ở gốc ứng dụng nên cũng là nơi theo chủ đề của server. Lớp trang
- * trí cố định sau nội dung, chỉ chạy `transform` (styles.css, `.hw-*`), đứng yên khi máy giảm
- * chuyển động và chỉ được gắn vào DOM khi chủ đề bật — tắt chủ đề là không còn hoạt ảnh nào chạy.
+ * Lớp trang trí nền của chủ đề Halloween: trăng tròn, mạng nhện góc trái, bốn con dơi bay ngang,
+ * hai bóng ma lơ lửng. `ThemeDecor` chỉ gắn nó khi chủ đề Halloween bật. Cố định sau nội dung,
+ * chỉ chạy `transform` (styles.css, `.hw-*`), đứng yên khi máy giảm chuyển động.
  */
 
-import { Ghost } from 'lucide-react';
 import { cx } from '../lib/cx';
-import { useSetSharedTheme, useTheme, useThemeSync } from '../lib/theme';
-
-export function ThemeToggle({ className }: { className?: string }) {
-  const on = useTheme() === 'halloween';
-  const setShared = useSetSharedTheme();
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      title={on ? 'Tắt chủ đề Halloween cho mọi người' : 'Bật chủ đề Halloween cho mọi người'}
-      disabled={setShared.isPending}
-      onClick={() => setShared.mutate(on ? 'night' : 'halloween')}
-      className={cx('theme-toggle btn-secondary px-2 py-1', className)}
-    >
-      <Ghost aria-hidden="true" className="size-4" strokeWidth={2.5} />
-      <span className="sr-only">Chủ đề Halloween</span>
-    </button>
-  );
-}
 
 const INK = '#0D0714';
 
@@ -57,8 +35,6 @@ function GhostShape({ className }: { className: string }) {
 }
 
 export function HalloweenDecor() {
-  useThemeSync();
-  if (useTheme() !== 'halloween') return null;
   return (
     <div className="hw-decor" aria-hidden="true">
       <svg viewBox="0 0 100 100" className="hw-moon">

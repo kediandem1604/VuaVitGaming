@@ -95,7 +95,7 @@ function parseDecimal(raw: string): number {
 }
 
 const THEME_KEY = 'theme';
-const themeSchema = z.enum(['night', 'halloween']);
+const themeSchema = z.enum(['night', 'halloween', 'christmas']);
 
 /** Chủ đề admin đã chọn cho mọi người; thiếu dòng hoặc giá trị lạ → `night`. */
 export async function getTheme(ctx: Ctx): Promise<ThemeName> {

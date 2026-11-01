@@ -125,8 +125,11 @@ test('the shared theme defaults to night and ignores unknown stored values', asy
   // Chủ đề không nằm trong cài đặt số.
   expect(await getSettings(ctx)).toEqual(DEFAULT_SETTINGS);
 
-  await expect(setTheme(ctx, 'christmas' as 'night')).rejects.toMatchObject({ code: 'VALIDATION' });
-  expect(await getTheme(ctx)).toBe('halloween');
+  expect(await setTheme(ctx, 'christmas')).toBe('christmas');
+  expect(await getTheme(ctx)).toBe('christmas');
+
+  await expect(setTheme(ctx, 'tết' as 'night')).rejects.toMatchObject({ code: 'VALIDATION' });
+  expect(await getTheme(ctx)).toBe('christmas');
 
   await testDb.appSetting.update({ where: { key: 'theme' }, data: { value: 'sửa tay' } });
   expect(await getTheme(ctx)).toBe('night');
