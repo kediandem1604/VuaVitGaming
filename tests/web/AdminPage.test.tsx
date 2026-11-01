@@ -17,7 +17,7 @@ const mod: MeDto = {
 };
 const admin: MeDto = { ...mod, id: 2, memberCode: 'GGD-0002', displayName: 'Admin Hai', accessLevel: 'admin' };
 
-const MOD_TABS = ['Buổi chơi', 'Duyệt điểm', 'Treo thưởng', 'Thành viên', 'Gửi lỗi'];
+const MOD_TABS = ['Buổi chơi', 'Duyệt điểm', 'Treo thưởng', 'Offline', 'Thành viên', 'Gửi lỗi'];
 const ADMIN_TABS = [...MOD_TABS, 'Hạng mục MVP', 'Role', 'Cài đặt'];
 
 const json = (status: number, body: unknown) =>

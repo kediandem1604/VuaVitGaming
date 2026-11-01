@@ -43,13 +43,17 @@ const noBounties: Handler = (_init, url) => {
   return json(200, { sessionId, open: true, bounties: [], myClaims: [] });
 };
 
+/** Sự kiện offline: test ở đây không tả gì thì không có sự kiện nào (xem `TodayOffline.test.tsx`). */
+const OFFLINE_KEY = 'GET /api/offline-events/upcoming';
+const noOffline: Handler = () => json(200, []);
+
 /** fetch giả định tuyến theo `METHOD path` (bỏ query string). */
 function stubFetch(routes: Record<string, Handler>) {
   const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const path = url.split('?')[0] ?? url;
     const key = `${init?.method ?? 'GET'} ${path}`;
-    const handler = routes[key] ?? (BOUNTIES_PATH.test(key) ? noBounties : undefined);
+    const handler = routes[key] ?? (BOUNTIES_PATH.test(key) ? noBounties : key === OFFLINE_KEY ? noOffline : undefined);
     if (!handler) throw new Error(`Không có tuyến giả cho ${key}`);
     return Promise.resolve(handler(init, url));
   });

@@ -5,7 +5,7 @@
  * Discord dựa vào cờ `discordDirty`).
  *
  * Việc hiện có: nhắc giờ, tự kết thúc buổi, đóng vote đến hạn, đăng/sửa bù tin buổi,
- * đăng/sửa tin treo thưởng (cờ `bountyDirty`), đăng bù tin vote, ngày nhân điểm (đăng bù tin tạo, nhắc 9:00 đúng ngày), mùa giải (nhắc mod ngày 3, chốt mùa 00:05 ngày 4, đăng bù bảng tổng
+ * đăng/sửa tin treo thưởng (cờ `bountyDirty`), đăng bù tin vote, ngày nhân điểm (đăng bù tin tạo, nhắc 9:00 đúng ngày), đăng bù tin sự kiện offline, mùa giải (nhắc mod ngày 3, chốt mùa 00:05 ngày 4, đăng bù bảng tổng
  * kết), huy hiệu (trao danh hiệu tháng đã chốt, đăng bù tổng kết), role Discord top 3 mỗi phe,
  * dọn phiên web hết hạn.
  */
@@ -17,6 +17,7 @@ import { runBadgeJobs } from '../modules/badges/jobs.js';
 import { syncDirtyBountyBoards } from '../modules/bounties/discord.js';
 import { runMultiplierJobs } from '../modules/multipliers/jobs.js';
 import { closeDueRounds, syncVotes } from '../modules/mvp/votes.js';
+import { runOfflineJobs } from '../modules/offline/jobs.js';
 import { runReminders } from '../modules/reminders/service.js';
 import { runSeasonJobs } from '../modules/seasons/service.js';
 import { autoEndSessions } from '../modules/sessions/end.js';
@@ -80,7 +81,7 @@ export async function cleanupWebSessions(ctx: Ctx): Promise<number> {
 /**
  * Các việc của một lượt, theo thứ tự chạy: nhắc giờ trước (gấp nhất); tự kết thúc buổi
  * và đóng vote (đổi trạng thái, tự đăng Discord); rồi đăng bù tin buổi, tin treo thưởng, tin vote và
- * kết quả vote (gom cả những gì hai việc trước không đăng được); ngày nhân điểm; việc mùa giải (chỉ có
+ * kết quả vote (gom cả những gì hai việc trước không đăng được); ngày nhân điểm; sự kiện offline; việc mùa giải (chỉ có
  * gì để làm quanh ngày 3–4 hằng tháng) rồi huy hiệu ngay sau (tháng vừa chốt được trao
  * danh hiệu trong cùng lượt); gắn/gỡ role top mỗi phe; cuối cùng dọn dẹp.
  */
@@ -93,6 +94,7 @@ export function defaultJobs(): Job[] {
     { name: 'bounty-sync', run: syncDirtyBountyBoards },
     { name: 'vote-sync', run: syncVotes },
     { name: 'multiplier-days', run: runMultiplierJobs },
+    { name: 'offline-events', run: runOfflineJobs },
     { name: 'season', run: runSeasonJobs },
     { name: 'badges', run: runBadgeJobs },
     { name: 'rank-roles', run: syncRankRoles },

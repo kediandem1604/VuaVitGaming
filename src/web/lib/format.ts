@@ -150,3 +150,16 @@ export function addDaysIso(iso: string, n: number): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${String(shifted.getUTCFullYear()).padStart(4, '0')}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
 }
+
+/** `Thứ Bảy, 24/10 lúc 18:30` (giờ VN) của một mốc ISO 8601 (UTC) — thời gian sự kiện offline. */
+export function formatDayTimeLabel(iso: string): string {
+  return `${formatDayLabel(new Date(iso))} lúc ${formatTime(iso)}`;
+}
+
+/**
+ * Giờ VN `YYYY-MM-DDTHH:mm` (giá trị của ô `datetime-local`) của một mốc ISO 8601 (UTC) — để điền
+ * sẵn form sửa; server nhận lại đúng dạng này và tự đổi sang UTC.
+ */
+export function vnDateTimeInputValue(iso: string): string {
+  return `${vnTodayIso(new Date(iso))}T${formatTime(iso)}`;
+}

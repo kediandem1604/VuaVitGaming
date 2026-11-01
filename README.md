@@ -555,6 +555,10 @@ Mẫu đầy đủ ở `.env.example`. Tất cả đều **bắt buộc** trừ 
 
 Admin đặt ở **Quản trị → Cài đặt → Ngày nhân điểm**: chọn ngày (hôm nay hoặc sau này), hệ số **×2–×5** và lời nhắn (không bắt buộc, tối đa 100 ký tự); ngày chưa qua sửa/xoá được, ngày đã qua của mùa hiện ra mờ và bị khoá. Lần khai có **ngày chơi** là ngày đó được nhân **chỉ phần điểm cộng** — điểm trừ (chỉ số phạt, bị báo cáo), +1 báo cáo đúng và treo thưởng giữ nguyên — ở mọi bảng điểm mùa; đổi hệ số thì điểm tính lại theo. Mọi người thấy **banner** vàng cam dưới thanh điều hướng (hôm nay / ngày mai / ngày xa hơn, bấm ✕ để ẩn trên máy mình), dòng gợi ý ở form Khai điểm và chip `×m` cạnh lần khai; bot đăng tin vào `#thông-báo` khi tạo, sửa, xoá và nhắc lại lúc **9:00** đúng ngày.
 
+### Tổ chức offline
+
+Mod và admin tạo buổi gặp mặt ở **Quản trị → Offline**: tên, thời gian (giờ Việt Nam), địa điểm, mô tả và hạn vote (không bắt buộc, không sau giờ sự kiện); mỗi dòng có Sửa, **Đóng vote**/**Mở lại** và Xoá. Bot đăng tin vào `#thông-báo` kèm link web (lỗi Discord thì bộ hẹn giờ đăng bù khi sự kiện chưa diễn ra). Trên trang **Hôm nay**, ngay dưới các buổi chơi, mỗi sự kiện chưa diễn ra có thẻ **"🎉 Offline"** với hai nút **Mình đi được** / **Không đi được** (bấm nút kia để đổi), số người đi được và hàng avatar — bấm số để xem tên cả hai nhóm. Hết hạn vote (không đặt hạn thì tới giờ sự kiện) hoặc đã đóng vote thì thẻ ghi "Đã chốt danh sách".
+
 ### Cài đặt (admin)
 
 - **Quản trị → Cài đặt**: thời gian mở vote (1–72 giờ, mặc định 12), tự kết thúc buổi sau (1–24 giờ, mặc định 4), nhắc trước (5–120 phút, mặc định 15). Cuối tab là mục **Chế độ chơi**: sửa tên tiếng Việt của từng chế độ (tên Việt của dữ liệu mẫu chưa được xác minh hết) và bật/tắt — chế độ tắt không còn trong form tạo buổi, hạng mục và role; buổi cũ giữ nguyên.

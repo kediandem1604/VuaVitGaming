@@ -29,6 +29,7 @@ import { badgeRoutes } from './routes/badges.js';
 import { meRoutes } from './routes/me.js';
 import { multiplierRoutes } from './routes/multipliers.js';
 import { mvpRoutes } from './routes/mvp.js';
+import { offlineRoutes } from './routes/offline.js';
 import { ROLE_IMAGE_TYPES, ROLE_IMAGE_UPLOAD_ROUTE, roleRoutes } from './routes/roles.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { HIGHLIGHT_TYPES, HIGHLIGHT_UPLOAD_ROUTE, statsRoutes } from './routes/stats.js';
@@ -92,6 +93,7 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(bountyRoutes);
   await app.register(accusationRoutes);
   await app.register(multiplierRoutes);
+  await app.register(offlineRoutes);
 
   const webDistDir = deps.webDistDir;
   if (webDistDir !== undefined) {

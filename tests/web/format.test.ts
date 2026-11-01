@@ -5,11 +5,13 @@ import {
   formatDateLabel,
   formatDayLabel,
   formatDayMonth,
+  formatDayTimeLabel,
   formatSeasonLabel,
   formatTime,
   isIsoDate,
   vnMonthOf,
   vnTodayIso,
+  vnDateTimeInputValue,
 } from '../../src/web/lib/format';
 
 test('formatTime renders the Vietnam wall clock as HH:mm', () => {
@@ -102,4 +104,12 @@ test('isIsoDate accepts only real calendar days in YYYY-MM-DD form', () => {
   for (const ok of ['2026-10-22', '2024-02-29', '2026-12-31', '2026-01-01']) expect(isIsoDate(ok), ok).toBe(true);
   for (const bad of ['2026-13-45', '2026-02-30', '2025-02-29', '2026-00-10', '2026-10-32', '2026-1-5', 'hom-qua', '', '2026-10-22T00:00'])
     expect(isIsoDate(bad), bad).toBe(false);
+});
+
+test('offline event times: label and datetime-local value in VN time, across midnight', () => {
+  expect(formatDayTimeLabel('2026-10-24T11:30:00.000Z')).toBe('Thứ Bảy, 24/10 lúc 18:30');
+  // 17:30Z ngày 31/10 đã là 00:30 ngày 1/11 ở Việt Nam.
+  expect(formatDayTimeLabel('2026-10-31T17:30:00.000Z')).toBe('Chủ Nhật, 01/11 lúc 00:30');
+  expect(vnDateTimeInputValue('2026-10-31T17:30:00.000Z')).toBe('2026-11-01T00:30');
+  expect(vnDateTimeInputValue('2026-10-24T05:00:00.000Z')).toBe('2026-10-24T12:00');
 });

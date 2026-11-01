@@ -152,6 +152,8 @@ model Member {
   bountyClaimsReviewed BountyClaim[] @relation("BountyClaimReviewer")
   bountyClaimsRevoked  BountyClaim[] @relation("BountyClaimRevoker")
   multiplierDays       ScoreMultiplierDay[]
+  offlineEventsCreated OfflineEvent[] @relation("OfflineEventCreator")
+  offlineVotes         OfflineVote[]
 
   @@map("members")
 }
@@ -619,4 +621,41 @@ model SchedulerLease {
   expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
 
   @@map("scheduler_lease")
+}
+
+/// Tổ chức offline (spec offline): một buổi gặp mặt ngoài đời; thành viên vote đi được / không đi được.
+/// `announcedAt` = đã đăng tin tạo lên #thông-báo (NULL → bộ hẹn giờ đăng bù khi sự kiện chưa diễn ra).
+model OfflineEvent {
+  id           Int       @id @default(autoincrement())
+  title        String
+  startsAt     DateTime  @map("starts_at") @db.Timestamptz(3)
+  place        String
+  description  String?
+  voteDeadline DateTime? @map("vote_deadline") @db.Timestamptz(3)
+  closed       Boolean   @default(false)
+  announcedAt  DateTime? @map("announced_at") @db.Timestamptz(3)
+  createdById  Int       @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdBy Member        @relation("OfflineEventCreator", fields: [createdById], references: [id])
+  votes     OfflineVote[]
+
+  @@index([startsAt])
+  @@map("offline_events")
+}
+
+/// Vote của một thành viên cho một sự kiện offline (mỗi người một dòng; đổi ý thì sửa `going`).
+model OfflineVote {
+  eventId   Int      @map("event_id")
+  memberId  Int      @map("member_id")
+  going     Boolean
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  event  OfflineEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  member Member       @relation(fields: [memberId], references: [id])
+
+  @@id([eventId, memberId])
+  @@index([memberId])
+  @@map("offline_votes")
 }

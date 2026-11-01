@@ -19,22 +19,27 @@
  * Điểm danh: cập nhật lạc quan (ghế đổi ngay khi bấm, xem `TodaySession`), rồi thay đúng
  * buổi đó trong cache bằng DTO trả về; lỗi thì trả lại như cũ, hiện thông báo ngay dưới thẻ
  * và tải lại danh sách để thẻ phản ánh trạng thái thật (đã đủ người, đã huỷ…).
+ *
+ * Tổ chức offline (spec offline): ngay dưới phần buổi chơi, mỗi sự kiện chưa diễn ra một thẻ
+ * `OfflineCard` (thứ tự của server — gần nhất trước). Không có sự kiện hay hỏi lỗi thì không vẽ gì
+ * (phần phụ). Vote cập nhật lạc quan như điểm danh; lỗi thì trả lại, hiện lời nhắn dưới thẻ và tải lại.
  */
 
 import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Users } from 'lucide-react';
-import type { BountyClaimDto, HallOfDayDto, MeDto, SessionBountiesDto, SessionDto } from '../../shared/api-types';
+import type { BountyClaimDto, HallOfDayDto, MeDto, OfflineEventDto, SessionBountiesDto, SessionDto } from '../../shared/api-types';
 import { apiGet, apiSend, errorMessage } from '../api';
 import { BountyCard, hasBountyRows } from '../components/BountyCard';
 import { DailyHall } from '../components/DailyHall';
 import { EmptyState } from '../components/EmptyState';
+import { OfflineCard, applyMyVote } from '../components/OfflineCard';
 import { QueryState } from '../components/QueryState';
 import { SessionCard } from '../components/SessionCard';
 import { SkeletonCards } from '../components/Skeleton';
 import { useCurrentMember } from '../hooks/useMe';
 import { formatDayLabel, formatDayMonth } from '../lib/format';
 import { mvpDatesQuery, sessionBountiesQuery } from '../lib/queries';
-import { MY_BOUNTY_CLAIMS_KEY, PENDING_BOUNTY_CLAIMS_KEY } from '../lib/queryKeys';
+import { MY_BOUNTY_CLAIMS_KEY, OFFLINE_UPCOMING_KEY, PENDING_BOUNTY_CLAIMS_KEY } from '../lib/queryKeys';
 import { reminderChannels, type ReminderChannels } from '../lib/reminders';
 
 export const SESSIONS_TODAY_KEY = ['sessions', 'today'] as const;
@@ -78,9 +83,53 @@ export function TodayPage() {
         </QueryState>
       </section>
 
+      <OfflineSection />
+
       <HallSection hall={hall} />
     </div>
   );
+}
+
+/** Các thẻ sự kiện offline sắp tới; chưa tải xong, lỗi hay không có sự kiện → không vẽ gì. */
+function OfflineSection() {
+  const events = useQuery({ queryKey: OFFLINE_UPCOMING_KEY, queryFn: () => apiGet<OfflineEventDto[]>('/api/offline-events/upcoming') });
+  if (!events.data || events.data.length === 0) return null;
+  return (
+    <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+      {events.data.map((event) => (
+        <TodayOffline key={event.id} event={event} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Một thẻ offline kèm mutation vote riêng. Lạc quan: bấm là nút và số người đổi ngay trong cache (sau
+ * khi huỷ các lần tải đang chạy); server trả về thì thay đúng sự kiện đó bằng DTO thật; lỗi (hết hạn,
+ * đã đóng, đã xoá) thì trả lại bản chụp, hiện lời nhắn dưới thẻ và tải lại danh sách.
+ */
+function TodayOffline({ event }: { event: OfflineEventDto }) {
+  const queryClient = useQueryClient();
+  const me = useCurrentMember();
+  const vote = useMutation({
+    mutationFn: (going: boolean) => apiSend<OfflineEventDto>('PUT', `/api/offline-events/${event.id}/vote`, { going }),
+    onMutate: async (going) => {
+      await queryClient.cancelQueries({ queryKey: OFFLINE_UPCOMING_KEY });
+      const previous = queryClient.getQueryData<OfflineEventDto[]>(OFFLINE_UPCOMING_KEY);
+      queryClient.setQueryData<OfflineEventDto[]>(OFFLINE_UPCOMING_KEY, (current) =>
+        current?.map((item) => (item.id === event.id ? applyMyVote(item, me, going) : item)),
+      );
+      return { previous };
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<OfflineEventDto[]>(OFFLINE_UPCOMING_KEY, (current) => current?.map((item) => (item.id === updated.id ? updated : item)));
+    },
+    onError: (_error, _going, context) => {
+      if (context?.previous) queryClient.setQueryData(OFFLINE_UPCOMING_KEY, context.previous);
+      void queryClient.invalidateQueries({ queryKey: OFFLINE_UPCOMING_KEY });
+    },
+  });
+  return <OfflineCard event={event} onVote={(going) => vote.mutate(going)} pending={vote.isPending} error={vote.isError ? errorMessage(vote.error) : null} />;
 }
 
 /**

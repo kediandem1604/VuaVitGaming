@@ -39,7 +39,8 @@ export type ErrorCode =
   | 'BOUNTY_ALREADY_CLAIMED'
   | 'MULTIPLIER_DAY_TAKEN'
   | 'MULTIPLIER_DAY_PAST'
-  | 'MULTIPLIER_DAY_LOCKED';
+  | 'MULTIPLIER_DAY_LOCKED'
+  | 'OFFLINE_VOTE_CLOSED';
 
 const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   NOT_FOUND: { status: 404, message: 'Không tìm thấy' },
@@ -87,6 +88,8 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   MULTIPLIER_DAY_TAKEN: { status: 409, message: 'Ngày này đã có hệ số nhân' },
   MULTIPLIER_DAY_PAST: { status: 400, message: 'Chỉ đặt được cho hôm nay hoặc sau này' },
   MULTIPLIER_DAY_LOCKED: { status: 409, message: 'Ngày đã qua không sửa/xoá được' },
+  // Tổ chức offline (spec offline) — đã đóng vote, quá hạn vote, hoặc sự kiện đã bắt đầu.
+  OFFLINE_VOTE_CLOSED: { status: 409, message: 'Đã hết hạn vote' },
 };
 
 export class AppError extends Error {

@@ -36,3 +36,7 @@ export const MY_ACCUSATIONS_KEY = ['accusations', 'mine'] as const;
 export const PENDING_ACCUSATIONS_KEY = ['admin', 'accusations', 'pending'] as const;
 /** Báo cáo người chơi đã duyệt trong mục "Đã duyệt gần đây" của tab Duyệt điểm. */
 export const APPROVED_ACCUSATIONS_KEY = ['admin', 'accusations', 'approved'] as const;
+/** Sự kiện offline sắp tới (thẻ ở trang Hôm nay) — tab Quản trị → Offline làm mới sau khi thêm/sửa/xoá. */
+export const OFFLINE_UPCOMING_KEY = ['offline-events', 'upcoming'] as const;
+/** Danh sách sự kiện của tab Quản trị → Offline. */
+export const ADMIN_OFFLINE_EVENTS_KEY = ['admin', 'offline-events'] as const;

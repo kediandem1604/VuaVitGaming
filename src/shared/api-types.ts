@@ -709,3 +709,65 @@ export interface MultiplierDayInput {
 
 /** Body `PATCH /api/admin/multiplier-days/:id`: chỉ các trường được gửi. */
 export type MultiplierDayPatch = Partial<MultiplierDayInput>;
+// ---------------------------------------------------------------------------
+// Tổ chức offline (spec offline)
+// ---------------------------------------------------------------------------
+
+/** Một người đã vote cho sự kiện offline (avatar + tên). */
+export interface OfflinePersonDto {
+  memberId: number;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+/**
+ * Một sự kiện offline cho trang Hôm nay (`GET /api/offline-events/upcoming`, `PUT …/:id/vote`).
+ * `startsAt`/`voteDeadline` là ISO 8601 (UTC). `open` = còn vote được lúc này: chưa `closed` và chưa
+ * tới hạn (hạn vote; không đặt hạn thì giờ sự kiện). `going`/`notGoing` theo thứ tự vote; `myVote`
+ * là vote của người đang xem (`null` = chưa vote).
+ */
+export interface OfflineEventDto {
+  id: number;
+  title: string;
+  startsAt: string;
+  place: string;
+  description: string | null;
+  voteDeadline: string | null;
+  closed: boolean;
+  open: boolean;
+  going: OfflinePersonDto[];
+  notGoing: OfflinePersonDto[];
+  myVote: boolean | null;
+}
+
+/**
+ * Một dòng của `GET /api/admin/offline-events` (và kết quả POST/PATCH): `past` = diễn ra trước hôm
+ * nay (giờ VN); hai số đếm vote.
+ */
+export interface AdminOfflineEventDto {
+  id: number;
+  title: string;
+  startsAt: string;
+  place: string;
+  description: string | null;
+  voteDeadline: string | null;
+  closed: boolean;
+  past: boolean;
+  goingCount: number;
+  notGoingCount: number;
+}
+
+/**
+ * Body `POST /api/admin/offline-events`. `startsAt`/`voteDeadline` là giờ VN dạng `YYYY-MM-DDTHH:mm`
+ * (đúng giá trị của ô `datetime-local`) — server đổi sang UTC. Mô tả/hạn vote rỗng → `null`.
+ */
+export interface OfflineEventInput {
+  title: string;
+  startsAt: string;
+  place: string;
+  description?: string | null;
+  voteDeadline?: string | null;
+}
+
+/** Body `PATCH /api/admin/offline-events/:id`: chỉ các trường được gửi; `closed` để Đóng vote / Mở lại. */
+export type OfflineEventPatch = Partial<OfflineEventInput> & { closed?: boolean };
