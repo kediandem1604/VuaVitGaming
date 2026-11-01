@@ -40,7 +40,8 @@ export type ErrorCode =
   | 'MULTIPLIER_DAY_TAKEN'
   | 'MULTIPLIER_DAY_PAST'
   | 'MULTIPLIER_DAY_LOCKED'
-  | 'OFFLINE_VOTE_CLOSED';
+  | 'OFFLINE_VOTE_CLOSED'
+  | 'ROUND_HAS_REPORTS';
 
 const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   NOT_FOUND: { status: 404, message: 'Không tìm thấy' },
@@ -90,6 +91,8 @@ const DEFAULTS: Record<ErrorCode, { status: number; message: string }> = {
   MULTIPLIER_DAY_LOCKED: { status: 409, message: 'Ngày đã qua không sửa/xoá được' },
   // Tổ chức offline (spec offline) — đã đóng vote, quá hạn vote, hoặc sự kiện đã bắt đầu.
   OFFLINE_VOTE_CLOSED: { status: 409, message: 'Đã hết hạn vote' },
+  // Ván đấu (spec ván §4): còn lần khai chờ duyệt/đã duyệt thì không xoá được ván.
+  ROUND_HAS_REPORTS: { status: 409, message: 'Ván đã có lần khai — không xoá được' },
 };
 
 export class AppError extends Error {

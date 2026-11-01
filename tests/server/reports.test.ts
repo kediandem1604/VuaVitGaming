@@ -111,6 +111,7 @@ test('submit stores a pending report with the clock time and ensures the season'
     createdAt: new Date(NOW), // từ đồng hồ của ctx, không phải giờ thật
     highlightChannelId: null,
     highlightMessageId: null,
+    roundId: null,
   });
   expect(await reportRow(r.id)).toEqual(r);
 
@@ -237,6 +238,7 @@ test('an extra-metric report stores extraValue and the DTO carries points and th
     accusationDuplicate: false,
     accusationWaitingFor: null,
     penaltyOf: null,
+    round: null,
   });
 
   // Không gửi extraValue → 0; chỉ chỉ số phụ cũng được (0 + 1 × 3).
@@ -979,6 +981,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       accusationDuplicate: false,
       accusationWaitingFor: null,
       penaltyOf: null,
+      round: null,
     },
     {
       id: r2.id,
@@ -1002,6 +1005,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       accusationDuplicate: false,
       accusationWaitingFor: null,
       penaltyOf: null,
+      round: null,
     },
     {
       id: r1.id,
@@ -1025,6 +1029,7 @@ test('listMyReports: newest first, own reports only, limited', async () => {
       accusationDuplicate: false,
       accusationWaitingFor: null,
       penaltyOf: null,
+      round: null,
     },
   ];
   expect(list).toEqual(expected);
@@ -1107,6 +1112,7 @@ test('listPendingReports: oldest first across members, pending only', async () =
       accusationDuplicate: false,
       accusationWaitingFor: null,
       penaltyOf: null,
+      round: null,
     },
   ]);
 

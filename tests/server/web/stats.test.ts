@@ -274,6 +274,7 @@ test('submit returns the created report; mine lists newest first; own pending re
     accusationDuplicate: false,
     accusationWaitingFor: null,
     penaltyOf: null,
+    round: null,
   });
 
   setNow('2026-10-22T12:30:00Z');
@@ -404,6 +405,7 @@ test('an extra-metric report over HTTP: extraValue in, points and role limits ou
     accusationDuplicate: false,
     accusationWaitingFor: null,
     penaltyOf: null,
+    round: null,
   });
   expect(await reportRow(dto.id)).toMatchObject({ value: 4, extraValue: 2 });
 

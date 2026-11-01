@@ -154,6 +154,8 @@ model Member {
   multiplierDays       ScoreMultiplierDay[]
   offlineEventsCreated OfflineEvent[] @relation("OfflineEventCreator")
   offlineVotes         OfflineVote[]
+  roundsCreated        GameRound[]       @relation("GameRoundCreator")
+  roundWins            GameRoundWinner[]
 
   @@map("members")
 }
@@ -202,6 +204,9 @@ model GameSession {
   bountyChannelId  String?       @map("bounty_channel_id")
   bountyMessageId  String?       @map("bounty_message_id")
   bountyDirty      Boolean       @default(false) @map("bounty_dirty")
+  /// Số ván lớn nhất từng cấp cho buổi (spec ván §4): ván mới lấy `round_seq + 1` — xoá ván cuối thì số
+  /// đó không bị cấp lại, xoá ván giữa thì các ván khác giữ số.
+  roundSeq         Int           @default(0) @map("round_seq")
 
   mode          GameMode          @relation(fields: [modeId], references: [id])
   createdBy     Member            @relation("SessionCreator", fields: [createdById], references: [id])
@@ -212,6 +217,7 @@ model GameSession {
   bounties      Bounty[]
   bountyClaims  BountyClaim[]
   accusations   PlayerAccusation[]
+  rounds        GameRound[]
 
   @@index([startsAt])
   @@map("game_sessions")
@@ -402,12 +408,17 @@ model StatReport {
   /// Tin Discord chứa highlight (kênh + id tin); luôn ghi/xoá cùng nhau, cả hai null = không có highlight.
   highlightChannelId String? @map("highlight_channel_id")
   highlightMessageId String? @map("highlight_message_id")
+  /// Ván của lần khai (spec ván §2): có `roundId` → điểm theo luật thắng/thua (spec ván §3). UNIQUE một
+  /// phần `(round_id, member_id) WHERE round_id IS NOT NULL AND source = 'self' AND status IN
+  /// ('pending','approved')` chỉ có trong migration (Prisma 6 không mô tả được index một phần).
+  roundId            Int?    @map("round_id")
 
   member     Member       @relation("ReportMember", fields: [memberId], references: [id])
   role       Role         @relation(fields: [roleId], references: [id])
   session    GameSession? @relation(fields: [sessionId], references: [id])
   reviewedBy Member?      @relation("ReportReviewer", fields: [reviewedById], references: [id])
   revokedBy  Member?      @relation("ReportRevoker", fields: [revokedById], references: [id])
+  round      GameRound?   @relation(fields: [roundId], references: [id], onDelete: Restrict)
   /// Báo cáo người chơi kèm lần khai này (của chính người khai), nếu có.
   accusation PlayerAccusation? @relation("AccusationReport")
   /// Báo cáo mà lần khai này là mục trừ điểm của nó (`source = accusation`).
@@ -415,6 +426,7 @@ model StatReport {
 
   @@index([roleId, status, playedOn])
   @@index([memberId, createdAt])
+  @@index([roundId])
   @@map("stat_reports")
 }
 
@@ -658,4 +670,41 @@ model OfflineVote {
   @@id([eventId, memberId])
   @@index([memberId])
   @@map("offline_votes")
+}
+
+/// Một ván trong buổi chơi (spec ván §2): ảnh kết quả do mod/admin up và phe thắng (NULL = chưa chọn).
+/// `number` cấp từ `game_sessions.round_seq`, UNIQUE trong buổi. Ảnh PNG/JPG/WebP ≤ 5 MB lưu thẳng trong
+/// DB; `imageUpdatedAt` đổi mỗi lần thay ảnh (ETag và tham số `?v=` của URL ảnh).
+model GameRound {
+  id             Int      @id @default(autoincrement())
+  sessionId      Int      @map("session_id")
+  number         Int
+  image          Bytes
+  imageMime      String   @map("image_mime")
+  imageUpdatedAt DateTime @map("image_updated_at") @db.Timestamptz(3)
+  winnerFaction  Faction? @map("winner_faction")
+  createdById    Int      @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  session     GameSession       @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  createdBy   Member            @relation("GameRoundCreator", fields: [createdById], references: [id])
+  winners     GameRoundWinner[]
+  statReports StatReport[]
+
+  @@unique([sessionId, number])
+  @@map("game_rounds")
+}
+
+/// Người thắng của ván khi Phe thứ 3 thắng (spec ván §2, §4): chỉ dùng khi `winner_faction = neutral`.
+model GameRoundWinner {
+  roundId  Int @map("round_id")
+  memberId Int @map("member_id")
+
+  round  GameRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  member Member    @relation(fields: [memberId], references: [id])
+
+  @@id([roundId, memberId])
+  @@index([memberId])
+  @@map("game_round_winners")
 }

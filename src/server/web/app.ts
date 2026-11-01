@@ -31,6 +31,7 @@ import { multiplierRoutes } from './routes/multipliers.js';
 import { mvpRoutes } from './routes/mvp.js';
 import { offlineRoutes } from './routes/offline.js';
 import { ROLE_IMAGE_TYPES, ROLE_IMAGE_UPLOAD_ROUTE, roleRoutes } from './routes/roles.js';
+import { ROUND_CREATE_ROUTE, ROUND_IMAGE_TYPES, ROUND_IMAGE_UPLOAD_ROUTE, roundRoutes } from './routes/rounds.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { HIGHLIGHT_TYPES, HIGHLIGHT_UPLOAD_ROUTE, statsRoutes } from './routes/stats.js';
 
@@ -94,6 +95,7 @@ export async function buildApp(ctx: Ctx, deps: AppDeps): Promise<FastifyInstance
   await app.register(accusationRoutes);
   await app.register(multiplierRoutes);
   await app.register(offlineRoutes);
+  await app.register(roundRoutes);
 
   const webDistDir = deps.webDistDir;
   if (webDistDir !== undefined) {
@@ -235,18 +237,22 @@ function sendNotFound(request: FastifyRequest, reply: FastifyReply, serveWeb: bo
 
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 /**
- * Route PUT nhận body thô (file) và đúng các content-type được nhận ở đó — ngoại lệ duy nhất
- * của guard JSON; mỗi route chỉ mở danh sách của mình (ảnh role không mở route highlight và ngược lại).
+ * Route nhận body thô (file) — khoá `METHOD mẫu-route` — và đúng các content-type được nhận ở đó: ngoại
+ * lệ duy nhất của guard JSON; mỗi route chỉ mở danh sách của mình (ảnh role không mở route highlight và
+ * ngược lại).
  */
 const RAW_UPLOAD_ROUTES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  [ROLE_IMAGE_UPLOAD_ROUTE, new Set(ROLE_IMAGE_TYPES)],
-  [HIGHLIGHT_UPLOAD_ROUTE, new Set(HIGHLIGHT_TYPES)],
+  [`PUT ${ROLE_IMAGE_UPLOAD_ROUTE}`, new Set(ROLE_IMAGE_TYPES)],
+  [`PUT ${HIGHLIGHT_UPLOAD_ROUTE}`, new Set(HIGHLIGHT_TYPES)],
+  [`POST ${ROUND_CREATE_ROUTE}`, new Set(ROUND_IMAGE_TYPES)],
+  [`PUT ${ROUND_IMAGE_UPLOAD_ROUTE}`, new Set(ROUND_IMAGE_TYPES)],
 ]);
 
 /**
  * Thao tác ghi dưới /api phải gửi `application/json` (chống CSRF kiểu form, cùng
- * với cookie sameSite=lax). Ngoại lệ: hai route tải file thô (`PUT /api/admin/roles/:id/image`
- * nhận ảnh, `PUT /api/reports/:id/highlight` nhận video/ảnh) với content-type của route đó;
+ * với cookie sameSite=lax). Ngoại lệ: các route tải file thô (`PUT /api/admin/roles/:id/image`
+ * nhận ảnh, `PUT /api/reports/:id/highlight` nhận video/ảnh, `POST /api/admin/sessions/:id/rounds` và
+ * `PUT /api/admin/rounds/:id/image` nhận ảnh ván) với content-type của route đó;
  * DELETE không có body được bỏ content-type. Xét theo route đã khớp (`routePath`),
  * nên đường dẫn mã hoá % (`/%61pi/me`) bị chặn y như đường dẫn thường.
  */
@@ -258,7 +264,7 @@ async function jsonGuard(request: FastifyRequest, reply: FastifyReply): Promise<
   const type = mediaTypeOf(request.headers['content-type']);
   if (type === 'application/json') return undefined;
   if (type === undefined && request.method === 'DELETE') return undefined;
-  if (request.method === 'PUT' && type !== undefined && RAW_UPLOAD_ROUTES.get(path)?.has(type) === true) return undefined;
+  if (type !== undefined && RAW_UPLOAD_ROUTES.get(`${request.method} ${path}`)?.has(type) === true) return undefined;
   return reply.code(415).send(errorBody('UNSUPPORTED_MEDIA_TYPE', 'Chỉ nhận dữ liệu JSON'));
 }
 

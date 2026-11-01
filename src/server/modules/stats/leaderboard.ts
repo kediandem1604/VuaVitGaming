@@ -27,6 +27,12 @@
  * với lần nhận treo thưởng không role), mốc phân hoà là `reviewedAt` của báo cáo. Báo cáo cũ gắn lần
  * khai vẫn tính qua `bonusPoints` của lần khai.
  *
+ * Lần khai theo ván (spec ván §3, `round_id` có giá trị — mùa ≥ `ROUND_SCORING_FROM`): điểm =
+ * `won ? (1 + (value × points + extraValue × extraPoints) × m) : 0 − penaltyValue × penaltyPoints +
+ * bonusPoints`, `won` theo phe thắng HIỆN TẠI của ván (và danh sách người thắng khi Phe thứ 3 thắng) —
+ * đổi phe thắng là mọi bảng đổi theo lúc đọc. Lần khai không có `round_id` giữ công thức cũ. `games`
+ * vẫn đếm mọi lần khai `self` (tức số ván đã khai).
+ *
  * Chỉ người có điểm > 0 mới lên bảng (điểm mùa có thể âm khi bị trừ nhiều hơn được cộng):
  * role mà mọi lần khai đã duyệt gộp lại ≤ 0 thì chưa ai hoá thân (§4.7 chỉ lưu top 1 "có
  * điểm > 0"), và nhờ vậy `getRoleLeaderboard(...)[0]` luôn chính là người đang hoá thân
@@ -51,9 +57,10 @@ import type {
   RoleDto,
   TotalsScope,
 } from '../../../shared/api-types.js';
+import { roundWon } from '../../../shared/rounds.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
-import { dateOnlyToDb, seasonDateRange } from '../../lib/time.js';
+import { dateOnlyToDb, seasonDateRange, toVnDate } from '../../lib/time.js';
 import { multiplierDaysInRange } from '../multipliers/service.js';
 import { listRoles } from '../roles/service.js';
 import { checkSeasonId, isSeasonClosed } from '../seasons/service.js';
@@ -112,7 +119,7 @@ interface Unassigned {
 
 /**
  * Gộp các lần khai đã duyệt có ngày chơi trong mùa theo (role, người) bằng MỘT truy vấn
- * GROUP BY theo (role, người, nguồn) — tổng `value`, `extraValue`, `penaltyValue`,
+ * GROUP BY theo (role, người, nguồn, ván) — tổng `value`, `extraValue`, `penaltyValue`,
  * `bonusPoints`, số dòng và lần duyệt gần nhất; tách theo `source` để `games` chỉ đếm lần khai
  * `self` mà vẫn một truy vấn. `roleId` để thu hẹp về một role. Điểm ô = Σ value × points +
  * Σ extraValue × extraPoints − Σ penaltyValue × penaltyPoints + Σ bonusPoints theo điểm hiện
@@ -135,6 +142,13 @@ async function aggregateSeason(db: DbClient, seasonId: string, roleId?: number, 
  * riêng trong `unassigned` theo người (chỉ bảng tổng "Cả 3 phe" dùng). Không có `roleId` thì thêm
  * MỘT truy vấn gộp báo cáo độc lập đã duyệt theo người gửi (+1 mỗi báo cáo, cũng vào `unassigned`).
  * Có `roleId` thì chỉ lấy lần nhận của role đó (`unassigned` rỗng).
+ *
+ * Lần khai theo ván: cùng truy vấn gộp ở trên (thêm `roundId` vào khoá nhóm — lần khai theo ngày có
+ * `roundId = null` nên nhóm và điểm của chúng y như trước). Nhóm có ván tính ở `roundCells` theo luật
+ * thắng/thua, thêm MỘT truy vấn lấy phe thắng, người thắng và giờ buổi của các ván đó (chỉ khi có nhóm
+ * như vậy). Hệ số ngày nhân của lần khai theo ván lấy theo ngày VN của buổi (= `played_on` của lần khai
+ * theo ván, luồng khai ghi như vậy), dùng lại danh sách ngày nhân của mùa; `boostedPlus` bỏ lần khai theo
+ * ván. Phe của role đi cùng truy vấn điểm role. Số truy vấn không phụ thuộc số ván hay số người.
  */
 async function aggregateSeasonCells(
   db: DbClient,
@@ -150,8 +164,8 @@ async function aggregateSeasonCells(
     _sum: { points: true },
     _max: { reviewedAt: true },
   });
-  const groups = await db.statReport.groupBy({
-    by: ['roleId', 'memberId', 'source'],
+  const allGroups = await db.statReport.groupBy({
+    by: ['roleId', 'memberId', 'source', 'roundId'],
     where: {
       status: 'approved',
       ...(roleId === undefined ? {} : { roleId }),
@@ -161,8 +175,11 @@ async function aggregateSeasonCells(
     _count: { _all: true },
     _max: { reviewedAt: true },
   });
-  const points = await pointsByRole(db, groups.map((g) => g.roleId));
-  const boosted = await boostedPlus(db, first, last, roleId);
+  const groups = allGroups.filter((g) => g.roundId === null);
+  const roundGroups = allGroups.filter((g) => g.roundId !== null);
+  const points = await pointsByRole(db, allGroups.map((g) => g.roleId));
+  const days = await multiplierDaysInRange(db, first, last);
+  const boosted = await boostedPlus(db, days, roleId);
 
   // Ghép hai nguồn (self, accusation) của cùng một ô.
   const cells = new Map<string, Agg>();
@@ -196,6 +213,18 @@ async function aggregateSeasonCells(
     // Lần khai ngày nhân luôn nằm trong nhóm gộp ở trên (cùng điều kiện, hẹp hơn); phòng hờ.
     if (!p || !cell) continue;
     cell.score += (b.multiplier - 1) * (b.value * p.points + b.extraValue * (p.extraPoints ?? 0));
+  }
+
+  // Lần khai theo ván: luật thắng/thua (spec ván §3).
+  for (const c of await roundCells(db, roundGroups, points, days)) {
+    const key = `${c.roleId}:${c.memberId}`;
+    const cell = cells.get(key);
+    if (!cell) cells.set(key, c);
+    else {
+      cell.score += c.score;
+      cell.games += c.games;
+      if (c.lastApprovedAt > cell.lastApprovedAt) cell.lastApprovedAt = c.lastApprovedAt;
+    }
   }
 
   // Lần nhận treo thưởng: có role → cộng vào ô (không thêm trận); không role → riêng theo người.
@@ -234,19 +263,84 @@ async function aggregateSeasonCells(
   return { cells: (opts.keepNonPositive ? all : all.filter((g) => g.score > 0)).sort(compareAgg), unassigned };
 }
 
+/** Nhóm gộp lần khai theo ván của `aggregateSeasonCells` (theo role, người, nguồn, ván). */
+interface RoundGroup {
+  roleId: number;
+  memberId: number;
+  source: 'self' | 'accusation';
+  roundId: number | null;
+  _sum: { value: number | null; extraValue: number | null; penaltyValue: number | null; bonusPoints: number | null };
+  _count: { _all: number };
+  _max: { reviewedAt: Date | null };
+}
+
 /**
- * Tổng chỉ số chính/phụ của các lần khai đã duyệt chơi đúng ngày nhân điểm trong mùa, theo (role,
- * người, ngày), kèm hệ số HIỆN TẠI của ngày đó (spec ngày nhân điểm §3). Một truy vấn lấy các ngày
- * nhân của mùa; mùa có ngày nhân thì thêm đúng MỘT truy vấn gộp (không có thì không). Ngày nhân thuộc
- * mùa theo chính ngày đó, nên ngày 1 hay cuối tháng chỉ nhân lần khai của mùa chứa nó.
+ * Điểm các nhóm lần khai theo ván (spec ván §3): mỗi lần khai thắng được `1 + phần cộng × m`, thua/chưa
+ * chọn phe thắng được 0, điểm phạt và bonus tính như cũ. Mỗi (ván, người) chỉ có một lần khai `self` còn
+ * hiệu lực (UNIQUE một phần), nên "+1 mỗi lần khai thắng" = `_count` của nhóm thắng. Một truy vấn lấy
+ * phe thắng và người thắng của các ván có nhóm (không có nhóm thì không truy vấn).
+ */
+async function roundCells(
+  db: DbClient,
+  groups: readonly RoundGroup[],
+  points: Map<number, RolePoints>,
+  days: readonly { day: Date; multiplier: number }[],
+): Promise<Agg[]> {
+  const roundIds = [...new Set(groups.flatMap((g) => (g.roundId === null ? [] : [g.roundId])))];
+  if (roundIds.length === 0) return [];
+  const rounds = await db.gameRound.findMany({
+    where: { id: { in: roundIds } },
+    select: { id: true, winnerFaction: true, winners: { select: { memberId: true } }, session: { select: { startsAt: true } } },
+  });
+  const byDay = new Map(days.map((d) => [d.day.getTime(), d.multiplier]));
+  const roundById = new Map(
+    rounds.map((r) => [
+      r.id,
+      {
+        winnerFaction: r.winnerFaction,
+        winners: new Set(r.winners.map((w) => w.memberId)),
+        // Hệ số của ngày VN của buổi (= ngày chơi của lần khai theo ván).
+        multiplier: byDay.get(dateOnlyToDb(toVnDate(r.session.startsAt)).getTime()) ?? 1,
+      },
+    ]),
+  );
+
+  const out: Agg[] = [];
+  for (const g of groups) {
+    const p = points.get(g.roleId);
+    const round = g.roundId === null ? undefined : roundById.get(g.roundId);
+    // Khoá ngoại đảm bảo role và ván luôn có; phòng hờ dữ liệu lạ thì bỏ nhóm đó.
+    if (!p || !round) continue;
+    const won = roundWon(p.faction, round.winnerFaction, round.winners.has(g.memberId));
+    const m = round.multiplier;
+    // `_count` lần +1: mỗi lần khai thắng một lần (+1 không nhân hệ số).
+    const plus = won
+      ? g._count._all + ((g._sum.value ?? 0) * p.points + (g._sum.extraValue ?? 0) * (p.extraPoints ?? 0)) * m
+      : 0;
+    out.push({
+      roleId: g.roleId,
+      memberId: g.memberId,
+      score: plus - (g._sum.penaltyValue ?? 0) * (p.penaltyPoints ?? 0) + (g._sum.bonusPoints ?? 0),
+      games: g.source === 'self' ? g._count._all : 0,
+      // Lần khai đã duyệt luôn có reviewedAt; phòng hờ dữ liệu lạ.
+      lastApprovedAt: g._max.reviewedAt ?? new Date(0),
+    });
+  }
+  return out;
+}
+
+/**
+ * Tổng chỉ số chính/phụ của các lần khai đã duyệt KHÔNG theo ván chơi đúng ngày nhân điểm trong mùa,
+ * theo (role, người, ngày), kèm hệ số HIỆN TẠI của ngày đó (spec ngày nhân điểm §3). `days` = các ngày
+ * nhân của mùa (người gọi đã tra một lần); có ngày nhân thì đúng MỘT truy vấn gộp (không có thì không).
+ * Ngày nhân thuộc mùa theo chính ngày đó, nên ngày 1 hay cuối tháng chỉ nhân lần khai của mùa chứa nó.
+ * Lần khai theo ván đã nhân hệ số ngay trong `roundCells`.
  */
 async function boostedPlus(
   db: DbClient,
-  first: string,
-  last: string,
+  days: readonly { day: Date; multiplier: number }[],
   roleId: number | undefined,
 ): Promise<{ roleId: number; memberId: number; multiplier: number; value: number; extraValue: number }[]> {
-  const days = await multiplierDaysInRange(db, first, last);
   if (days.length === 0) return [];
   const byDay = new Map(days.map((d) => [d.day.getTime(), d.multiplier]));
   const groups = await db.statReport.groupBy({
@@ -256,6 +350,7 @@ async function boostedPlus(
       // Chỉ lần khai của chính người chơi — mục trừ điểm do báo cáo không có phần cộng để nhân
       // (khớp `toReportDto`).
       source: 'self',
+      roundId: null,
       ...(roleId === undefined ? {} : { roleId }),
       playedOn: { in: days.map((d) => d.day) },
     },
@@ -270,15 +365,18 @@ async function boostedPlus(
   }));
 }
 
-/** Điểm hiện tại của một role: điểm mỗi đơn vị chính, phụ (null nếu không có), phạt (null nếu không có). */
-type RolePoints = { points: number; extraPoints: number | null; penaltyPoints: number | null };
+/** Điểm hiện tại của một role: điểm mỗi đơn vị chính, phụ (null nếu không có), phạt (null nếu không có); phe (luật ván). */
+type RolePoints = { points: number; extraPoints: number | null; penaltyPoints: number | null; faction: Faction };
 
 /** Điểm hiện tại của các role được hỏi (một truy vấn); không có role nào thì không truy vấn. */
 async function pointsByRole(db: DbClient, roleIds: number[]): Promise<Map<number, RolePoints>> {
   const ids = [...new Set(roleIds)];
   if (ids.length === 0) return new Map();
-  const roles = await db.role.findMany({ where: { id: { in: ids } }, select: { id: true, points: true, extraPoints: true, penaltyPoints: true } });
-  return new Map(roles.map((r) => [r.id, { points: r.points, extraPoints: r.extraPoints, penaltyPoints: r.penaltyPoints }]));
+  const roles = await db.role.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, points: true, extraPoints: true, penaltyPoints: true, faction: true },
+  });
+  return new Map(roles.map((r) => [r.id, { points: r.points, extraPoints: r.extraPoints, penaltyPoints: r.penaltyPoints, faction: r.faction }]));
 }
 
 type MemberInfo = { displayName: string; avatarUrl: string | null };

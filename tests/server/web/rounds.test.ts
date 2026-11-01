@@ -1,0 +1,155 @@
+import type { GameSession, Member } from '@prisma/client';
+import type { FastifyInstance } from 'fastify';
+import { afterEach, beforeEach, expect, test } from 'vitest';
+import type { Ctx } from '../../../src/server/ctx.js';
+import { dateOnlyToDb } from '../../../src/server/lib/time.js';
+import { createWebSession } from '../../../src/server/modules/auth/sessions.js';
+import type { OAuthClient } from '../../../src/server/modules/auth/oauth.js';
+import { buildApp } from '../../../src/server/web/app.js';
+import type { RoundDto, SessionRoundsDto } from '../../../src/shared/api-types.js';
+import { makeTestCtx } from '../../helpers/ctx.js';
+import { resetDb, testDb } from '../../helpers/db.js';
+import { createMember, createSession, roleByKey } from '../../helpers/factories.js';
+
+const oauth: OAuthClient = {
+  authorizeUrl: () => 'https://discord.test/authorize',
+  exchange: async () => {
+    throw new Error('không dùng');
+  },
+};
+
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png-body')]);
+const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBPVP8 ')]);
+
+let ctx: Ctx;
+let setNow: (iso: string) => void;
+let app: FastifyInstance;
+let session: GameSession;
+let member: Member;
+let memberSid: string;
+let modSid: string;
+let adminSid: string;
+
+beforeEach(async () => {
+  await resetDb();
+  ({ ctx, setNow } = makeTestCtx());
+  setNow('2026-11-05T05:00:00Z');
+  app = await buildApp(ctx, { oauth });
+  await app.ready();
+  const mod = await createMember(testDb, { accessLevel: 'mod', displayName: 'Mod' });
+  const admin = await createMember(testDb, { accessLevel: 'admin', displayName: 'Admin' });
+  member = await createMember(testDb, { displayName: 'An' });
+  modSid = await sidFor(mod);
+  adminSid = await sidFor(admin);
+  memberSid = await sidFor(member);
+  session = await createSession(testDb, { startsAt: new Date('2026-11-05T14:00:00Z'), createdById: mod.id });
+});
+
+afterEach(async () => {
+  await app.close();
+});
+
+async function sidFor(m: Member): Promise<string> {
+  const s = await createWebSession(ctx, m.id);
+  return app.signCookie(s.id);
+}
+
+const cookies = (sid?: string) => (sid ? { ggd_sid: sid } : {});
+
+const addRound = (sid: string | undefined, body: Buffer | string = PNG, type = 'image/png', query = '') =>
+  app.inject({
+    method: 'POST',
+    url: `/api/admin/sessions/${session.id}/rounds${query}`,
+    cookies: cookies(sid),
+    headers: { 'content-type': type },
+    payload: body,
+  });
+
+const putImage = (id: number, sid: string | undefined, body: Buffer | string, type = 'image/png') =>
+  app.inject({ method: 'PUT', url: `/api/admin/rounds/${id}/image`, cookies: cookies(sid), headers: { 'content-type': type }, payload: body });
+
+const patchRound = (id: number, sid: string | undefined, payload: unknown) =>
+  app.inject({ method: 'PATCH', url: `/api/admin/rounds/${id}`, cookies: cookies(sid), headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+
+test('thêm ván: mod và admin được, thành viên 403, chưa đăng nhập 401', async () => {
+  expect((await addRound(undefined)).statusCode).toBe(401);
+  expect((await addRound(memberSid)).statusCode).toBe(403);
+  const byMod = await addRound(modSid, PNG, 'image/png', '?winnerFaction=duck');
+  expect(byMod.statusCode).toBe(201);
+  expect(byMod.json<RoundDto>()).toMatchObject({ number: 1, winnerFaction: 'duck', sessionId: session.id });
+  const byAdmin = await addRound(adminSid, WEBP, 'image/webp');
+  expect(byAdmin.json<RoundDto>()).toMatchObject({ number: 2, winnerFaction: null });
+  expect((await addRound(modSid, PNG, 'image/png', '?winnerFaction=chicken')).json()).toMatchObject({ error: { code: 'VALIDATION' } });
+});
+
+test('ảnh sai loại / quá lớn / không phải ảnh → câu của spec; JSON hay text/plain', async () => {
+  const gif = await addRound(modSid, Buffer.from('GIF89a....'), 'image/gif');
+  expect(gif.statusCode).toBe(400);
+  expect(gif.json()).toEqual({ error: { code: 'INVALID_IMAGE', message: 'Chỉ nhận ảnh PNG, JPG hoặc WebP' } });
+  // Đuôi/content-type nói PNG nhưng nội dung không phải.
+  expect((await addRound(modSid, Buffer.from('not an image'), 'image/png')).json()).toMatchObject({ error: { message: 'Chỉ nhận ảnh PNG, JPG hoặc WebP' } });
+  expect((await addRound(modSid, Buffer.from('xx'), 'application/octet-stream')).json()).toMatchObject({ error: { message: 'Chỉ nhận ảnh PNG, JPG hoặc WebP' } });
+  const big = await addRound(modSid, Buffer.concat([PNG, Buffer.alloc(6 * 1024 * 1024)]));
+  expect(big.statusCode).toBe(400);
+  expect(big.json()).toEqual({ error: { code: 'INVALID_IMAGE', message: 'Ảnh tối đa 5 MB' } });
+  const json = await addRound(modSid, '{}', 'application/json');
+  expect(json.json()).toMatchObject({ error: { message: 'Chỉ nhận ảnh PNG, JPG hoặc WebP' } });
+  expect((await addRound(modSid, 'x', 'text/plain')).statusCode).toBe(415);
+  expect(await testDb.gameRound.count()).toBe(0);
+});
+
+test('ảnh ván: cần đăng nhập, private cache 5 phút, ETag theo mốc đổi ảnh, 304, đổi ảnh → ETag mới', async () => {
+  const round = (await addRound(modSid)).json<RoundDto>();
+  const url = `/api/rounds/${round.id}/image`;
+  expect((await app.inject({ url })).statusCode).toBe(401);
+
+  const res = await app.inject({ url, cookies: cookies(memberSid) });
+  expect(res.statusCode).toBe(200);
+  expect(res.headers['content-type']).toBe('image/png');
+  expect(res.headers['cache-control']).toBe('private, max-age=300');
+  expect(res.rawPayload.equals(PNG)).toBe(true);
+  const etag = res.headers.etag as string;
+  expect(etag).toBe(`"round-${round.id}-${new Date('2026-11-05T05:00:00Z').getTime()}"`);
+
+  const again = await app.inject({ url, cookies: cookies(memberSid), headers: { 'if-none-match': etag } });
+  expect(again.statusCode).toBe(304);
+  expect(again.body).toBe('');
+
+  setNow('2026-11-05T05:10:00Z');
+  expect((await putImage(round.id, memberSid, WEBP, 'image/webp')).statusCode).toBe(403);
+  const changed = await putImage(round.id, modSid, WEBP, 'image/webp');
+  expect(changed.statusCode).toBe(200);
+  expect(changed.json<RoundDto>().imageUrl).toBe(`/api/rounds/${round.id}/image?v=${new Date('2026-11-05T05:10:00Z').getTime()}`);
+  const fresh = await app.inject({ url, cookies: cookies(memberSid), headers: { 'if-none-match': etag } });
+  expect(fresh.statusCode).toBe(200);
+  expect(fresh.headers['content-type']).toBe('image/webp');
+  expect(fresh.headers.etag).not.toBe(etag);
+  expect((await putImage(round.id, modSid, Buffer.concat([PNG, Buffer.alloc(6 * 1024 * 1024)]))).json()).toMatchObject({ error: { message: 'Ảnh tối đa 5 MB' } });
+  expect((await app.inject({ url: '/api/rounds/999/image', cookies: cookies(memberSid) })).statusCode).toBe(404);
+});
+
+test('sửa và xoá ván qua API; trang buổi cho mọi thành viên', async () => {
+  const round = (await addRound(modSid)).json<RoundDto>();
+  const pelican = await roleByKey(testDb, 'pelican');
+  await testDb.statReport.create({
+    data: { memberId: member.id, roleId: pelican.id, roundId: round.id, sessionId: session.id, playedOn: dateOnlyToDb('2026-11-05'), value: 1, createdAt: ctx.now() },
+  });
+  expect((await patchRound(round.id, memberSid, { winnerFaction: 'neutral' })).statusCode).toBe(403);
+  const patched = await patchRound(round.id, modSid, { winnerFaction: 'neutral', winnerIds: [member.id] });
+  expect(patched.statusCode).toBe(200);
+  expect(patched.json<RoundDto>()).toMatchObject({ winnerFaction: 'neutral', winnerIds: [member.id] });
+
+  const page = await app.inject({ url: `/api/sessions/${session.id}/rounds`, cookies: cookies(memberSid) });
+  expect(page.statusCode).toBe(200);
+  const dto = page.json<SessionRoundsDto>();
+  expect(dto.rounds[0]!.reports[0]).toMatchObject({ member: { id: member.id, displayName: 'An' }, status: 'pending', won: true, mine: { value: 1 } });
+  expect((await app.inject({ url: `/api/sessions/${session.id}/rounds` })).statusCode).toBe(401);
+
+  const del = (sid: string) => app.inject({ method: 'DELETE', url: `/api/admin/rounds/${round.id}`, cookies: cookies(sid) });
+  expect((await del(memberSid)).statusCode).toBe(403);
+  const blocked = await del(modSid);
+  expect(blocked.statusCode).toBe(409);
+  expect(blocked.json()).toMatchObject({ error: { code: 'ROUND_HAS_REPORTS' } });
+  await testDb.statReport.deleteMany({});
+  expect((await del(adminSid)).statusCode).toBe(204);
+});

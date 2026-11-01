@@ -14,7 +14,8 @@
  * Điểm một lần khai = `(value × points + extraValue × extraPoints) × m − penaltyValue ×
  * penaltyPoints + bonusPoints` (spec điểm role §3; `m` = hệ số ngày nhân điểm của ngày chơi, không
  * có thì 1), tính lúc đọc theo điểm hiện tại của role và hệ số hiện tại — chỉ
- * `value`/`extraValue`/`penaltyValue` (và `bonusPoints` khi báo cáo được duyệt) được lưu.
+ * `value`/`extraValue`/`penaltyValue` (và `bonusPoints` khi báo cáo được duyệt) được lưu. Lần khai
+ * theo ván (`roundId`, spec ván §3) dùng `roundReportPoints` theo phe thắng hiện tại của ván.
  *
  * Duyệt: mod không tự duyệt lần khai của mình (admin thì được — server chỉ có một
  * admin vẫn chạy); đổi trạng thái `pending → approved/rejected` là một cập nhật có
@@ -52,6 +53,7 @@ import type { Prisma, StatReport } from '@prisma/client';
 import { z } from 'zod';
 import type { AccessLevel, ReportDto, ReviewedReportDto } from '../../../shared/api-types.js';
 import { formatReportValue, reportPoints } from '../../../shared/metric.js';
+import { roundReportPoints, roundWon } from '../../../shared/rounds.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import {
@@ -687,9 +689,12 @@ const REPORT_SELECT = {
   highlightChannelId: true,
   highlightMessageId: true,
   member: { select: { id: true, displayName: true } },
+  // Người thắng của ván chỉ có khi Phe thứ 3 thắng — vài dòng mỗi ván.
+  round: { select: { id: true, number: true, sessionId: true, winnerFaction: true, winners: { select: { memberId: true } } } },
   role: {
     select: {
       id: true,
+      faction: true,
       nameVi: true,
       icon: true,
       metricLabel: true,
@@ -734,6 +739,7 @@ function toReportDto(
   const duplicate = hiddenAs !== undefined;
   // Mục trừ điểm do báo cáo không có phần cộng nào để nhân — luôn 1 (không hiện chip ×m).
   const multiplier = r.source === 'self' ? (multipliers.get(dbToDateOnly(r.playedOn)) ?? 1) : 1;
+  const won = r.round ? roundWon(r.role.faction, r.round.winnerFaction, r.round.winners.some((w) => w.memberId === r.member.id)) : false;
   return {
     id: r.id,
     member: { id: r.member.id, displayName: r.member.displayName },
@@ -757,7 +763,7 @@ function toReportDto(
     bonusPoints: r.bonusPoints,
     source: r.source,
     multiplier,
-    points: reportPoints(r, r.role, multiplier),
+    points: r.round ? roundReportPoints(r, r.role, multiplier, won) : reportPoints(r, r.role, multiplier),
     playedOn: dbToDateOnly(r.playedOn),
     sessionId: r.sessionId,
     note: r.note,
@@ -774,6 +780,9 @@ function toReportDto(
     // Chỉ hàng chờ (mod) mới thấy tên người báo cáo sớm hơn; người khai trùng thì không.
     accusationWaitingFor: queue ? (hiddenAs?.waitingFor ?? null) : null,
     penaltyOf: r.penaltyFor ? toAccusationDto(r.penaltyFor) : null,
+    round: r.round
+      ? { id: r.round.id, number: r.round.number, sessionId: r.round.sessionId, winnerFaction: r.round.winnerFaction, won }
+      : null,
   };
 }
 
@@ -783,6 +792,13 @@ export async function getReportDto(ctx: Ctx, reportId: number): Promise<ReportDt
   if (!row) throw appError('NOT_FOUND');
   const [one] = await toReportDtos(ctx, [row]);
   return one!.dto;
+}
+
+/** Các lần khai theo id dạng DTO (thứ tự không bảo đảm; id không có thì bỏ) — trang buổi dùng cho lần khai của người xem. */
+export async function getReportDtos(ctx: Ctx, reportIds: number[]): Promise<ReportDto[]> {
+  if (reportIds.length === 0) return [];
+  const rows = await ctx.db.statReport.findMany({ where: { id: { in: reportIds } }, select: REPORT_SELECT });
+  return (await toReportDtos(ctx, rows)).map((x) => x.dto);
 }
 
 /** Lần khai của một người, mới nhất trước; `limit` mặc định 50, tối đa 100 (lớn hơn bị cắt). */

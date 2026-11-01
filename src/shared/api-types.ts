@@ -189,7 +189,9 @@ export interface ReportRoleDto {
  * +1 khi báo cáo kèm theo được duyệt đúng; `source` cho biết lần khai do người chơi khai hay là mục
  * trừ điểm do báo cáo. `points = (value × points + extraValue × extraPoints) × multiplier −
  * penaltyValue × penaltyPoints + bonusPoints` theo điểm hiện tại của role (spec điểm role §3) và hệ
- * số hiện tại của ngày chơi (spec ngày nhân điểm §3), có thể âm.
+ * số hiện tại của ngày chơi (spec ngày nhân điểm §3), có thể âm. Lần khai theo ván (`round` khác
+ * null, spec ván §3): `points = (round.won ? 1 + (value × points + extraValue × extraPoints) ×
+ * multiplier : 0) − penaltyValue × penaltyPoints + bonusPoints`.
  */
 export interface ReportDto {
   id: number;
@@ -243,6 +245,20 @@ export interface ReportDto {
    * bắn {victim.displayName} ({phe}) − {penaltyPoints} điểm"); `null` với lần khai thường.
    */
   penaltyOf: AccusationDto | null;
+  /** Ván của lần khai (spec ván §3); `null` với lần khai theo ngày (mùa ≤ 2026-10) và mục trừ điểm. */
+  round: ReportRoundDto | null;
+}
+
+/**
+ * Ván của một lần khai: `won` theo phe thắng HIỆN TẠI của ván — role thuộc `winnerFaction`, và khi
+ * Phe thứ 3 thắng thì người khai được tick thắng; `winnerFaction = null` (chưa chọn) → `false`.
+ */
+export interface ReportRoundDto {
+  id: number;
+  number: number;
+  sessionId: number;
+  winnerFaction: Faction | null;
+  won: boolean;
 }
 
 /**
@@ -771,3 +787,50 @@ export interface OfflineEventInput {
 
 /** Body `PATCH /api/admin/offline-events/:id`: chỉ các trường được gửi; `closed` để Đóng vote / Mở lại. */
 export type OfflineEventPatch = Partial<OfflineEventInput> & { closed?: boolean };
+
+// ---------------------------------------------------------------------------
+// Ván đấu (spec 2026-11-01 game rounds)
+// ---------------------------------------------------------------------------
+
+/**
+ * Một lần khai trong danh sách công khai của ván (`GET /api/sessions/:id/rounds`): chỉ lần khai
+ * `pending`/`approved` do người chơi khai. `mine` = đủ `ReportDto` khi là lần khai của chính người xem
+ * (chỉ số, ghi chú, điểm — để hiện trạng thái và mở form "Sửa"), `null` với người khác (không lộ chỉ số).
+ */
+export interface RoundReportDto {
+  id: number;
+  member: { id: number; displayName: string; avatarUrl: string | null };
+  role: { id: number; nameVi: string; icon: string; faction: Faction };
+  status: 'pending' | 'approved';
+  won: boolean;
+  mine: ReportDto | null;
+}
+
+/**
+ * Một ván. `imageUrl` = `/api/rounds/{id}/image?v={mốc đổi ảnh}` — đổi ảnh là đổi URL nên người đang xem
+ * tải lại ảnh mới. `winnerIds`: người thắng khi Phe thứ 3 thắng (rỗng với phe khác hoặc chưa tick ai).
+ * Lần khai theo thứ tự gửi (cũ trước).
+ */
+export interface RoundDto {
+  id: number;
+  sessionId: number;
+  number: number;
+  winnerFaction: Faction | null;
+  winnerIds: number[];
+  imageUrl: string;
+  imageUpdatedAt: string;
+  reports: RoundReportDto[];
+}
+
+/** Trang buổi (`GET /api/sessions/:id/rounds`): buổi và các ván theo số tăng dần. */
+export interface SessionRoundsDto {
+  session: { id: number; startsAt: string; modeName: string; status: SessionStatus };
+  rounds: RoundDto[];
+}
+
+/** Sửa ván (`PATCH /api/admin/rounds/:id`): trường vắng mặt giữ nguyên. */
+export interface RoundPatch {
+  winnerFaction?: Faction | null;
+  /** Chỉ khi phe thắng (sau khi sửa) là `neutral`: thay toàn bộ danh sách người thắng. */
+  winnerIds?: number[];
+}
