@@ -18,9 +18,11 @@ import { apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { Modal } from '../../components/Modal';
 import { Presence } from '../../components/Presence';
+import { PrefetchLink } from '../../components/PrefetchLink';
 import { QueryState } from '../../components/QueryState';
 import { cx } from '../../lib/cx';
 import { formatDateLabel, formatDayLabel, formatTime, vnTodayIso } from '../../lib/format';
+import { sessionPath } from '../../lib/rounds';
 import { Chip } from './Chip';
 import { Checkbox } from './Controls';
 
@@ -290,6 +292,10 @@ function AdminSessionRow({ session, onMoved }: { session: SessionDto; onMoved: (
         </div>
         {session.roomCode && <p className={cx('font-bold', secondary)}>Mã phòng: {session.roomCode}</p>}
         {session.note && <p className={secondary}>{session.note}</p>}
+        {/* Trang buổi ở chế độ quản lý ván (spec ván §4). SessionDto không có số ván nên link không kèm số. */}
+        <PrefetchLink to={sessionPath(session.id)} className="self-start font-bold text-gold underline underline-offset-2">
+          Ván đấu
+        </PrefetchLink>
         {open && (
           <div className="flex flex-col gap-1">
             <div className="flex flex-wrap gap-2">

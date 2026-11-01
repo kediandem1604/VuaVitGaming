@@ -22,7 +22,7 @@ import { supportsViewTransitions, useDisplayedLocation } from './lib/viewTransit
 import { LoginPage } from './pages/LoginPage';
 import { ForbiddenPage, NotFoundPage } from './pages/PlaceholderPage';
 import { TodayPage } from './pages/TodayPage';
-import { AdminPage, BadgesPage, HallPage, LeaderboardPage, MemberPage, MvpPage, ProfilePage, ReportPage } from './routes';
+import { AdminPage, BadgesPage, HallPage, LeaderboardPage, MemberPage, MvpPage, ProfilePage, ReportPage, SessionPage } from './routes';
 
 export function App() {
   return (
@@ -54,6 +54,7 @@ function RoutedApp() {
         <Route path="huy-hieu" element={<BadgesPage />} />
         <Route path="thanh-vien/:id" element={<MemberPage />} />
         <Route path="khai-diem" element={<ReportPage />} />
+        <Route path="buoi/:id" element={<SessionPage />} />
         <Route path="ho-so" element={<ProfilePage />} />
         <Route
           path="quan-tri"

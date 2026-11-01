@@ -57,13 +57,16 @@ import { ApiError, apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { HighlightLink } from '../../components/HighlightLink';
 import { MultiplierChip } from '../../components/MultiplierChip';
+import { Presence } from '../../components/Presence';
 import { QueryState } from '../../components/QueryState';
+import { RoundImageModal } from '../../components/RoundImageModal';
 import { PENALISED_CHIP, accusationStatusText, formatAccusationLine, formatPenaltyLine, formatStandaloneLine } from '../../lib/accusations';
 import { CLAIM_SOURCE_LABEL, bountyIcon, sessionText } from '../../lib/bounties';
 import { cx } from '../../lib/cx';
 import { useStaggerOnce } from '../../lib/motion';
 import { formatDateLabel, formatTime } from '../../lib/format';
 import { approvedAccusationsQuery, pendingAccusationsQuery } from '../../lib/queries';
+import { roundImagePath, winnerText } from '../../lib/rounds';
 import {
   APPROVED_ACCUSATIONS_KEY,
   APPROVED_BOUNTY_CLAIMS_KEY,
@@ -751,19 +754,42 @@ function ReportSummary({ report, meta }: { report: ReportDto; meta: ReactNode })
           {report.role.icon} {report.role.nameVi}
         </span>
         {report.source === 'accusation' && <span className="chip bg-duck-soft text-night-950">{PENALISED_CHIP}</span>}
-        {/* Ngày chơi là ngày nhân điểm (spec ngày nhân điểm §5). */}
-        <MultiplierChip multiplier={report.multiplier} />
+        {/* Ngày chơi là ngày nhân điểm (spec ngày nhân điểm §5); ván thua không có điểm cộng để nhân. */}
+        {(!report.round || report.round.won) && <MultiplierChip multiplier={report.multiplier} />}
         <time dateTime={report.playedOn} className="ml-auto text-night-300 tabular-nums">
           {formatDateLabel(report.playedOn)}
         </time>
       </div>
       {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
       <p className="text-lg leading-tight font-extrabold break-words text-white">{penaltyOf ? formatPenaltyLine(penaltyOf) : formatReportValue(report, report.role)}</p>
+      {report.round && <RoundThumb round={report.round} />}
       <p className="text-night-300">{meta}</p>
       {report.note && !penaltyOf && <p className="text-night-200">{report.note}</p>}
       {report.accusation && <AccusationBox accusation={report.accusation} />}
       {report.highlightUrl && <HighlightLink href={report.highlightUrl} />}
     </>
+  );
+}
+
+/**
+ * Ảnh ván của lần khai theo ván (spec ván §5 "Duyệt điểm"): ảnh nhỏ bấm phóng to + "Ván {n} · {phe
+ * thắng}" để mod đối chiếu role và chỉ số với bảng kết quả.
+ */
+function RoundThumb({ round }: { round: NonNullable<ReportDto['round']> }) {
+  const [zoom, setZoom] = useState(false);
+  const src = roundImagePath(round.id);
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <button type="button" aria-label={`Phóng to ảnh ván ${round.number}`} className="shrink-0 overflow-hidden rounded-lg border-2 border-night-700 hover:border-gold" onClick={() => setZoom(true)}>
+        <img src={src} alt="" loading="lazy" className="aspect-video w-24 object-cover" />
+      </button>
+      <p className="font-bold text-white">
+        Ván {round.number} · {winnerText(round.winnerFaction)}
+      </p>
+      <Presence present={zoom}>
+        <RoundImageModal title={`Ảnh ván ${round.number}`} src={src} onClose={() => setZoom(false)} />
+      </Presence>
+    </div>
   );
 }
 

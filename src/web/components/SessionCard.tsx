@@ -22,6 +22,7 @@ import { useNow } from '../hooks/useNow';
 import { cx } from '../lib/cx';
 import { formatCountdown, formatTime } from '../lib/format';
 import { reminderText, type ReminderChannels } from '../lib/reminders';
+import { sessionPath } from '../lib/rounds';
 import { Avatar } from './Avatar';
 import { PrefetchLink } from './PrefetchLink';
 
@@ -86,6 +87,13 @@ export function SessionCard({ session, onToggle, pending, error, reminders, clas
       {session.note && <p className="text-sm text-night-200">{session.note}</p>}
 
       <SeatRow session={session} />
+
+      {/* Buổi đã bắt đầu (đang chơi hoặc đã kết thúc): sang trang buổi xem ảnh ván và khai role (spec ván §5). */}
+      {(session.status === 'ended' || (open && live)) && (
+        <PrefetchLink to={sessionPath(session.id)} className="btn-secondary w-full text-center">
+          Ván đấu
+        </PrefetchLink>
+      )}
 
       {open && (
         <div className="flex flex-col gap-1.5">

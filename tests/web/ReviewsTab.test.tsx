@@ -1078,3 +1078,26 @@ test('revoking a penalty row also refreshes the approved player reports (its sta
   await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: APPROVED_ACCUSATIONS_KEY }));
   expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_ACCUSATIONS_KEY });
 });
+
+test('a round report shows the round thumbnail (zoomable) and "Ván {n} · {winner}"; a lost round has no ×m chip', async () => {
+  stubFetch({
+    [PENDING_ROUTE]: () =>
+      json(200, [
+        report({ id: 30, multiplier: 2, round: { id: 101, number: 2, sessionId: 7, winnerFaction: 'goose', won: false } }),
+        report({ id: 31, multiplier: 2, round: { id: 102, number: 3, sessionId: 7, winnerFaction: null, won: false } }),
+      ]),
+  });
+  renderTab();
+
+  const items = await screen.findAllByRole('listitem');
+  const first = items[0] as HTMLElement;
+  expect(first).toHaveTextContent('Ván 2 · 🦢 Ngỗng thắng');
+  expect(within(first).queryByText('×2')).not.toBeInTheDocument();
+  expect(items[1]).toHaveTextContent('Ván 3 · Chưa chọn phe thắng');
+
+  const thumb = within(first).getByRole('button', { name: 'Phóng to ảnh ván 2' });
+  expect(thumb.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image');
+  fireEvent.click(thumb);
+  const dialog = await screen.findByRole('dialog', { name: 'Ảnh ván 2' });
+  expect(within(dialog).getByRole('img', { name: 'Ảnh ván 2' })).toHaveAttribute('src', '/api/rounds/101/image');
+});

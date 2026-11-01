@@ -10,7 +10,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import type { SessionDto } from '../../shared/api-types';
+import type { ReportRoleDto, SessionDto } from '../../shared/api-types';
+import { hasExtraMetric, hasPenaltyMetric } from '../../shared/metric';
 import { defaultPlayedOn, pickDefaultSession } from '../../shared/report-day';
 import { apiGet } from '../api';
 import { cx } from '../lib/cx';
@@ -155,3 +156,101 @@ export function NoteField({ id, value, onChange }: NoteFieldProps) {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Ô chỉ số (form khai theo ngày, form khai theo ván, form sửa)
+// ---------------------------------------------------------------------------
+
+/** Giá trị mặc định của ô chỉ số phụ và ô chỉ số phạt: 0 (hầu hết trận không có lần ám sát trong họp, không bắn sai). */
+export const OPTIONAL_METRIC_DEFAULT = '0';
+
+/**
+ * Phần role mà form cần để vẽ ô chỉ số chính (gợi ý điểm), ô chỉ số phụ và ô chỉ số phạt:
+ * `RoleDto` (form khai) và `ReportDto.role` (form sửa) đều khớp. Mỗi bộ ba trường phụ/phạt cùng
+ * có hoặc cùng null.
+ */
+export type FormRole = Pick<
+  ReportRoleDto,
+  'metricLabel' | 'maxPerGame' | 'points' | 'extraMetricLabel' | 'extraMaxPerGame' | 'extraPoints' | 'penaltyMetricLabel' | 'penaltyMaxPerGame' | 'penaltyPoints'
+>;
+
+type ParsedMetric = { value: number; error: null } | { value: null; error: string };
+
+/** Ô số không bắt buộc đã gõ: trống = 0; phải là số nguyên trong [0, max], không thì lời báo cùng chữ với server. */
+function parseOptionalMetric(raw: string, max: number, outOfRange: string): ParsedMetric {
+  const value = raw.trim() === '' ? 0 : Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > max) return { value: null, error: outOfRange };
+  return { value, error: null };
+}
+
+/**
+ * Đọc ô chỉ số phụ đã gõ: trống = 0; phải là số nguyên trong [0, extraMaxPerGame], không thì
+ * trả lời báo cùng chữ với server (`VALUE_OUT_OF_RANGE`). Role không có chỉ số phụ → 0, không lỗi.
+ */
+export function parseExtraValue(raw: string, role: FormRole): ParsedMetric {
+  if (!hasExtraMetric(role)) return { value: 0, error: null };
+  const max = role.extraMaxPerGame ?? 0;
+  return parseOptionalMetric(raw, max, `Chỉ số phụ phải từ 0 đến ${max}`);
+}
+
+/** Như `parseExtraValue` cho ô chỉ số phạt: [0, penaltyMaxPerGame]; role không có chỉ số phạt → 0, không lỗi. */
+export function parsePenaltyValue(raw: string, role: FormRole): ParsedMetric {
+  if (!hasPenaltyMetric(role)) return { value: 0, error: null };
+  const max = role.penaltyMaxPerGame ?? 0;
+  return parseOptionalMetric(raw, max, `Chỉ số phạt phải từ 0 đến ${max}`);
+}
+
+/** Gợi ý dưới ô chỉ số chính: "Tối đa N mỗi trận", thêm " · +P điểm mỗi lần" khi `points ≠ 1` (spec điểm role §5). */
+export function mainHint(role: FormRole): string {
+  const base = `Tối đa ${role.maxPerGame} mỗi trận`;
+  return role.points === 1 ? base : `${base} · +${role.points} điểm mỗi lần`;
+}
+
+export interface MetricFieldProps {
+  id: string;
+  /** Role có chỉ số phụ/phạt tương ứng (người gọi đã kiểm `hasExtraMetric`/`hasPenaltyMetric`). */
+  role: FormRole;
+  value: string;
+  onChange: (value: string) => void;
+}
+
+interface OptionalMetricFieldProps {
+  id: string;
+  label: string;
+  max: number;
+  hint: string;
+  value: string;
+  onChange: (value: string) => void;
+}
+
+/** Ô số không bắt buộc cùng dáng với ô chỉ số chính: nhãn, giới hạn [0, max], một dòng gợi ý. */
+function OptionalMetricField({ id, label, max, hint, value, onChange }: OptionalMetricFieldProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className={LABEL_CLASS}>
+        {label}
+      </label>
+      <input id={id} type="number" inputMode="numeric" min={0} max={max} step={1} className="field" value={value} onChange={(event) => onChange(event.target.value)} />
+      <p className={HINT_CLASS}>{hint}</p>
+    </div>
+  );
+}
+
+/**
+ * Ô chỉ số phụ (spec chỉ số phụ §6): nhãn = `extraMetricLabel`, giới hạn [0, extraMaxPerGame], gợi
+ * ý "Tối đa N mỗi trận · +P điểm mỗi lần".
+ */
+export function ExtraField({ id, role, value, onChange }: MetricFieldProps) {
+  const max = role.extraMaxPerGame ?? 0;
+  return <OptionalMetricField id={id} label={role.extraMetricLabel ?? ''} max={max} hint={`Tối đa ${max} mỗi trận · +${role.extraPoints} điểm mỗi lần`} value={value} onChange={onChange} />;
+}
+
+/**
+ * Ô chỉ số phạt (spec điểm role §5): nhãn = `penaltyMetricLabel`, giới hạn [0, penaltyMaxPerGame],
+ * gợi ý "Tối đa N mỗi trận · −P điểm mỗi lần" (dấu trừ Unicode, như khi đọc một lần khai).
+ */
+export function PenaltyField({ id, role, value, onChange }: MetricFieldProps) {
+  const max = role.penaltyMaxPerGame ?? 0;
+  return <OptionalMetricField id={id} label={role.penaltyMetricLabel ?? ''} max={max} hint={`Tối đa ${max} mỗi trận · −${role.penaltyPoints} điểm mỗi lần`} value={value} onChange={onChange} />;
+}
+

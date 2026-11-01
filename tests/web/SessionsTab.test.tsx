@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { EndOptionDto, ModeDto, OpenVoteRoundDto, SessionDto } from '../../src/shared/api-types';
 import { addDaysIso, vnTodayIso } from '../../src/web/lib/format';
@@ -69,7 +70,9 @@ const renderTab = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   render(
     <QueryClientProvider client={queryClient}>
-      <SessionsTab />
+      <MemoryRouter>
+        <SessionsTab />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 };
@@ -333,4 +336,11 @@ test('saving without changes just closes the edit dialog', async () => {
 
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(patchCalls(fetchMock)).toEqual([]);
+});
+
+test('every session row links to its rounds page', async () => {
+  stubFetch(baseRoutes);
+  renderTab();
+  const links = await screen.findAllByRole('link', { name: 'Ván đấu' });
+  expect(links.map((link) => link.getAttribute('href'))).toEqual(['/buoi/5', '/buoi/6']);
 });

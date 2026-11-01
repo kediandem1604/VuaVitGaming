@@ -40,6 +40,11 @@
  * ngày cũ thì dùng hệ số của chính lần khai (ngày đã qua không còn trong danh sách đó). Lần khai
  * có `multiplier > 1` mang chip vàng `×m` cạnh chip trạng thái.
  *
+ * Khai theo ván (spec ván §5): ngày chơi mặc định thuộc mùa ≥ `ROUND_SCORING_FROM` thì form "Khai một
+ * trận" nhường chỗ cho danh sách buổi/ván (`RoundSessions.tsx`). Lần khai theo ván ở "Lần khai của tôi"
+ * ghi "Buổi {HH:mm} {dd/mm} · Ván {n}" + chip Thắng/Thua (ván thua không có chip ×m); form sửa của nó
+ * không có ô ngày và không gửi `playedOn`.
+ *
  * Highlight (spec highlight §3): ô file không bắt buộc, chỉ hiện khi tính năng dùng được;
  * gửi = tạo lần khai rồi mới tải file, lỗi tải file không huỷ lần khai. Danh sách có link
  * "Xem highlight" và nút Thêm/Đổi trên lần khai còn chờ duyệt (`ReportHighlight.tsx`).
@@ -66,9 +71,27 @@ import { usePresence } from '../lib/motion';
 import { addDaysIso, formatDateLabel, vnTodayIso } from '../lib/format';
 import { multiplierOn, rolesQuery, upcomingMultipliersQuery } from '../lib/queries';
 import { MY_BOUNTY_CLAIMS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
+import { isRoundSeason } from '../../shared/rounds';
+import { defaultPlayedOn } from '../../shared/report-day';
+import { roundReportLabel, sessionRoundsQuery } from '../lib/rounds';
 import { AccusationTab } from './AccusationTab';
+import { RoundSessions } from './RoundSessions';
 import { HighlightButton, HighlightField, checkHighlight, uploadHighlight, type HighlightUpload } from './ReportHighlight';
-import { DateField, HINT_CLASS, LABEL_CLASS, NoteField, SessionField, WINDOW_DAYS, useReportDay } from './reportFields';
+import {
+  DateField,
+  ExtraField,
+  HINT_CLASS,
+  LABEL_CLASS,
+  NoteField,
+  OPTIONAL_METRIC_DEFAULT,
+  PenaltyField,
+  SessionField,
+  WINDOW_DAYS,
+  mainHint,
+  parseExtraValue,
+  parsePenaltyValue,
+  useReportDay,
+} from './reportFields';
 
 const HIGHLIGHT_CONFIG_KEY = ['reports', 'highlight-config'] as const;
 
@@ -116,53 +139,9 @@ interface ReportPatchBody {
   extraValue?: number;
   /** Chỉ gửi với role có chỉ số phạt (không gửi thì server giữ giá trị cũ). */
   penaltyValue?: number;
-  playedOn: string;
+  /** Không gửi với lần khai theo ván (ngày cố định theo buổi). */
+  playedOn?: string;
   note: string | null;
-}
-
-/** Giá trị mặc định của ô chỉ số phụ và ô chỉ số phạt: 0 (hầu hết trận không có lần ám sát trong họp, không bắn sai). */
-const OPTIONAL_METRIC_DEFAULT = '0';
-
-/**
- * Phần role mà form cần để vẽ ô chỉ số chính (gợi ý điểm), ô chỉ số phụ và ô chỉ số phạt:
- * `RoleDto` (form khai) và `ReportDto.role` (form sửa) đều khớp. Mỗi bộ ba trường phụ/phạt cùng
- * có hoặc cùng null.
- */
-type FormRole = Pick<
-  ReportRoleDto,
-  'metricLabel' | 'maxPerGame' | 'points' | 'extraMetricLabel' | 'extraMaxPerGame' | 'extraPoints' | 'penaltyMetricLabel' | 'penaltyMaxPerGame' | 'penaltyPoints'
->;
-
-type ParsedMetric = { value: number; error: null } | { value: null; error: string };
-
-/** Ô số không bắt buộc đã gõ: trống = 0; phải là số nguyên trong [0, max], không thì lời báo cùng chữ với server. */
-function parseOptionalMetric(raw: string, max: number, outOfRange: string): ParsedMetric {
-  const value = raw.trim() === '' ? 0 : Number(raw);
-  if (!Number.isInteger(value) || value < 0 || value > max) return { value: null, error: outOfRange };
-  return { value, error: null };
-}
-
-/**
- * Đọc ô chỉ số phụ đã gõ: trống = 0; phải là số nguyên trong [0, extraMaxPerGame], không thì
- * trả lời báo cùng chữ với server (`VALUE_OUT_OF_RANGE`). Role không có chỉ số phụ → 0, không lỗi.
- */
-function parseExtraValue(raw: string, role: FormRole): ParsedMetric {
-  if (!hasExtraMetric(role)) return { value: 0, error: null };
-  const max = role.extraMaxPerGame ?? 0;
-  return parseOptionalMetric(raw, max, `Chỉ số phụ phải từ 0 đến ${max}`);
-}
-
-/** Như `parseExtraValue` cho ô chỉ số phạt: [0, penaltyMaxPerGame]; role không có chỉ số phạt → 0, không lỗi. */
-function parsePenaltyValue(raw: string, role: FormRole): ParsedMetric {
-  if (!hasPenaltyMetric(role)) return { value: 0, error: null };
-  const max = role.penaltyMaxPerGame ?? 0;
-  return parseOptionalMetric(raw, max, `Chỉ số phạt phải từ 0 đến ${max}`);
-}
-
-/** Gợi ý dưới ô chỉ số chính: "Tối đa N mỗi trận", thêm " · +P điểm mỗi lần" khi `points ≠ 1` (spec điểm role §5). */
-function mainHint(role: FormRole): string {
-  const base = `Tối đa ${role.maxPerGame} mỗi trận`;
-  return role.points === 1 ? base : `${base} · +${role.points} điểm mỗi lần`;
 }
 
 /** Gửi khai điểm: thân JSON và file highlight đã kiểm tra (nếu có chọn). */
@@ -281,13 +260,27 @@ function ReportTab({ roles }: { roles: UseQueryResult<RoleDto[]> }) {
    * coi như không có: ẩn ô file và nút Thêm/Đổi, không báo gì — khai điểm vẫn bình thường.
    */
   const highlight = config.data?.enabled ? config.data : null;
+  /**
+   * Ngày chơi mặc định (mốc 6:00) thuộc mùa luật ván → danh sách buổi/ván thay form theo ngày (spec ván
+   * §5). Mấy ngày đầu tháng 11, ngày cuối tháng 10 còn trong cửa sổ 3 ngày vẫn khai theo ngày được qua
+   * `/baocao`; web không giữ hai form song song.
+   */
+  const roundMode = isRoundSeason(defaultPlayedOn(new Date()).slice(0, 7));
 
   return (
     <>
-      <section className="panel flex flex-col gap-3">
-        <h2 className="text-xl leading-tight font-extrabold text-white">Khai một trận</h2>
-        <QueryState query={roles}>{(list) => <ReportForm roles={list} highlight={highlight} />}</QueryState>
-      </section>
+      {roundMode ? (
+        <section className="panel flex flex-col gap-3">
+          <h2 className="text-xl leading-tight font-extrabold text-white">Khai theo ván</h2>
+          <p className={HINT_CLASS}>Chọn ván của buổi bạn chơi rồi khai role</p>
+          <QueryState query={roles}>{(list) => <RoundSessions roles={list} />}</QueryState>
+        </section>
+      ) : (
+        <section className="panel flex flex-col gap-3">
+          <h2 className="text-xl leading-tight font-extrabold text-white">Khai một trận</h2>
+          <QueryState query={roles}>{(list) => <ReportForm roles={list} highlight={highlight} />}</QueryState>
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl leading-tight font-extrabold text-white">Lần khai của tôi</h2>
@@ -722,54 +715,6 @@ function FactionChip({ faction }: { faction: Faction }) {
 // Các ô dùng chung cho form khai và form sửa
 // ---------------------------------------------------------------------------
 
-interface MetricFieldProps {
-  id: string;
-  /** Role có chỉ số phụ/phạt tương ứng (người gọi đã kiểm `hasExtraMetric`/`hasPenaltyMetric`). */
-  role: FormRole;
-  value: string;
-  onChange: (value: string) => void;
-}
-
-interface OptionalMetricFieldProps {
-  id: string;
-  label: string;
-  max: number;
-  hint: string;
-  value: string;
-  onChange: (value: string) => void;
-}
-
-/** Ô số không bắt buộc cùng dáng với ô chỉ số chính: nhãn, giới hạn [0, max], một dòng gợi ý. */
-function OptionalMetricField({ id, label, max, hint, value, onChange }: OptionalMetricFieldProps) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className={LABEL_CLASS}>
-        {label}
-      </label>
-      <input id={id} type="number" inputMode="numeric" min={0} max={max} step={1} className="field" value={value} onChange={(event) => onChange(event.target.value)} />
-      <p className={HINT_CLASS}>{hint}</p>
-    </div>
-  );
-}
-
-/**
- * Ô chỉ số phụ (spec chỉ số phụ §6): nhãn = `extraMetricLabel`, giới hạn [0, extraMaxPerGame], gợi
- * ý "Tối đa N mỗi trận · +P điểm mỗi lần".
- */
-function ExtraField({ id, role, value, onChange }: MetricFieldProps) {
-  const max = role.extraMaxPerGame ?? 0;
-  return <OptionalMetricField id={id} label={role.extraMetricLabel ?? ''} max={max} hint={`Tối đa ${max} mỗi trận · +${role.extraPoints} điểm mỗi lần`} value={value} onChange={onChange} />;
-}
-
-/**
- * Ô chỉ số phạt (spec điểm role §5): nhãn = `penaltyMetricLabel`, giới hạn [0, penaltyMaxPerGame],
- * gợi ý "Tối đa N mỗi trận · −P điểm mỗi lần" (dấu trừ Unicode, như khi đọc một lần khai).
- */
-function PenaltyField({ id, role, value, onChange }: MetricFieldProps) {
-  const max = role.penaltyMaxPerGame ?? 0;
-  return <OptionalMetricField id={id} label={role.penaltyMetricLabel ?? ''} max={max} hint={`Tối đa ${max} mỗi trận · −${role.penaltyPoints} điểm mỗi lần`} value={value} onChange={onChange} />;
-}
-
 // ---------------------------------------------------------------------------
 // Treo thưởng của tôi (spec treo thưởng §6)
 // ---------------------------------------------------------------------------
@@ -838,6 +783,8 @@ function ReportItem({ report, highlight }: ReportItemProps) {
   const chip = STATUS_CHIP[report.status];
   /** Mục trừ điểm do bị báo cáo: dòng giá trị đọc theo báo cáo, không lặp ghi chú của server (cùng nội dung). */
   const penaltyOf = report.source === 'accusation' ? report.penaltyOf : null;
+  // Lần khai theo ván: giờ của buổi lấy từ ván của buổi (cùng cache với trang buổi / danh sách ván).
+  const roundSession = useQuery({ ...sessionRoundsQuery(report.round?.sessionId ?? 0), enabled: Boolean(report.round) });
 
   return (
     <li className="panel flex flex-col gap-2">
@@ -847,7 +794,9 @@ function ReportItem({ report, highlight }: ReportItemProps) {
         </span>
         <span className={cx('chip', chip.className)}>{chip.text}</span>
         {report.source === 'accusation' && <span className="chip bg-duck-soft text-night-950">{PENALISED_CHIP}</span>}
-        <MultiplierChip multiplier={report.multiplier} />
+        {report.round && <RoundResultChip round={report.round} />}
+        {/* Ván thua: điểm cộng (thứ được nhân) bằng 0 nên không hiện chip ×m. */}
+        {(!report.round || report.round.won) && <MultiplierChip multiplier={report.multiplier} />}
         <time dateTime={report.playedOn} className="ml-auto text-sm text-night-300 tabular-nums">
           {formatDateLabel(report.playedOn)}
         </time>
@@ -859,7 +808,11 @@ function ReportItem({ report, highlight }: ReportItemProps) {
         <>
           {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
           <p className="font-bold break-words text-white">{penaltyOf ? formatPenaltyLine(penaltyOf) : formatReportValue(report, report.role)}</p>
-          {report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>}
+          {report.round ? (
+            <p className={HINT_CLASS}>{roundReportLabel(report.round.number, report.playedOn, roundSession.data?.session.startsAt)}</p>
+          ) : (
+            report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>
+          )}
           {report.note && !penaltyOf && <p className="text-sm text-night-200">{report.note}</p>}
           {/* Báo cáo cũ gửi kèm lần khai (trước khi tách tab): chỉ để xem. */}
           {report.accusation && <MyAccusation accusation={report.accusation} duplicate={report.accusationDuplicate} />}
@@ -891,6 +844,12 @@ function ReportItem({ report, highlight }: ReportItemProps) {
       )}
     </li>
   );
+}
+
+/** Chip kết quả ván của lần khai theo ván: thắng / thua / chưa chọn phe thắng. */
+function RoundResultChip({ round }: { round: NonNullable<ReportDto['round']> }) {
+  if (round.winnerFaction === null) return <span className="chip px-2.5 py-0.5">Chưa có phe thắng</span>;
+  return round.won ? <span className="chip bg-ok px-2.5 py-0.5 text-night-950">Thắng</span> : <span className="chip bg-duck-soft px-2.5 py-0.5 text-night-950">Thua</span>;
 }
 
 /**
@@ -970,7 +929,8 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
       value: Number(value),
       ...(hasExtraMetric(report.role) ? { extraValue: extra.value } : {}),
       ...(hasPenaltyMetric(report.role) ? { penaltyValue: penalty.value } : {}),
-      playedOn,
+      // Lần khai theo ván: ngày cố định theo buổi của ván, không gửi.
+      ...(report.round ? {} : { playedOn }),
       note: trimmedNote === '' ? null : trimmedNote,
     });
   };
@@ -1021,13 +981,15 @@ function EditForm({ report, onDone }: { report: ReportDto; onDone: () => void })
           }}
         />
       )}
-      <DateField
-        id={ids.date}
-        today={today}
-        value={playedOn}
-        multiplier={editMultiplier(multipliers.data, playedOn, today, report)}
-        onChange={setPlayedOn}
-      />
+      {!report.round && (
+        <DateField
+          id={ids.date}
+          today={today}
+          value={playedOn}
+          multiplier={editMultiplier(multipliers.data, playedOn, today, report)}
+          onChange={setPlayedOn}
+        />
+      )}
       <NoteField id={ids.note} value={note} onChange={setNote} />
       <div className="flex flex-wrap gap-2">
         <button type="submit" className="btn-primary" disabled={save.isPending}>

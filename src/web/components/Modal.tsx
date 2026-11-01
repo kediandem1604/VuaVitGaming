@@ -24,6 +24,8 @@ interface ModalProps {
   titleId: string;
   onClose: () => void;
   children: ReactNode;
+  /** `wide` = hộp rộng tới `max-w-4xl` (xem ảnh phóng to); mặc định `max-w-md`. */
+  size?: 'md' | 'wide';
 }
 
 const FOCUSABLE =
@@ -33,7 +35,7 @@ function focusableIn(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => !el.hasAttribute('hidden') && el.getAttribute('aria-hidden') !== 'true');
 }
 
-export function Modal({ titleId, onClose, children }: ModalProps) {
+export function Modal({ titleId, onClose, children, size = 'md' }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const state = usePresenceState();
@@ -118,7 +120,7 @@ export function Modal({ titleId, onClose, children }: ModalProps) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="panel layer-pop flex max-h-full w-full max-w-md flex-col gap-3 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+        className={`panel layer-pop flex max-h-full w-full ${size === 'wide' ? 'max-w-4xl' : 'max-w-md'} flex-col gap-3 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-gold`}
         data-state={state}
         data-side="center"
         onClick={(event) => event.stopPropagation()}

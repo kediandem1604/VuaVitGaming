@@ -1,9 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as rtlRender, screen, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { SessionAttendeeDto, SessionDto } from '../../src/shared/api-types';
 import { SessionCard } from '../../src/web/components/SessionCard';
 import { reminderChannels, type ReminderChannels } from '../../src/web/lib/reminders';
+
+/** Thẻ có link (Ván đấu, Hồ sơ) nên luôn vẽ trong một router. */
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 const a: SessionAttendeeDto = { memberId: 1, displayName: 'Ngỗng Một', avatarUrl: 'https://cdn.example/a.png' };
 const b: SessionAttendeeDto = { memberId: 2, displayName: 'Vịt Hai', avatarUrl: null };
@@ -190,7 +194,7 @@ const upcoming: SessionDto = { ...s, startsAt: '2099-01-01T14:00:00.000Z' };
 
 /** Thẻ buổi với kênh nhắc cho trước; trong router vì dòng "đã tắt nhắc" có link sang Hồ sơ. */
 const renderWithReminders = (reminders: ReminderChannels, session: SessionDto = upcoming) =>
-  render(
+  rtlRender(
     <MemoryRouter>
       <SessionCard session={session} onToggle={vi.fn()} pending={false} reminders={reminders} />
     </MemoryRouter>,
@@ -258,4 +262,18 @@ test('the reminder line is hidden once the session is live, and on cancelled or 
 test('shows the error message near the button', () => {
   render(<SessionCard reminders={both} session={s} onToggle={vi.fn()} pending={false} error="Đã đủ người" />);
   expect(screen.getByRole('alert')).toHaveTextContent('Đã đủ người');
+});
+
+test('a started or ended session links to its rounds page; an upcoming or cancelled one does not', () => {
+  const { unmount } = render(<SessionCard reminders={both} session={s} onToggle={vi.fn()} pending={false} />);
+  expect(screen.getByRole('link', { name: 'Ván đấu' })).toHaveAttribute('href', '/buoi/7');
+  unmount();
+  render(<SessionCard reminders={both} session={{ ...upcoming, status: 'ended' }} onToggle={vi.fn()} pending={false} />);
+  expect(screen.getByRole('link', { name: 'Ván đấu' })).toBeInTheDocument();
+  cleanup();
+  render(<SessionCard reminders={both} session={upcoming} onToggle={vi.fn()} pending={false} />);
+  expect(screen.queryByRole('link', { name: 'Ván đấu' })).not.toBeInTheDocument();
+  cleanup();
+  render(<SessionCard reminders={both} session={{ ...s, status: 'cancelled' }} onToggle={vi.fn()} pending={false} />);
+  expect(screen.queryByRole('link', { name: 'Ván đấu' })).not.toBeInTheDocument();
 });

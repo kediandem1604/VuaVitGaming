@@ -23,6 +23,7 @@ export const BadgesPage = lazyPage(() => import('./pages/BadgesPage').then((m) =
 export const MemberPage = lazyPage(() => import('./pages/MemberPage').then((m) => ({ default: m.MemberPage })));
 export const ReportPage = lazyPage(() => import('./pages/ReportPage').then((m) => ({ default: m.ReportPage })));
 export const ProfilePage = lazyPage(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })));
+export const SessionPage = lazyPage(() => import('./pages/SessionPage').then((m) => ({ default: m.SessionPage })));
 export const AdminPage = lazyPage(() => import('./pages/admin/AdminPage').then((m) => ({ default: m.AdminPage })));
 
 /** `prefetchQuery` còn tươi thì TanStack tự bỏ qua, nên gọi mỗi lần tỏ ý định cũng không tốn mạng. */
@@ -41,3 +42,5 @@ registerPrefetchRoute('/ho-so', ProfilePage.preload, (qc) => void qc.prefetchQue
 registerPrefetchRoute('/quan-tri', AdminPage.preload);
 // Trang thành viên: một chunk cho mọi id (dữ liệu theo id thì để trang tự tải).
 registerPrefetchRoute('/thanh-vien/:id', MemberPage.preload);
+// Trang buổi (ván đấu): một chunk cho mọi id; role để mở form khai ngay.
+registerPrefetchRoute('/buoi/:id', SessionPage.preload, roles);

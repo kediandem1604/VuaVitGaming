@@ -58,10 +58,24 @@ export async function apiUpload<T>(path: string, file: File, contentType: string
   throw await failure(res);
 }
 
-/** Hai route tải file (ảnh role, highlight) là ngoại lệ duy nhất của guard "chỉ nhận JSON" trên server. */
+/**
+ * `POST`/`PUT` một ảnh dưới dạng body thô (ảnh ván: thêm ván, đổi ảnh — không phải multipart) với
+ * content-type của chính tệp, đọc JSON trả về. Lỗi và 401 xử lý như mọi lời gọi khác.
+ */
+export async function apiSendFile<T>(method: 'POST' | 'PUT', path: string, file: Blob): Promise<T> {
+  const res = await sendRaw(method, path, file, file.type);
+  if (res.ok) return (await res.json()) as T;
+  throw await failure(res);
+}
+
+/** Các route tải file (ảnh role, highlight, ảnh ván) là ngoại lệ duy nhất của guard "chỉ nhận JSON" trên server. */
 function putRaw(path: string, body: Blob, contentType: string): Promise<Response> {
+  return sendRaw('PUT', path, body, contentType);
+}
+
+function sendRaw(method: 'POST' | 'PUT', path: string, body: Blob, contentType: string): Promise<Response> {
   return fetch(path, {
-    method: 'PUT',
+    method,
     credentials: 'include',
     headers: { accept: 'application/json', 'content-type': contentType },
     body,
