@@ -51,6 +51,8 @@ export interface SessionDto {
   attendees: SessionAttendeeDto[];
   /** `'going'` nếu người đang đăng nhập có trong `attendees`. */
   myStatus: 'going' | null;
+  /** Số ván đã up của buổi (spec ván §4). */
+  roundCount: number;
 }
 
 /** Một người thắng một hạng mục tri ân. */
@@ -257,8 +259,12 @@ export interface ReportRoundDto {
   id: number;
   number: number;
   sessionId: number;
+  /** Giờ bắt đầu của buổi chứa ván (ISO 8601). */
+  sessionStartsAt: string;
   winnerFaction: Faction | null;
   won: boolean;
+  /** Ảnh ván, cùng dạng `?v=` với `RoundDto.imageUrl` (đổi theo mỗi lần thay ảnh). */
+  imageUrl: string;
 }
 
 /**

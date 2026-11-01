@@ -63,7 +63,7 @@ import type { StatReport } from '@prisma/client';
 import { z } from 'zod';
 import type { AccessLevel, ReportDto, ReviewedReportDto, RoundReportInput } from '../../../shared/api-types.js';
 import { formatReportValue, reportPoints } from '../../../shared/metric.js';
-import { DAY_REPORTS_REPLACED_MESSAGE, isRoundSeason, roundReportPoints, roundWon } from '../../../shared/rounds.js';
+import { DAY_REPORTS_REPLACED_MESSAGE, isRoundSeason, roundImageUrl, roundReportPoints, roundWon } from '../../../shared/rounds.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import {
@@ -785,7 +785,17 @@ const REPORT_SELECT = {
   highlightMessageId: true,
   member: { select: { id: true, displayName: true } },
   // Người thắng của ván chỉ có khi Phe thứ 3 thắng — vài dòng mỗi ván.
-  round: { select: { id: true, number: true, sessionId: true, winnerFaction: true, winners: { select: { memberId: true } } } },
+  round: {
+    select: {
+      id: true,
+      number: true,
+      sessionId: true,
+      winnerFaction: true,
+      imageUpdatedAt: true,
+      session: { select: { startsAt: true } },
+      winners: { select: { memberId: true } },
+    },
+  },
   role: {
     select: {
       id: true,
@@ -877,7 +887,15 @@ function toReportDto(
     accusationWaitingFor: queue ? (hiddenAs?.waitingFor ?? null) : null,
     penaltyOf: r.penaltyFor ? toAccusationDto(r.penaltyFor) : null,
     round: r.round
-      ? { id: r.round.id, number: r.round.number, sessionId: r.round.sessionId, winnerFaction: r.round.winnerFaction, won }
+      ? {
+          id: r.round.id,
+          number: r.round.number,
+          sessionId: r.round.sessionId,
+          sessionStartsAt: r.round.session.startsAt.toISOString(),
+          winnerFaction: r.round.winnerFaction,
+          won,
+          imageUrl: roundImageUrl(r.round.id, r.round.imageUpdatedAt),
+        }
       : null,
   };
 }

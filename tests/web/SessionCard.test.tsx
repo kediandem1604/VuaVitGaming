@@ -23,6 +23,7 @@ const s: SessionDto = {
   status: 'scheduled',
   attendees: [a],
   myStatus: null,
+  roundCount: 0,
 };
 
 /** Nhắc qua cả email và Discord — mặc định cho các test không xét dòng nhắc. */

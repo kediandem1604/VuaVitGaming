@@ -64,7 +64,12 @@ const updateBody = z
   .strict()
   .refine((body) => (body.date === undefined) === (body.time === undefined));
 
-export function toSessionDto(view: SessionView, avatars: ReadonlyMap<number, string | null>, meId: number): SessionDto {
+export function toSessionDto(
+  view: SessionView,
+  avatars: ReadonlyMap<number, string | null>,
+  meId: number,
+  roundCounts: ReadonlyMap<number, number>,
+): SessionDto {
   return {
     id: view.id,
     startsAt: view.startsAt.toISOString(),
@@ -79,6 +84,7 @@ export function toSessionDto(view: SessionView, avatars: ReadonlyMap<number, str
       avatarUrl: avatars.get(a.memberId) ?? null,
     })),
     myStatus: view.attendees.some((a) => a.memberId === meId) ? 'going' : null,
+    roundCount: roundCounts.get(view.id) ?? 0,
   };
 }
 
@@ -88,13 +94,24 @@ function avatarsOf(ctx: Ctx, views: SessionView[]): Promise<Map<number, string |
   return avatarUrlsByMemberId(ctx, ids);
 }
 
+/** Số ván của từng buổi — một truy vấn `GROUP BY session_id` cho cả danh sách (không N+1). */
+async function roundCountsOf(ctx: Ctx, views: SessionView[]): Promise<Map<number, number>> {
+  if (views.length === 0) return new Map();
+  const rows = await ctx.db.gameRound.groupBy({
+    by: ['sessionId'],
+    where: { sessionId: { in: views.map((v) => v.id) } },
+    _count: { _all: true },
+  });
+  return new Map(rows.map((r) => [r.sessionId, r._count._all]));
+}
+
 async function toDtos(ctx: Ctx, views: SessionView[], meId: number): Promise<SessionDto[]> {
-  const avatars = await avatarsOf(ctx, views);
-  return views.map((v) => toSessionDto(v, avatars, meId));
+  const [avatars, roundCounts] = await Promise.all([avatarsOf(ctx, views), roundCountsOf(ctx, views)]);
+  return views.map((v) => toSessionDto(v, avatars, meId, roundCounts));
 }
 
 async function toDto(ctx: Ctx, view: SessionView, meId: number): Promise<SessionDto> {
-  return toSessionDto(view, await avatarsOf(ctx, [view]), meId);
+  return (await toDtos(ctx, [view], meId))[0]!;
 }
 
 /** Ngày + giờ VN → mốc UTC. Dạng đã kiểm tra bằng zod; ngày không tồn tại → 400. */

@@ -19,6 +19,7 @@ const base: Omit<SessionDto, 'id' | 'startsAt' | 'attendees'> = {
   note: null,
   status: 'scheduled',
   myStatus: null,
+  roundCount: 0,
 };
 
 // Trả về theo thứ tự ngược giờ để kiểm tra trang tự sắp xếp theo startsAt.

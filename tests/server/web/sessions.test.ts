@@ -37,6 +37,11 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+/** Ván ghi thẳng vào DB (ảnh giả) cho buổi `sessionId` với số `number`. */
+async function insertRound(sessionId: number, number: number, createdById: number) {
+  await testDb.gameRound.create({ data: { sessionId, number, image: Buffer.from('png'), imageMime: 'image/png', imageUpdatedAt: new Date(), createdById } });
+}
+
 /** Cookie phiên (đã ký) của một thành viên — không qua OAuth. */
 async function sidFor(member: Member): Promise<string> {
   const session = await createWebSession(ctx, member.id);
@@ -123,6 +128,7 @@ test('GET /api/sessions defaults to today in VN and maps the DTO with avatars an
         { memberId: me.id, displayName: 'Tôi', avatarUrl: 'https://cdn/me.png' },
       ],
       myStatus: 'going',
+      roundCount: 0,
     },
   ]);
 
@@ -237,6 +243,7 @@ test('member cannot create session, mod can', async () => {
     status: 'scheduled',
     attendees: [],
     myStatus: null,
+    roundCount: 0,
   });
   expect(await testDb.gameSession.findUniqueOrThrow({ where: { id: dto.id } })).toMatchObject({
     createdById: mod.id,
@@ -375,6 +382,7 @@ test('only mods and admins can edit a session', async () => {
     status: 'scheduled',
     attendees: [{ memberId: me.id, displayName: 'Tôi', avatarUrl: null }],
     myStatus: null, // mod không tham gia buổi này
+    roundCount: 0,
   });
   // Tin Discord được sửa theo bản mới.
   expect(notifier.updated.at(-1)?.view).toMatchObject({ roomCode: 'ABC123', note: 'Vào sớm', capacity: 10 });
@@ -472,4 +480,57 @@ test('editing a session needs a JSON body like every other write', async () => {
   });
   expect(res.statusCode).toBe(415);
   expect((await testDb.gameSession.findUniqueOrThrow({ where: { id: s.id } })).roomCode).toBeNull();
+});
+
+test('SessionDto.roundCount: số ván mỗi buổi, một truy vấn đếm cho cả danh sách', async () => {
+  const { member, sid } = await memberWithSid({ accessLevel: 'mod' });
+  const a = await insertSession(testDb, { startsAt: new Date('2026-10-22T12:00:00Z') });
+  const b = await insertSession(testDb, { startsAt: new Date('2026-10-22T14:00:00Z') });
+  const c = await insertSession(testDb, { startsAt: new Date('2026-10-22T15:00:00Z') });
+  await insertRound(a.id, 1, member.id);
+  await insertRound(a.id, 2, member.id);
+  await insertRound(a.id, 3, member.id);
+  await insertRound(b.id, 1, member.id);
+  // Buổi ngày khác không tính.
+  const other = await insertSession(testDb, { startsAt: new Date('2026-10-23T14:00:00Z') });
+  await insertRound(other.id, 1, member.id);
+
+  // Đếm số truy vấn bảng game_rounds khi liệt kê.
+  const ops: string[] = [];
+  const db = testDb.$extends({
+    query: {
+      gameRound: {
+        async $allOperations({ operation, args, query }) {
+          ops.push(operation);
+          return query(args);
+        },
+      },
+    },
+  }) as unknown as Ctx['db'];
+  const counted = await buildApp({ ...ctx, db }, { oauth });
+  await counted.ready();
+  try {
+    setNow('2026-10-22T16:00:00Z');
+    const res = await counted.inject({ url: '/api/sessions?date=2026-10-22', cookies: { ggd_sid: sid } });
+    expect(res.statusCode).toBe(200);
+    const list = res.json<SessionDto[]>();
+    expect(list.map((v) => [v.id, v.roundCount])).toEqual([
+      [a.id, 3],
+      [b.id, 1],
+      [c.id, 0],
+    ]);
+    expect(ops).toHaveLength(1);
+  } finally {
+    await counted.close();
+  }
+
+  // Sửa buổi cũng trả số ván.
+  const patched = await app.inject({
+    method: 'PATCH',
+    url: `/api/admin/sessions/${a.id}`,
+    cookies: { ggd_sid: sid },
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({ note: 'x' }),
+  });
+  expect(patched.json<SessionDto>()).toMatchObject({ id: a.id, roundCount: 3 });
 });

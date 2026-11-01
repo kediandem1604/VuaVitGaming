@@ -292,9 +292,9 @@ function AdminSessionRow({ session, onMoved }: { session: SessionDto; onMoved: (
         </div>
         {session.roomCode && <p className={cx('font-bold', secondary)}>Mã phòng: {session.roomCode}</p>}
         {session.note && <p className={secondary}>{session.note}</p>}
-        {/* Trang buổi ở chế độ quản lý ván (spec ván §4). SessionDto không có số ván nên link không kèm số. */}
+        {/* Trang buổi ở chế độ quản lý ván (spec ván §4), kèm số ván đã up. */}
         <PrefetchLink to={sessionPath(session.id)} className="self-start font-bold text-gold underline underline-offset-2">
-          Ván đấu
+          Ván đấu ({session.roundCount})
         </PrefetchLink>
         {open && (
           <div className="flex flex-col gap-1">

@@ -15,7 +15,7 @@ const PELICAN = { id: 30, nameVi: 'Bồ nông', icon: '🦩', faction: 'neutral'
 // 19:00 giờ VN hôm nay.
 const today = vnTodayIso();
 const tonight = `${today}T12:00:00.000Z`;
-const session: SessionDto = { id: 7, startsAt: tonight, modeName: 'Cổ điển', capacity: 16, roomCode: null, note: null, status: 'scheduled', attendees: [], myStatus: null };
+const session: SessionDto = { id: 7, startsAt: tonight, modeName: 'Cổ điển', capacity: 16, roomCode: null, note: null, status: 'scheduled', attendees: [], myStatus: null, roundCount: 0 };
 
 const bounty = (over: Partial<BountyDto> & Pick<BountyDto, 'id' | 'title'>): BountyDto => ({
   description: null,

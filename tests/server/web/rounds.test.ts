@@ -174,7 +174,15 @@ test('khai theo ván qua API: 201 ReportDto có round; trùng 409; body có ngà
     sessionId: session.id,
     value: 2,
     note: 'ok',
-    round: { id: round.id, number: 1, sessionId: session.id, winnerFaction: 'duck', won: true },
+    round: {
+      id: round.id,
+      number: 1,
+      sessionId: session.id,
+      sessionStartsAt: '2026-11-05T14:00:00.000Z',
+      winnerFaction: 'duck',
+      won: true,
+      imageUrl: round.imageUrl,
+    },
   });
 
   const dup = await json('POST', url, memberSid, { roleId: duck.id, value: 0 });

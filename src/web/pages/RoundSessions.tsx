@@ -1,7 +1,8 @@
 /**
  * Tab Khai điểm từ mùa luật ván (spec ván §5 "Trang Khai điểm"): thay form khai theo ngày bằng danh
  * sách buổi trong 3 ngày gần đây (hôm nay lùi 3 ngày, giờ VN), mới nhất trước — buổi mặc định theo
- * mốc 6:00 (`pickDefaultSession`) đứng đầu. Chỉ các buổi đã bắt đầu (cộng buổi mặc định), không bị
+ * `pickLatestStartedSession` (buổi mới nhất đã bắt đầu từ đầu ngày chơi mặc định, kể cả buổi sau nửa
+ * đêm — giống `/baocao van` bỏ trống `ngay`) đứng đầu. Chỉ các buổi đã bắt đầu (cộng buổi mặc định), không bị
  * huỷ, thuộc mùa luật ván. Mỗi buổi: các ván (ảnh nhỏ dẫn sang `/buoi/:id#van-{n}`, chip phe thắng,
  * "Đã khai: {role}" hoặc nút "Khai" mở form ngay dưới ván); buổi chưa có ván → "Buổi này chưa có ảnh
  * ván, chờ mod up".
@@ -12,7 +13,7 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { RoleDto, RoundDto, SessionDto } from '../../shared/api-types';
-import { pickDefaultSession } from '../../shared/report-day';
+import { pickLatestStartedSession } from '../../shared/report-day';
 import { apiGet, errorMessage } from '../api';
 import { EmptyState } from '../components/EmptyState';
 import { PrefetchLink } from '../components/PrefetchLink';
@@ -29,7 +30,7 @@ import { RoundReportForm } from './RoundReportForm';
  */
 export function roundSessionsToShow(sessions: readonly SessionDto[], now: Date): SessionDto[] {
   const open = sessions.filter((session) => sessionTakesRoundReports(session, now));
-  const preferred = pickDefaultSession(open, now);
+  const preferred = pickLatestStartedSession(open, now);
   const started = open.filter((session) => session !== preferred && new Date(session.startsAt).getTime() <= now.getTime());
   started.sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
   return preferred ? [preferred, ...started] : started;

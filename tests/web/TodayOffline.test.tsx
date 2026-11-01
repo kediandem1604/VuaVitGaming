@@ -45,6 +45,7 @@ const session: SessionDto = {
   status: 'scheduled',
   attendees: [],
   myStatus: null,
+  roundCount: 0,
 };
 const emptyHall: HallOfDayDto = { date: '2026-10-22', sessions: [] };
 

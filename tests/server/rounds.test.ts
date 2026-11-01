@@ -17,7 +17,7 @@ import {
   getRoleLeader,
   getRoleLeaderboard,
 } from '../../src/server/modules/stats/leaderboard.js';
-import { listMyReports, reviewReport } from '../../src/server/modules/stats/reports.js';
+import { getReportDtos, listMyReports, reviewReport } from '../../src/server/modules/stats/reports.js';
 import { ROUND_SCORING_FROM, isRoundSeason, roundReportPoints, roundWon } from '../../src/shared/rounds.js';
 import { makeTestCtx } from '../helpers/ctx.js';
 import { resetDb, testDb } from '../helpers/db.js';
@@ -174,6 +174,17 @@ test('ngày nhân điểm nhân phần chỉ số của lần khai thắng, khô
   expect(await scoreOf(vigilante.id, a.id)).toBe(1 + 2 * 5 * 2 - 3);
   const [dto] = await listMyReports(ctx, a.id);
   expect(dto).toMatchObject({ multiplier: 2, points: 1 + 20 - 3, round: { id: r1, number: 1, sessionId: session.id, winnerFaction: 'goose', won: true } });
+  // Giờ buổi và ảnh ván (cùng dạng `?v=` với RoundDto) đi kèm lần khai.
+  const imageAt = (await testDb.gameRound.findUniqueOrThrow({ where: { id: r1 } })).imageUpdatedAt;
+  expect(dto!.round).toEqual({
+    id: r1,
+    number: 1,
+    sessionId: session.id,
+    sessionStartsAt: new Date(SESSION_AT).toISOString(),
+    winnerFaction: 'goose',
+    won: true,
+    imageUrl: `/api/rounds/${r1}/image?v=${imageAt.getTime()}`,
+  });
 });
 
 test('mùa 10 (không có ván) giữ nguyên điểm; lần khai theo ngày và theo ván cùng ô cộng đúng', async () => {
@@ -330,6 +341,10 @@ test('đổi ảnh: thay nội dung, mime và mốc đổi ảnh', async () => {
   setNow('2026-11-05T06:00:00Z');
   const dto = await replaceRoundImage(ctx, mod.id, r1, JPG);
   expect(dto.imageUpdatedAt).toBe('2026-11-05T06:00:00.000Z');
+  // Lần khai của ván cũng đổi `?v=` theo ảnh mới.
+  const [mine] = await getReportDtos(ctx, [await roundReport({ memberId: a.id, roleId: vigilante.id, roundId: r1, status: 'pending' })]);
+  expect(mine!.round?.imageUrl).toBe(`/api/rounds/${r1}/image?v=${Date.parse('2026-11-05T06:00:00Z')}`);
+  expect(mine!.round?.imageUrl).toBe(dto.imageUrl);
   const img = await getRoundImage(ctx, r1);
   expect(img?.mime).toBe('image/jpeg');
   expect(img?.buf.equals(JPG)).toBe(true);

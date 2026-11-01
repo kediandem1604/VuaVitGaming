@@ -67,14 +67,6 @@ export function sessionPath(sessionId: number, number?: number): string {
   return number === undefined ? `/buoi/${sessionId}` : `/buoi/${sessionId}#${roundAnchor(number)}`;
 }
 
-/**
- * Ảnh của một ván không kèm `?v=` — dùng khi chỉ có id ván (lần khai trong Duyệt điểm). Ảnh vừa đổi
- * có thể còn bản cũ trong cache trình duyệt tối đa 5 phút (`max-age=300`).
- */
-export function roundImagePath(roundId: number): string {
-  return `/api/rounds/${roundId}/image`;
-}
-
 /** Ngày VN `YYYY-MM-DD` của giờ bắt đầu một buổi. */
 export function sessionVnDate(startsAt: string): string {
   return vnTodayIso(new Date(startsAt));
@@ -85,13 +77,9 @@ export function sessionShortLabel(startsAt: string): string {
   return `Buổi ${formatTime(startsAt)} ${formatDayMonth(sessionVnDate(startsAt))}`;
 }
 
-/**
- * Nhãn lần khai theo ván ở "Lần khai của tôi": "Buổi {HH:mm} {dd/mm} · Ván {n}". Chưa biết giờ buổi
- * (đang tải) thì "Buổi {dd/mm} · Ván {n}" theo ngày chơi (= ngày VN của buổi).
- */
-export function roundReportLabel(number: number, playedOn: string, startsAt: string | undefined): string {
-  const session = startsAt === undefined ? `Buổi ${formatDayMonth(playedOn)}` : sessionShortLabel(startsAt);
-  return `${session} · Ván ${number}`;
+/** Nhãn lần khai theo ván ở "Lần khai của tôi": "Buổi {HH:mm} {dd/mm} · Ván {n}" (giờ buổi từ `ReportDto.round.sessionStartsAt`). */
+export function roundReportLabel(number: number, sessionStartsAt: string): string {
+  return `${sessionShortLabel(sessionStartsAt)} · Ván ${number}`;
 }
 
 /** Số ngày lùi tối đa của cửa sổ khai (khớp server). */

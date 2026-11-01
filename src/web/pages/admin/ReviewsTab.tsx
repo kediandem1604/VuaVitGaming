@@ -66,7 +66,7 @@ import { cx } from '../../lib/cx';
 import { useStaggerOnce } from '../../lib/motion';
 import { formatDateLabel, formatTime } from '../../lib/format';
 import { approvedAccusationsQuery, pendingAccusationsQuery } from '../../lib/queries';
-import { roundImagePath, winnerText } from '../../lib/rounds';
+import { winnerText } from '../../lib/rounds';
 import {
   APPROVED_ACCUSATIONS_KEY,
   APPROVED_BOUNTY_CLAIMS_KEY,
@@ -777,7 +777,8 @@ function ReportSummary({ report, meta }: { report: ReportDto; meta: ReactNode })
  */
 function RoundThumb({ round }: { round: NonNullable<ReportDto['round']> }) {
   const [zoom, setZoom] = useState(false);
-  const src = roundImagePath(round.id);
+  // `imageUrl` có `?v=` theo lần đổi ảnh gần nhất → mod luôn thấy ảnh mới, không dính cache 5 phút.
+  const src = round.imageUrl;
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" aria-label={`Phóng to ảnh ván ${round.number}`} className="shrink-0 overflow-hidden rounded-lg border-2 border-night-700 hover:border-gold" onClick={() => setZoom(true)}>

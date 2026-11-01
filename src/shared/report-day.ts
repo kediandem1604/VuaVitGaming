@@ -45,3 +45,25 @@ export function pickDefaultSession<T extends SessionLike>(sessions: readonly T[]
   const started = sameDay.filter(({ at }) => at <= now.getTime());
   return (started.at(-1) ?? sameDay[0]!).s;
 }
+
+/** Mốc 00:00 giờ VN của ngày chơi mặc định lúc `now` (đầu khoảng mà `pickLatestStartedSession` xét). */
+export function defaultPlayedOnStart(now: Date): Date {
+  return new Date(Date.parse(`${defaultPlayedOn(now)}T00:00:00Z`) - VN_OFFSET_MS);
+}
+
+/**
+ * Buổi mặc định khi khai theo ván mà không chọn ngày (bot `/baocao van` bỏ trống `ngay`, tab Khai điểm
+ * trên web — hai kênh phải chọn giống nhau): trong các buổi không bị huỷ có `startsAt` từ 00:00 VN của
+ * ngày chơi mặc định tới `now`, buổi bắt đầu muộn nhất. Nhờ vậy buổi bắt đầu sau nửa đêm (00:00–05:59,
+ * ngày VN hôm nay trong khi ngày chơi mặc định vẫn là hôm qua) được chọn thay cho buổi tối hôm qua.
+ * Chưa buổi nào bắt đầu → `pickDefaultSession` của ngày chơi mặc định (buổi sớm nhất ngày đó, hoặc null).
+ */
+export function pickLatestStartedSession<T extends SessionLike>(sessions: readonly T[], now: Date): T | null {
+  const from = defaultPlayedOnStart(now).getTime();
+  const latest = sessions
+    .map((s) => ({ s, at: new Date(s.startsAt).getTime() }))
+    .filter(({ s, at }) => s.status !== 'cancelled' && !Number.isNaN(at) && at >= from && at <= now.getTime())
+    .sort((x, y) => x.at - y.at)
+    .at(-1);
+  return latest ? latest.s : pickDefaultSession(sessions, now);
+}

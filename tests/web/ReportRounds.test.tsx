@@ -47,6 +47,7 @@ const session = (id: number, startsAt: string, over: Partial<SessionDto> = {}): 
   status: 'ended',
   attendees: [],
   myStatus: null,
+  roundCount: 0,
   ...over,
 });
 
@@ -92,7 +93,7 @@ const roundReport = (over: Partial<ReportDto> = {}): ReportDto => ({
   accusationDuplicate: false,
   accusationWaitingFor: null,
   penaltyOf: null,
-  round: { id: 101, number: 1, sessionId: 7, winnerFaction: 'duck', won: true },
+  round: { id: 101, number: 1, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: 'duck', won: true, imageUrl: '/api/rounds/101/image?v=1' },
   ...over,
 });
 
@@ -162,6 +163,12 @@ test('picking sessions: default first, then started ones newest first; no cancel
   expect(roundSessionsToShow([october, yesterday, cancelled, today23, today20], NOW).map((s) => s.id)).toEqual([7, 6]);
   // Trước 6:00 sáng: buổi mặc định là buổi của hôm qua.
   expect(roundSessionsToShow([yesterday, today20], new Date('2026-11-03T05:00:00+07:00')).map((s) => s.id)).toEqual([7, 6]);
+  // Buổi bắt đầu sau nửa đêm (00:30 ngày 3/11) đứng đầu lúc 02:00, dù ngày chơi mặc định vẫn là 2/11 —
+  // cùng cách chọn với `/baocao van` bỏ trống `ngay`.
+  const night = session(9, '2026-11-02T17:30:00.000Z');
+  expect(roundSessionsToShow([yesterday, today20, night], new Date('2026-11-03T02:00:00+07:00')).map((s) => s.id)).toEqual([9, 7, 6]);
+  // 00:10: buổi sau nửa đêm chưa bắt đầu → buổi 20:00 hôm qua vẫn mặc định, buổi 00:30 ẩn.
+  expect(roundSessionsToShow([yesterday, today20, night], new Date('2026-11-03T00:10:00+07:00')).map((s) => s.id)).toEqual([7, 6]);
 });
 
 test('the new season replaces the day form with sessions and their rounds', async () => {
@@ -192,7 +199,7 @@ test('the new season replaces the day form with sessions and their rounds', asyn
 });
 
 test('"Lần khai của tôi" labels a round report with its session, round and win/lose chip', async () => {
-  stubFetch(baseRoutes([roundReport(), roundReport({ id: 41, multiplier: 2, round: { id: 102, number: 2, sessionId: 7, winnerFaction: 'goose', won: false } }), roundReport({ id: 42, round: { id: 103, number: 3, sessionId: 7, winnerFaction: null, won: false } })]));
+  stubFetch(baseRoutes([roundReport(), roundReport({ id: 41, multiplier: 2, round: { id: 102, number: 2, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: 'goose', won: false, imageUrl: '/api/rounds/102/image?v=1' } }), roundReport({ id: 42, round: { id: 103, number: 3, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: null, won: false, imageUrl: '/api/rounds/103/image?v=1' } })]));
   renderPage();
 
   const heading = await screen.findByRole('heading', { name: 'Lần khai của tôi' });
@@ -206,6 +213,18 @@ test('"Lần khai của tôi" labels a round report with its session, round and 
   expect(within(items[1] as HTMLElement).getByText('Thua')).toBeInTheDocument();
   expect(within(items[1] as HTMLElement).queryByText('×2')).not.toBeInTheDocument();
   expect(within(items[2] as HTMLElement).getByText('Chưa có phe thắng')).toBeInTheDocument();
+});
+
+test('"Lần khai của tôi" reads the session time from the report, without fetching the session rounds', async () => {
+  // Buổi 22:30 ngày 1/11 (id 9) không có trong danh sách buổi; nhãn lấy thẳng từ `round.sessionStartsAt`.
+  const other = roundReport({ id: 43, playedOn: '2026-11-01', sessionId: 9, round: { id: 109, number: 4, sessionId: 9, sessionStartsAt: '2026-11-01T15:30:00.000Z', winnerFaction: 'duck', won: true, imageUrl: '/api/rounds/109/image?v=1' } });
+  const fetchMock = stubFetch(baseRoutes([other]));
+  renderPage();
+
+  const heading = await screen.findByRole('heading', { name: 'Lần khai của tôi' });
+  const section = heading.closest('section') as HTMLElement;
+  expect(await within(section).findByText('Buổi 22:30 01/11 · Ván 4')).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/sessions/9/rounds'))).toBe(false);
 });
 
 test('editing a pending round report never sends the day', async () => {

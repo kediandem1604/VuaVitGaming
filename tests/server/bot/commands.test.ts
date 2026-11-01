@@ -660,6 +660,56 @@ test('/baocao van với ngay: buổi mặc định của ngày đó; không có 
   expect(errors).not.toHaveBeenCalled();
 });
 
+test('/baocao van bỏ trống ngay lúc 00:00–05:59: buổi bắt đầu sau nửa đêm thắng buổi tối hôm qua', async () => {
+  // Buổi 21:00 ngày 05/11 và buổi 00:30 ngày 06/11 giờ VN, cả hai có ván 1; lúc 02:00 ngày 06/11
+  // ngày chơi mặc định vẫn là 05/11 nhưng buổi mới nhất đã bắt đầu là buổi 00:30.
+  await sessionWithRounds('2026-11-05T14:00:00Z', 1);
+  const night = await sessionWithRounds('2026-11-05T17:30:00Z', 1);
+  // Buổi huỷ sau nửa đêm không được chọn.
+  await sessionWithRounds('2026-11-05T18:00:00Z', 0, 'cancelled');
+  setNow('2026-11-05T19:00:00Z');
+
+  const i = baocao({ role: 'swordsman', so_lieu: 1, van: 1 });
+  await handleInteraction(ctx, i);
+  expect(i.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 1 mạng chém ván 1 buổi 00:30 06/11. Chờ mod duyệt nhé!');
+  expect(await reports()).toEqual([
+    expect.objectContaining({ roundId: night.rounds[0], sessionId: night.session.id, playedOn: new Date('2026-11-06T00:00:00Z') }),
+  ]);
+  expect(errors).not.toHaveBeenCalled();
+});
+
+test('/baocao van bỏ trống ngay lúc sau nửa đêm, chưa có buổi mới → buổi tối hôm qua', async () => {
+  const evening = await sessionWithRounds('2026-11-05T14:00:00Z', 1);
+  // Buổi 03:00 ngày 06/11 chưa tới giờ lúc 01:00.
+  await sessionWithRounds('2026-11-05T20:00:00Z', 1);
+  setNow('2026-11-05T18:00:00Z');
+
+  const i = baocao({ role: 'swordsman', so_lieu: 1, van: 1 });
+  await handleInteraction(ctx, i);
+  expect(i.lastText).toBe('Đã gửi: ⚔️ Kiếm sĩ — 1 mạng chém ván 1 buổi 21:00 05/11. Chờ mod duyệt nhé!');
+  expect((await reports())[0]).toMatchObject({ roundId: evening.rounds[0], sessionId: evening.session.id });
+});
+
+test('/baocao van vào ngày mùa cũ → nhắc bỏ tuỳ chọn van', async () => {
+  await sessionWithRounds('2026-10-31T14:00:00Z', 1);
+  setNow('2026-11-02T05:00:00Z');
+  const typed = baocao({ role: 'swordsman', so_lieu: 1, van: 1, ngay: '31/10' });
+  await handleInteraction(ctx, typed);
+  expect(typed.lastText).toBe('Mùa này khai theo ngày — bỏ tuỳ chọn van');
+  // Ngày mùa cũ không có buổi nào cũng vậy.
+  const empty = baocao({ role: 'swordsman', so_lieu: 1, van: 1, ngay: '30/10' });
+  await handleInteraction(ctx, empty);
+  expect(empty.lastText).toBe('Mùa này khai theo ngày — bỏ tuỳ chọn van');
+
+  // Bỏ trống ngay lúc 01:00 ngày 01/11: ngày chơi mặc định 31/10, buổi mặc định là buổi 21:00 ngày 31/10.
+  setNow('2026-10-31T18:00:00Z');
+  const fallback = baocao({ role: 'swordsman', so_lieu: 1, van: 1 });
+  await handleInteraction(ctx, fallback);
+  expect(fallback.lastText).toBe('Mùa này khai theo ngày — bỏ tuỳ chọn van');
+  expect(await reports()).toHaveLength(0);
+  expect(errors).not.toHaveBeenCalled();
+});
+
 test('/baocao mùa cũ (≤ 2026-10) không có van vẫn khai theo ngày', async () => {
   setNow('2026-11-02T05:00:00Z');
   const i = baocao({ role: 'swordsman', so_lieu: 3, ngay: '31/10' });

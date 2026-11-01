@@ -23,7 +23,7 @@ import { Prisma } from '@prisma/client';
 import type { Faction } from '@prisma/client';
 import { z } from 'zod';
 import type { ReportDto, RoundDto, RoundReportDto, SessionRoundsDto } from '../../../shared/api-types.js';
-import { roundWon } from '../../../shared/rounds.js';
+import { roundImageUrl, roundWon } from '../../../shared/rounds.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dbToDateOnly, seasonIdOf, toVnDate } from '../../lib/time.js';
@@ -99,11 +99,6 @@ const ROUND_SELECT = {
 } satisfies Prisma.GameRoundSelect;
 
 type RoundRow = Prisma.GameRoundGetPayload<{ select: typeof ROUND_SELECT }>;
-
-/** URL ảnh của ván — `?v=` đổi theo mỗi lần thay ảnh. */
-export function roundImageUrl(id: number, imageUpdatedAt: Date): string {
-  return `/api/rounds/${id}/image?v=${imageUpdatedAt.getTime()}`;
-}
 
 /** DTO các ván; lần khai của `viewerId` kèm đủ `ReportDto` (một lượt tra cho mọi ván). */
 async function toRoundDtos(ctx: Ctx, rows: RoundRow[], viewerId: number): Promise<RoundDto[]> {

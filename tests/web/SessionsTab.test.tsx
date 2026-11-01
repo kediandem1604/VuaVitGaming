@@ -24,10 +24,11 @@ const base: Omit<SessionDto, 'id' | 'startsAt'> = {
     { memberId: 2, displayName: 'Vịt Hai', avatarUrl: null },
   ],
   myStatus: null,
+  roundCount: 0,
 };
 
 const sessions: SessionDto[] = [
-  { ...base, id: 5, startsAt: `${today}T14:00:00.000Z`, roomCode: 'ABCD' },
+  { ...base, id: 5, startsAt: `${today}T14:00:00.000Z`, roomCode: 'ABCD', roundCount: 3 },
   { ...base, id: 6, startsAt: `${today}T12:00:00.000Z`, status: 'ended', attendees: [] },
 ];
 
@@ -341,6 +342,8 @@ test('saving without changes just closes the edit dialog', async () => {
 test('every session row links to its rounds page', async () => {
   stubFetch(baseRoutes);
   renderTab();
-  const links = await screen.findAllByRole('link', { name: 'Ván đấu' });
+  const links = await screen.findAllByRole('link', { name: /^Ván đấu/ });
   expect(links.map((link) => link.getAttribute('href'))).toEqual(['/buoi/5', '/buoi/6']);
+  // Kèm số ván của buổi.
+  expect(links.map((link) => link.textContent)).toEqual(['Ván đấu (3)', 'Ván đấu (0)']);
 });

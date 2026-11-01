@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { REPORT_DAY_START_HOUR, defaultPlayedOn, pickDefaultSession } from '../../src/shared/report-day.js';
+import { REPORT_DAY_START_HOUR, defaultPlayedOn, pickDefaultSession, pickLatestStartedSession } from '../../src/shared/report-day.js';
 
 /** Mốc UTC của `HH:mm` ngày `ymd` giờ VN (UTC+7). */
 const vn = (ymd: string, hhmm: string) => new Date(`${ymd}T${hhmm}:00+07:00`);
@@ -44,4 +44,28 @@ test('the default session is the latest one already started that day, else the f
   expect(pickDefaultSession([s(9, '2026-10-31', '19:00', 'cancelled')], vn('2026-10-31', '20:00'))).toBeNull();
   // Nhận cả `Date`.
   expect(pickDefaultSession([{ id: 7, startsAt: vn('2026-10-31', '19:00'), status: 'ended' }], vn('2026-10-31', '23:00'))?.id).toBe(7);
+});
+
+test('the latest started session counts sessions after midnight, from the start of the default day up to now', () => {
+  const s = (id: number, ymd: string, hhmm: string, status = 'scheduled') => ({ id, startsAt: vn(ymd, hhmm).toISOString(), status });
+  const sessions = [
+    s(1, '2026-10-30', '23:00'),
+    s(2, '2026-10-31', '21:00'),
+    s(3, '2026-11-01', '00:30'),
+    s(4, '2026-11-01', '01:30', 'cancelled'),
+    s(5, '2026-11-01', '03:00'),
+  ];
+  // 02:00 ngày 01/11 (ngày chơi mặc định 31/10): buổi 00:30 hôm nay thắng buổi 21:00 hôm qua; buổi huỷ bị bỏ.
+  expect(pickLatestStartedSession(sessions, vn('2026-11-01', '02:00'))?.id).toBe(3);
+  // 03:00 đúng giờ buổi 5 → đã bắt đầu.
+  expect(pickLatestStartedSession(sessions, vn('2026-11-01', '03:00'))?.id).toBe(5);
+  // 00:10: chưa có buổi sau nửa đêm → buổi 21:00 hôm qua; buổi 23:00 ngày 30/10 nằm trước đầu ngày chơi.
+  expect(pickLatestStartedSession(sessions, vn('2026-11-01', '00:10'))?.id).toBe(2);
+  // Từ 06:00 ngày chơi là 01/11: buổi 21:00 ngày 31/10 không còn tính.
+  expect(pickLatestStartedSession([s(2, '2026-10-31', '21:00')], vn('2026-11-01', '07:00'))).toBeNull();
+  // Chưa buổi nào bắt đầu → như `pickDefaultSession`: buổi sớm nhất của ngày chơi.
+  expect(pickLatestStartedSession([s(6, '2026-11-01', '20:00'), s(7, '2026-11-01', '19:00')], vn('2026-11-01', '08:00'))?.id).toBe(7);
+  expect(pickLatestStartedSession([], vn('2026-11-01', '08:00'))).toBeNull();
+  // Nhận cả `Date`.
+  expect(pickLatestStartedSession([{ id: 8, startsAt: vn('2026-11-01', '00:30'), status: 'ended' }], vn('2026-11-01', '01:00'))?.id).toBe(8);
 });

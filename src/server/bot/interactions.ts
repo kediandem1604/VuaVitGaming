@@ -24,7 +24,7 @@
 import { MessageFlags } from 'discord.js';
 import type { APIEmbed } from 'discord.js';
 import type { RoleDto } from '../../shared/api-types.js';
-import { defaultPlayedOn, pickDefaultSession } from '../../shared/report-day.js';
+import { defaultPlayedOn, defaultPlayedOnStart, pickDefaultSession, pickLatestStartedSession } from '../../shared/report-day.js';
 import { normalizeText } from '../../shared/text.js';
 import type { Ctx } from '../ctx.js';
 import { AppError } from '../lib/errors.js';
@@ -320,8 +320,14 @@ async function handleReport(ctx: Ctx, interaction: GuildCommandInteraction): Pro
         await interaction.editReply('Từ tháng 11 khai điểm theo ván — thêm tuỳ chọn van');
         return;
       }
-      // Buổi = buổi mặc định của ngày chơi (mốc 6:00 khi bỏ trống `ngay`, như web).
-      const session = await defaultSession(ctx, playedOn);
+      // Bỏ trống `ngay` → buổi mới nhất đã bắt đầu từ đầu ngày chơi mặc định (kể cả buổi sau nửa đêm,
+      // như tab Khai điểm trên web); có `ngay` → buổi mặc định của ngày đó.
+      const session = typedDay === '' ? await latestStartedSession(ctx) : await defaultSession(ctx, playedOn);
+      // Ngày của buổi (hoặc ngày chơi khi không có buổi) thuộc mùa cũ → mùa đó khai theo ngày.
+      if (!isRoundSeason(seasonIdOf(session ? toVnDate(session.startsAt) : playedOn))) {
+        await interaction.editReply('Mùa này khai theo ngày — bỏ tuỳ chọn van');
+        return;
+      }
       if (!session) {
         await interaction.editReply(`Không có buổi chơi nào ngày ${formatVnDay(playedOn)}`);
         return;
@@ -368,6 +374,21 @@ async function defaultSession(ctx: Ctx, playedOn: string): Promise<{ id: number;
     select: { id: true, startsAt: true, status: true },
   });
   return pickDefaultSession(sessions, ctx.now(), playedOn);
+}
+
+/**
+ * Buổi khai theo ván khi bỏ trống `ngay` (`pickLatestStartedSession`, cùng cách chọn với web): các buổi
+ * không huỷ từ 00:00 VN của ngày chơi mặc định tới hết ngày đó hoặc tới `now` (mốc nào muộn hơn), hoặc null.
+ */
+async function latestStartedSession(ctx: Ctx): Promise<{ id: number; startsAt: Date } | null> {
+  const now = ctx.now();
+  const start = defaultPlayedOnStart(now);
+  const dayEnd = start.getTime() + 24 * 60 * 60 * 1000;
+  const sessions = await ctx.db.gameSession.findMany({
+    where: { startsAt: { gte: start, lt: new Date(Math.max(dayEnd, now.getTime() + 1)) }, status: { not: 'cancelled' } },
+    select: { id: true, startsAt: true, status: true },
+  });
+  return pickLatestStartedSession(sessions, now);
 }
 
 /** `/bxh`: top 10 của role trong mùa hiện tại, embed công khai (không cần hồ sơ người gõ). */

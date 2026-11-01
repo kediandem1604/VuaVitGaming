@@ -73,7 +73,7 @@ import { multiplierOn, rolesQuery, upcomingMultipliersQuery } from '../lib/queri
 import { MY_BOUNTY_CLAIMS_KEY, MY_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
 import { isRoundSeason } from '../../shared/rounds';
 import { defaultPlayedOn } from '../../shared/report-day';
-import { roundReportLabel, sessionRoundsQuery } from '../lib/rounds';
+import { roundReportLabel } from '../lib/rounds';
 import { AccusationTab } from './AccusationTab';
 import { RoundSessions } from './RoundSessions';
 import { HighlightButton, HighlightField, checkHighlight, uploadHighlight, type HighlightUpload } from './ReportHighlight';
@@ -783,8 +783,6 @@ function ReportItem({ report, highlight }: ReportItemProps) {
   const chip = STATUS_CHIP[report.status];
   /** Mục trừ điểm do bị báo cáo: dòng giá trị đọc theo báo cáo, không lặp ghi chú của server (cùng nội dung). */
   const penaltyOf = report.source === 'accusation' ? report.penaltyOf : null;
-  // Lần khai theo ván: giờ của buổi lấy từ ván của buổi (cùng cache với trang buổi / danh sách ván).
-  const roundSession = useQuery({ ...sessionRoundsQuery(report.round?.sessionId ?? 0), enabled: Boolean(report.round) });
 
   return (
     <li className="panel flex flex-col gap-2">
@@ -809,7 +807,7 @@ function ReportItem({ report, highlight }: ReportItemProps) {
           {/* `break-words`: "x + y" với hai nhãn dài phải xuống dòng ở 320px, không tràn ngang. */}
           <p className="font-bold break-words text-white">{penaltyOf ? formatPenaltyLine(penaltyOf) : formatReportValue(report, report.role)}</p>
           {report.round ? (
-            <p className={HINT_CLASS}>{roundReportLabel(report.round.number, report.playedOn, roundSession.data?.session.startsAt)}</p>
+            <p className={HINT_CLASS}>{roundReportLabel(report.round.number, report.round.sessionStartsAt)}</p>
           ) : (
             report.sessionId !== null && <p className={HINT_CLASS}>Buổi #{report.sessionId}</p>
           )}

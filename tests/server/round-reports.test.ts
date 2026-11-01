@@ -75,7 +75,15 @@ test('khai theo ván: chờ duyệt, gắn ván, buổi của ván và ngày VN 
     createdAt: ctx.now(),
   });
   const dto = await getReportDto(ctx, created.id);
-  expect(dto.round).toEqual({ id: r1, number: 1, sessionId: session.id, winnerFaction: 'duck', won: true });
+  expect(dto.round).toEqual({
+    id: r1,
+    number: 1,
+    sessionId: session.id,
+    sessionStartsAt: session.startsAt.toISOString(),
+    winnerFaction: 'duck',
+    won: true,
+    imageUrl: `/api/rounds/${r1}/image?v=${ctx.now().getTime()}`,
+  });
   expect(dto.playedOn).toBe('2026-11-04');
   expect(dto.sessionId).toBe(session.id);
 });

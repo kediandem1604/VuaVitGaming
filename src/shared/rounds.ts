@@ -38,3 +38,8 @@ export const ROUND_REPORT_DUPLICATE_MESSAGE = 'Bạn đã khai ván này rồi';
 export const ROUND_REPORT_CLOSED_MESSAGE = 'Ván này không còn nhận khai';
 /** `POST /api/reports` (khai theo ngày) cho ngày thuộc mùa ≥ `ROUND_SCORING_FROM`. */
 export const DAY_REPORTS_REPLACED_MESSAGE = 'Từ tháng 11 khai điểm theo ván — chọn buổi và ván để khai';
+
+/** URL ảnh của ván — `?v=` đổi theo mỗi lần thay ảnh (RoundDto và ReportDto.round dùng chung). */
+export function roundImageUrl(id: number, imageUpdatedAt: Date): string {
+  return `/api/rounds/${id}/image?v=${imageUpdatedAt.getTime()}`;
+}

@@ -57,7 +57,7 @@ const myReport = (over: Partial<ReportDto> = {}): ReportDto => ({
   accusationDuplicate: false,
   accusationWaitingFor: null,
   penaltyOf: null,
-  round: { id: 101, number: 1, sessionId: 7, winnerFaction: null, won: false },
+  round: { id: 101, number: 1, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: null, won: false, imageUrl: '/api/rounds/101/image?v=1' },
   ...over,
 });
 

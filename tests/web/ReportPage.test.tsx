@@ -105,6 +105,7 @@ const session: SessionDto = {
   status: 'scheduled',
   attendees: [],
   myStatus: null,
+  roundCount: 0,
 };
 
 const report = (over: Partial<ReportDto> & Pick<ReportDto, 'id' | 'status'>): ReportDto => ({
