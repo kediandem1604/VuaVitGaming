@@ -43,3 +43,8 @@ export const DAY_REPORTS_REPLACED_MESSAGE = 'Từ tháng 11 khai điểm theo v�
 export function roundImageUrl(id: number, imageUpdatedAt: Date): string {
   return `/api/rounds/${id}/image?v=${imageUpdatedAt.getTime()}`;
 }
+
+/** URL ảnh nhỏ của ván (lưới, danh sách) — server trả ảnh gốc khi ván chưa có ảnh nhỏ. */
+export function roundThumbUrl(id: number, imageUpdatedAt: Date): string {
+  return `/api/rounds/${id}/image?size=thumb&v=${imageUpdatedAt.getTime()}`;
+}

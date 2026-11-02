@@ -1,9 +1,23 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { MeDto, ReportDto, RoleDto, RoundDto, RoundReportDto, SessionRoundsDto } from '../../src/shared/api-types';
+import { ImageDecodeError, prepareRoundImage } from '../../src/web/lib/imageResize';
+import { APPROVED_REPORTS_KEY, PENDING_REPORTS_KEY } from '../../src/web/lib/queryKeys';
 import { SessionPage } from '../../src/web/pages/SessionPage';
+
+// Thu nhỏ ảnh dùng canvas thật — có test riêng (imageResize.test.ts); ở đây giả: ảnh chính = file gốc,
+// ảnh nhỏ = một blob WebP cố định.
+vi.mock('../../src/web/lib/imageResize', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/web/lib/imageResize')>()),
+  prepareRoundImage: vi.fn(),
+}));
+const THUMB = new Blob(['thumb'], { type: 'image/webp' });
+const prepareMock = vi.mocked(prepareRoundImage);
+beforeEach(() => {
+  prepareMock.mockImplementation(async (file: File) => ({ main: file, thumb: THUMB }));
+});
 
 /** 21:00 giờ VN ngày 2/11/2026 (mùa luật ván); buổi 20:00 cùng ngày đã bắt đầu. */
 const NOW = new Date('2026-11-02T21:00:00+07:00');
@@ -57,7 +71,7 @@ const myReport = (over: Partial<ReportDto> = {}): ReportDto => ({
   accusationDuplicate: false,
   accusationWaitingFor: null,
   penaltyOf: null,
-  round: { id: 101, number: 1, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: null, won: false, imageUrl: '/api/rounds/101/image?v=1' },
+  round: { id: 101, number: 1, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: null, won: false, imageUrl: '/api/rounds/101/image?v=1', thumbUrl: '/api/rounds/101/image?size=thumb&v=1' },
   ...over,
 });
 
@@ -71,6 +85,7 @@ const round = (over: Partial<RoundDto> & Pick<RoundDto, 'id' | 'number'>): Round
   winnerFaction: null,
   winnerIds: [],
   imageUrl: `/api/rounds/${over.id}/image?v=1`,
+  thumbUrl: `/api/rounds/${over.id}/image?size=thumb&v=1`,
   imageUpdatedAt: '2026-11-02T13:20:00.000Z',
   reports: [],
   ...over,
@@ -146,7 +161,7 @@ test('the page shows the session title, round images, winner chips and public de
 
   const first = await card(1);
   expect(within(first).getByText('Chưa chọn phe thắng')).toBeInTheDocument();
-  expect(first.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?v=1');
+  expect(first.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?size=thumb&v=1');
   const list = within(first).getByRole('list', { name: 'Lần khai ván 1' });
   expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['VVịt Mười⚔️ Kiếm sĩ', 'ĐĐa Đa Mười Một🦤 Chim đa đa']);
   expect(within(await card(2)).getByText('🦢 Ngỗng thắng')).toBeInTheDocument();
@@ -264,8 +279,14 @@ test('a mod adds a round with the raw image and an optional winner', async () =>
       data = { ...data, rounds: [created] };
       return json(201, created);
     },
+    'PUT /api/admin/rounds/103/thumbnail': () => {
+      const withThumb = { ...data.rounds[0]!, thumbUrl: '/api/rounds/103/image?size=thumb&v=2' };
+      data = { ...data, rounds: [withThumb] };
+      return json(200, withThumb);
+    },
   });
-  renderPage();
+  const queryClient = renderPage();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
   const add = await screen.findByRole('button', { name: '+ Thêm ván' });
   fireEvent.click(add);
@@ -275,9 +296,16 @@ test('a mod adds a round with the raw image and an optional winner', async () =>
   fireEvent.change(input, { target: { files: [new File(['x'], 'a.gif', { type: 'image/gif' })] } });
   fireEvent.click(add);
   expect(screen.getByRole('alert')).toHaveTextContent('Chỉ nhận ảnh PNG, JPG hoặc WebP');
+  // Ảnh to được thu nhỏ trước; chỉ khi bản thu nhỏ vẫn quá 5 MB mới báo lỗi.
   fireEvent.change(input, { target: { files: [new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' })] } });
   fireEvent.click(add);
-  expect(screen.getByRole('alert')).toHaveTextContent('Ảnh tối đa 5 MB');
+  expect(await screen.findByRole('alert')).toHaveTextContent('Ảnh tối đa 5 MB');
+  // Trình duyệt không đọc được ảnh.
+  prepareMock.mockRejectedValueOnce(new ImageDecodeError());
+  fireEvent.change(input, { target: { files: [new File(['broken'], 'hong.png', { type: 'image/png' })] } });
+  fireEvent.click(add);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Không đọc được ảnh');
+  expect(calls(fetchMock, 'POST')).toHaveLength(0);
 
   const image = new File(['png'], 'van.png', { type: 'image/png' });
   fireEvent.change(input, { target: { files: [image] } });
@@ -292,6 +320,82 @@ test('a mod adds a round with the raw image and an optional winner', async () =>
   const init = post?.[1] as RequestInit;
   expect((init.headers as Record<string, string>)['content-type']).toBe('image/png');
   expect(init.body).toBe(image);
+  // Rồi ảnh nhỏ, qua route riêng; lưới dùng ảnh nhỏ.
+  await waitFor(() => expect(calls(fetchMock, 'PUT')).toHaveLength(1));
+  const [thumbPut] = calls(fetchMock, 'PUT');
+  expect(thumbPut?.[0]).toBe('/api/admin/rounds/103/thumbnail');
+  expect((thumbPut?.[1] as RequestInit).body).toBe(THUMB);
+  expect(((thumbPut?.[1] as RequestInit).headers as Record<string, string>)['content-type']).toBe('image/webp');
+  const added = await card(1);
+  await waitFor(() => expect(added.querySelector('img')).toHaveAttribute('src', '/api/rounds/103/image?size=thumb&v=2'));
+  // "Ván đấu ({n})" ở Quản trị → Buổi chơi đổi theo.
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
+});
+
+test('a failed thumbnail upload keeps the new round (the server serves the full image instead)', async () => {
+  let data: SessionRoundsDto = { session, rounds: [] };
+  stubFetch({
+    ...routesFor(() => data, member('mod')),
+    'POST /api/admin/sessions/7/rounds': () => {
+      const created = round({ id: 104, number: 1 });
+      data = { ...data, rounds: [created] };
+      return json(201, created);
+    },
+    'PUT /api/admin/rounds/104/thumbnail': () => json(400, { error: { code: 'INVALID_IMAGE', message: 'Ảnh nhỏ tối đa 300 KB' } }),
+  });
+  renderPage();
+  fireEvent.change(await screen.findByLabelText('Ảnh kết quả'), { target: { files: [new File(['png'], 'van.png', { type: 'image/png' })] } });
+  fireEvent.click(screen.getByRole('button', { name: '+ Thêm ván' }));
+  expect(await screen.findByRole('heading', { name: 'Ván 1' })).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole('button', { name: '+ Thêm ván' })).toBeEnabled());
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('the winner select is locked while its change is saving', async () => {
+  const data = twoRounds();
+  let release: (r: Response) => void = () => undefined;
+  stubFetch({
+    ...routesFor(data, member('mod')),
+    'PATCH /api/admin/rounds/101': () => new Promise<Response>((resolve) => (release = resolve)),
+  });
+  renderPage();
+  const admin = await within(await card(1)).findByRole('group', { name: 'Quản lý ván 1' });
+  const select = within(admin).getByRole('combobox', { name: 'Phe thắng' });
+  fireEvent.click(select);
+  fireEvent.click(screen.getByRole('option', { name: 'Vịt' }));
+  await waitFor(() => expect(select).toBeDisabled());
+  release(json(200, { ...data.rounds[0]!, winnerFaction: 'duck' }));
+  await waitFor(() => expect(select).toBeEnabled());
+});
+
+test('replacing an image uploads the new thumbnail and refreshes the review lists', async () => {
+  let data = twoRounds();
+  const fetchMock = stubFetch({
+    ...routesFor(() => data, member('mod')),
+    'PUT /api/admin/rounds/101/image': () => json(200, { ...data.rounds[0]!, imageUrl: '/api/rounds/101/image?v=2', thumbUrl: '/api/rounds/101/image?size=thumb&v=2' }),
+    'PUT /api/admin/rounds/101/thumbnail': () => {
+      const updated = { ...data.rounds[0]!, imageUrl: '/api/rounds/101/image?v=3', thumbUrl: '/api/rounds/101/image?size=thumb&v=3' };
+      data = { ...data, rounds: [updated, data.rounds[1]!] };
+      return json(200, updated);
+    },
+  });
+  const queryClient = renderPage();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const first = await card(1);
+  const admin = await within(first).findByRole('group', { name: 'Quản lý ván 1' });
+
+  // Ảnh hỏng → báo tại chỗ, không gửi gì.
+  prepareMock.mockRejectedValueOnce(new ImageDecodeError());
+  fireEvent.change(within(admin).getByLabelText('Đổi ảnh'), { target: { files: [new File(['x'], 'hong.webp', { type: 'image/webp' })] } });
+  expect(await within(admin).findByRole('alert')).toHaveTextContent('Không đọc được ảnh');
+  expect(calls(fetchMock, 'PUT')).toHaveLength(0);
+
+  fireEvent.change(within(admin).getByLabelText('Đổi ảnh'), { target: { files: [new File(['w'], 'b.webp', { type: 'image/webp' })] } });
+  await waitFor(() => expect(first.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?size=thumb&v=3'));
+  expect(calls(fetchMock, 'PUT').map(([url]) => url)).toEqual(['/api/admin/rounds/101/image', '/api/admin/rounds/101/thumbnail']);
+  expect(within(admin).queryByRole('alert')).not.toBeInTheDocument();
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: PENDING_REPORTS_KEY });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: APPROVED_REPORTS_KEY });
 });
 
 test('a mod sets the winner, ticks neutral winners, replaces the image and deletes a round', async () => {
@@ -307,7 +411,7 @@ test('a mod sets the winner, ticks neutral winners, replaces the image and delet
       const current = data.rounds[0]!;
       return put({ ...current, winnerFaction: body.winnerFaction ?? current.winnerFaction, winnerIds: body.winnerIds ?? current.winnerIds });
     },
-    'PUT /api/admin/rounds/101/image': () => put({ ...data.rounds[0]!, imageUrl: '/api/rounds/101/image?v=2' }),
+    'PUT /api/admin/rounds/101/image': () => put({ ...data.rounds[0]!, imageUrl: '/api/rounds/101/image?v=2', thumbUrl: '/api/rounds/101/image?size=thumb&v=2' }),
     'DELETE /api/admin/rounds/102': () => json(409, { error: { code: 'ROUND_HAS_REPORTS', message: 'Ván đã có lần khai — không xoá được' } }),
   });
   renderPage();
@@ -328,7 +432,7 @@ test('a mod sets the winner, ticks neutral winners, replaces the image and delet
   expect(JSON.parse(String((calls(fetchMock, 'PATCH')[1]?.[1] as RequestInit).body))).toEqual({ winnerIds: [11] });
 
   fireEvent.change(within(admin).getByLabelText('Đổi ảnh'), { target: { files: [new File(['w'], 'b.webp', { type: 'image/webp' })] } });
-  await waitFor(() => expect(first.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?v=2'));
+  await waitFor(() => expect(first.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?size=thumb&v=2'));
 
   // Xoá: hỏi lại; ván đã có lần khai → lỗi của server.
   const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
@@ -344,9 +448,11 @@ test('deleting a round without reports removes it from the page', async () => {
   const data: SessionRoundsDto = { session, rounds: [round({ id: 105, number: 3 })] };
   stubFetch({ ...routesFor(data, member('mod')), 'DELETE /api/admin/rounds/105': () => new Response(null, { status: 204 }) });
   vi.spyOn(window, 'confirm').mockReturnValue(true);
-  renderPage();
+  const queryClient = renderPage();
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
   fireEvent.click(await within(await card(3)).findByRole('button', { name: 'Xoá ván' }));
   await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ván 3' })).not.toBeInTheDocument());
   expect(screen.getByText('Buổi này chưa có ảnh ván, chờ mod up')).toBeInTheDocument();
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
 });

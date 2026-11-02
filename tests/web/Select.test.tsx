@@ -332,3 +332,17 @@ test('stacked: the label sits above a full-width trigger whose popup spans the t
   const popup = listbox().parentElement as HTMLElement;
   expect(popup.className).not.toContain('sm:w-max');
 });
+
+test('disabled: the trigger cannot open the list, and disabling an open select closes it', () => {
+  const onChange = vi.fn();
+  const { rerender } = render(<Select label="Mùa" value="2026-09" onChange={onChange} groups={SEASONS} />);
+  const trigger = screen.getByRole('combobox', { name: 'Mùa' });
+  fireEvent.click(trigger);
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+  rerender(<Select label="Mùa" value="2026-09" onChange={onChange} groups={SEASONS} disabled />);
+  expect(trigger).toBeDisabled();
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(trigger);
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  expect(onChange).not.toHaveBeenCalled();
+});

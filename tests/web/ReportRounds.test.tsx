@@ -65,6 +65,7 @@ const round = (id: number, sessionId: number, number: number, over: Partial<Roun
   winnerFaction: null,
   winnerIds: [],
   imageUrl: `/api/rounds/${id}/image?v=1`,
+  thumbUrl: `/api/rounds/${id}/image?size=thumb&v=1`,
   imageUpdatedAt: '2026-11-02T13:20:00.000Z',
   reports: [],
   ...over,
@@ -93,7 +94,7 @@ const roundReport = (over: Partial<ReportDto> = {}): ReportDto => ({
   accusationDuplicate: false,
   accusationWaitingFor: null,
   penaltyOf: null,
-  round: { id: 101, number: 1, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: 'duck', won: true, imageUrl: '/api/rounds/101/image?v=1' },
+  round: { id: 101, number: 1, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: 'duck', won: true, imageUrl: '/api/rounds/101/image?v=1', thumbUrl: '/api/rounds/101/image?size=thumb&v=1' },
   ...over,
 });
 
@@ -189,6 +190,8 @@ test('the new season replaces the day form with sessions and their rounds', asyn
   expect(rows[0]).toHaveTextContent('🦆 Vịt thắng');
   expect(rows[0]).toHaveTextContent('Đã khai: ⚔️ Kiếm sĩ');
   expect(within(rows[0] as HTMLElement).getByRole('link', { name: 'Xem ván 1' })).toHaveAttribute('href', '/buoi/7#van-1');
+  // Ô nhỏ dùng ảnh nhỏ của ván.
+  expect((rows[0] as HTMLElement).querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?size=thumb&v=1');
   expect(rows[1]).toHaveTextContent('Chưa chọn phe thắng');
 
   // "Khai" mở form ngay dưới ván.
@@ -199,7 +202,7 @@ test('the new season replaces the day form with sessions and their rounds', asyn
 });
 
 test('"Lần khai của tôi" labels a round report with its session, round and win/lose chip', async () => {
-  stubFetch(baseRoutes([roundReport(), roundReport({ id: 41, multiplier: 2, round: { id: 102, number: 2, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: 'goose', won: false, imageUrl: '/api/rounds/102/image?v=1' } }), roundReport({ id: 42, round: { id: 103, number: 3, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: null, won: false, imageUrl: '/api/rounds/103/image?v=1' } })]));
+  stubFetch(baseRoutes([roundReport(), roundReport({ id: 41, multiplier: 2, round: { id: 102, number: 2, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: 'goose', won: false, imageUrl: '/api/rounds/102/image?v=1', thumbUrl: '/api/rounds/102/image?size=thumb&v=1' } }), roundReport({ id: 42, round: { id: 103, number: 3, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: null, won: false, imageUrl: '/api/rounds/103/image?v=1', thumbUrl: '/api/rounds/103/image?size=thumb&v=1' } })]));
   renderPage();
 
   const heading = await screen.findByRole('heading', { name: 'Lần khai của tôi' });
@@ -217,7 +220,7 @@ test('"Lần khai của tôi" labels a round report with its session, round and 
 
 test('"Lần khai của tôi" reads the session time from the report, without fetching the session rounds', async () => {
   // Buổi 22:30 ngày 1/11 (id 9) không có trong danh sách buổi; nhãn lấy thẳng từ `round.sessionStartsAt`.
-  const other = roundReport({ id: 43, playedOn: '2026-11-01', sessionId: 9, round: { id: 109, number: 4, sessionId: 9, sessionStartsAt: '2026-11-01T15:30:00.000Z', winnerFaction: 'duck', won: true, imageUrl: '/api/rounds/109/image?v=1' } });
+  const other = roundReport({ id: 43, playedOn: '2026-11-01', sessionId: 9, round: { id: 109, number: 4, sessionId: 9, sessionStartsAt: '2026-11-01T15:30:00.000Z', winnerFaction: 'duck', won: true, imageUrl: '/api/rounds/109/image?v=1', thumbUrl: '/api/rounds/109/image?size=thumb&v=1' } });
   const fetchMock = stubFetch(baseRoutes([other]));
   renderPage();
 

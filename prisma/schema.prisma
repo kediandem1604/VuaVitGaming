@@ -682,6 +682,9 @@ model GameRound {
   image          Bytes
   imageMime      String   @map("image_mime")
   imageUpdatedAt DateTime @map("image_updated_at") @db.Timestamptz(3)
+  /// Ảnh nhỏ (≤ 300 KB) web tự thu nhỏ rồi up sau ảnh gốc; NULL = chưa có (dùng ảnh gốc). Đổi ảnh gốc → xoá.
+  thumb          Bytes?
+  thumbMime      String?  @map("thumb_mime")
   winnerFaction  Faction? @map("winner_faction")
   createdById    Int      @map("created_by")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

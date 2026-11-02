@@ -31,7 +31,7 @@ import { multiplierRoutes } from './routes/multipliers.js';
 import { mvpRoutes } from './routes/mvp.js';
 import { offlineRoutes } from './routes/offline.js';
 import { ROLE_IMAGE_TYPES, ROLE_IMAGE_UPLOAD_ROUTE, roleRoutes } from './routes/roles.js';
-import { ROUND_CREATE_ROUTE, ROUND_IMAGE_TYPES, ROUND_IMAGE_UPLOAD_ROUTE, roundRoutes } from './routes/rounds.js';
+import { ROUND_CREATE_ROUTE, ROUND_IMAGE_TYPES, ROUND_IMAGE_UPLOAD_ROUTE, ROUND_THUMB_UPLOAD_ROUTE, roundRoutes } from './routes/rounds.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { HIGHLIGHT_TYPES, HIGHLIGHT_UPLOAD_ROUTE, statsRoutes } from './routes/stats.js';
 
@@ -246,13 +246,14 @@ const RAW_UPLOAD_ROUTES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   [`PUT ${HIGHLIGHT_UPLOAD_ROUTE}`, new Set(HIGHLIGHT_TYPES)],
   [`POST ${ROUND_CREATE_ROUTE}`, new Set(ROUND_IMAGE_TYPES)],
   [`PUT ${ROUND_IMAGE_UPLOAD_ROUTE}`, new Set(ROUND_IMAGE_TYPES)],
+  [`PUT ${ROUND_THUMB_UPLOAD_ROUTE}`, new Set(ROUND_IMAGE_TYPES)],
 ]);
 
 /**
  * Thao tác ghi dưới /api phải gửi `application/json` (chống CSRF kiểu form, cùng
  * với cookie sameSite=lax). Ngoại lệ: các route tải file thô (`PUT /api/admin/roles/:id/image`
  * nhận ảnh, `PUT /api/reports/:id/highlight` nhận video/ảnh, `POST /api/admin/sessions/:id/rounds` và
- * `PUT /api/admin/rounds/:id/image` nhận ảnh ván) với content-type của route đó;
+ * `PUT /api/admin/rounds/:id/image`, `PUT /api/admin/rounds/:id/thumbnail` nhận ảnh ván) với content-type của route đó;
  * DELETE không có body được bỏ content-type. Xét theo route đã khớp (`routePath`),
  * nên đường dẫn mã hoá % (`/%61pi/me`) bị chặn y như đường dẫn thường.
  */

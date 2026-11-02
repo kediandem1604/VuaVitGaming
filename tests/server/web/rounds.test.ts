@@ -207,3 +207,72 @@ test('POST /api/reports theo ngày cho ngày mùa luật ván → 400 VALIDATION
   expect(res.json()).toEqual({ error: { code: 'VALIDATION', message: 'Từ tháng 11 khai điểm theo ván — chọn buổi và ván để khai' } });
   expect(await testDb.statReport.count()).toBe(0);
 });
+
+const putThumb = (id: number, sid: string | undefined, body: Buffer | string, type = 'image/webp') =>
+  app.inject({ method: 'PUT', url: `/api/admin/rounds/${id}/thumbnail`, cookies: cookies(sid), headers: { 'content-type': type }, payload: body });
+
+test('ảnh nhỏ: chưa có → ?size=thumb trả ảnh gốc; mod up ảnh nhỏ (≤ 300 KB, nhận diện theo nội dung); đổi ảnh gốc → xoá ảnh nhỏ', async () => {
+  const round = (await addRound(modSid)).json<RoundDto>();
+  const t0 = new Date('2026-11-05T05:00:00Z').getTime();
+  expect(round.thumbUrl).toBe(`/api/rounds/${round.id}/image?size=thumb&v=${t0}`);
+  const thumbUrl = `/api/rounds/${round.id}/image?size=thumb`;
+  expect((await app.inject({ url: thumbUrl })).statusCode).toBe(401);
+
+  // Chưa có ảnh nhỏ → ảnh gốc, ETag riêng (khác ETag ảnh gốc) để cache không lẫn.
+  const fallback = await app.inject({ url: thumbUrl, cookies: cookies(memberSid) });
+  expect(fallback.statusCode).toBe(200);
+  expect(fallback.headers['content-type']).toBe('image/png');
+  expect(fallback.headers['cache-control']).toBe('private, max-age=300');
+  expect(fallback.rawPayload.equals(PNG)).toBe(true);
+  const fullEtag = (await app.inject({ url: `/api/rounds/${round.id}/image`, cookies: cookies(memberSid) })).headers.etag;
+  expect(fallback.headers.etag).not.toBe(fullEtag);
+
+  // Quyền, loại ảnh, kích thước.
+  expect((await putThumb(round.id, undefined, WEBP)).statusCode).toBe(401);
+  expect((await putThumb(round.id, memberSid, WEBP)).statusCode).toBe(403);
+  expect((await putThumb(round.id, modSid, Buffer.from('GIF89a....'), 'image/gif')).json()).toEqual({
+    error: { code: 'INVALID_IMAGE', message: 'Chỉ nhận ảnh PNG, JPG hoặc WebP' },
+  });
+  const big = await putThumb(round.id, modSid, Buffer.concat([WEBP, Buffer.alloc(300 * 1024)]));
+  expect(big.statusCode).toBe(400);
+  expect(big.json()).toEqual({ error: { code: 'INVALID_IMAGE', message: 'Ảnh nhỏ tối đa 300 KB' } });
+  const tooBigBody = await putThumb(round.id, modSid, Buffer.concat([WEBP, Buffer.alloc(2 * 1024 * 1024)]));
+  expect(tooBigBody.json()).toEqual({ error: { code: 'INVALID_IMAGE', message: 'Ảnh nhỏ tối đa 300 KB' } });
+  expect((await putThumb(999999, modSid, WEBP)).statusCode).toBe(404);
+
+  setNow('2026-11-05T05:01:00Z');
+  const t1 = new Date('2026-11-05T05:01:00Z').getTime();
+  const up = await putThumb(round.id, adminSid, WEBP);
+  expect(up.statusCode).toBe(200);
+  // Up ảnh nhỏ đổi mốc ảnh → cả hai URL đổi `?v=`, người đang xem không dính bản cũ trong cache.
+  expect(up.json<RoundDto>()).toMatchObject({ thumbUrl: `/api/rounds/${round.id}/image?size=thumb&v=${t1}`, imageUrl: `/api/rounds/${round.id}/image?v=${t1}` });
+
+  const thumb = await app.inject({ url: thumbUrl, cookies: cookies(memberSid) });
+  expect(thumb.statusCode).toBe(200);
+  expect(thumb.headers['content-type']).toBe('image/webp');
+  expect(thumb.rawPayload.equals(WEBP)).toBe(true);
+  const thumbEtag = thumb.headers.etag as string;
+  expect(thumbEtag).not.toBe(fallback.headers.etag);
+  expect((await app.inject({ url: thumbUrl, cookies: cookies(memberSid), headers: { 'if-none-match': thumbEtag } })).statusCode).toBe(304);
+  // Ảnh gốc vẫn là PNG.
+  const full = await app.inject({ url: `/api/rounds/${round.id}/image`, cookies: cookies(memberSid) });
+  expect(full.headers['content-type']).toBe('image/png');
+  expect(full.headers.etag).not.toBe(thumbEtag);
+  expect((await app.inject({ url: `/api/rounds/${round.id}/image?size=huge`, cookies: cookies(memberSid) })).statusCode).toBe(400);
+
+  // Đổi ảnh gốc → ảnh nhỏ bị xoá, ?size=thumb trả lại ảnh gốc mới.
+  setNow('2026-11-05T05:02:00Z');
+  expect((await putImage(round.id, modSid, PNG)).statusCode).toBe(200);
+  const row = await testDb.gameRound.findUniqueOrThrow({ where: { id: round.id }, select: { thumb: true, thumbMime: true } });
+  expect(row).toEqual({ thumb: null, thumbMime: null });
+  const after = await app.inject({ url: thumbUrl, cookies: cookies(memberSid) });
+  expect(after.headers['content-type']).toBe('image/png');
+  expect(after.headers.etag).not.toBe(thumbEtag);
+});
+
+test('lần khai theo ván có round.thumbUrl', async () => {
+  const round = (await addRound(modSid, PNG, 'image/png', '?winnerFaction=duck')).json<RoundDto>();
+  const duck = await roleByKey(testDb, 'duck');
+  const res = await json('POST', `/api/rounds/${round.id}/reports`, memberSid, { roleId: duck.id, value: 1 });
+  expect(res.json<ReportDto>().round).toMatchObject({ imageUrl: round.imageUrl, thumbUrl: round.thumbUrl });
+});

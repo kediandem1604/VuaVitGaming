@@ -63,7 +63,7 @@ import type { StatReport } from '@prisma/client';
 import { z } from 'zod';
 import type { AccessLevel, ReportDto, ReviewedReportDto, RoundReportInput } from '../../../shared/api-types.js';
 import { formatReportValue, reportPoints } from '../../../shared/metric.js';
-import { DAY_REPORTS_REPLACED_MESSAGE, isRoundSeason, roundImageUrl, roundReportPoints, roundWon } from '../../../shared/rounds.js';
+import { DAY_REPORTS_REPLACED_MESSAGE, isRoundSeason, roundImageUrl, roundReportPoints, roundThumbUrl, roundWon } from '../../../shared/rounds.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import {
@@ -895,6 +895,7 @@ function toReportDto(
           winnerFaction: r.round.winnerFaction,
           won,
           imageUrl: roundImageUrl(r.round.id, r.round.imageUpdatedAt),
+          thumbUrl: roundThumbUrl(r.round.id, r.round.imageUpdatedAt),
         }
       : null,
   };

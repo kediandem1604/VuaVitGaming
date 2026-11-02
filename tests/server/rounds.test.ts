@@ -184,6 +184,7 @@ test('ngày nhân điểm nhân phần chỉ số của lần khai thắng, khô
     winnerFaction: 'goose',
     won: true,
     imageUrl: `/api/rounds/${r1}/image?v=${imageAt.getTime()}`,
+    thumbUrl: `/api/rounds/${r1}/image?size=thumb&v=${imageAt.getTime()}`,
   });
 });
 

@@ -1083,8 +1083,8 @@ test('a round report shows the round thumbnail (zoomable) and "Ván {n} · {winn
   stubFetch({
     [PENDING_ROUTE]: () =>
       json(200, [
-        report({ id: 30, multiplier: 2, round: { id: 101, number: 2, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: 'goose', won: false, imageUrl: '/api/rounds/101/image?v=5' } }),
-        report({ id: 31, multiplier: 2, round: { id: 102, number: 3, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: null, won: false, imageUrl: '/api/rounds/102/image?v=5' } }),
+        report({ id: 30, multiplier: 2, round: { id: 101, number: 2, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: 'goose', won: false, imageUrl: '/api/rounds/101/image?v=5', thumbUrl: '/api/rounds/101/image?size=thumb&v=5' } }),
+        report({ id: 31, multiplier: 2, round: { id: 102, number: 3, sessionId: 7, sessionStartsAt: '2026-11-02T13:00:00.000Z', winnerFaction: null, won: false, imageUrl: '/api/rounds/102/image?v=5', thumbUrl: '/api/rounds/102/image?size=thumb&v=5' } }),
       ]),
   });
   renderTab();
@@ -1096,8 +1096,8 @@ test('a round report shows the round thumbnail (zoomable) and "Ván {n} · {winn
   expect(items[1]).toHaveTextContent('Ván 3 · Chưa chọn phe thắng');
 
   const thumb = within(first).getByRole('button', { name: 'Phóng to ảnh ván 2' });
-  // Ảnh lấy từ `round.imageUrl` (có `?v=`, đổi khi mod thay ảnh).
-  expect(thumb.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?v=5');
+  // Ô nhỏ lấy `round.thumbUrl`, phóng to lấy `round.imageUrl` (cả hai có `?v=`, đổi khi mod thay ảnh).
+  expect(thumb.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?size=thumb&v=5');
   fireEvent.click(thumb);
   const dialog = await screen.findByRole('dialog', { name: 'Ảnh ván 2' });
   expect(within(dialog).getByRole('img', { name: 'Ảnh ván 2' })).toHaveAttribute('src', '/api/rounds/101/image?v=5');

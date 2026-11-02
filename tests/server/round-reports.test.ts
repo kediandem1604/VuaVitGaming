@@ -83,6 +83,7 @@ test('khai theo ván: chờ duyệt, gắn ván, buổi của ván và ngày VN 
     winnerFaction: 'duck',
     won: true,
     imageUrl: `/api/rounds/${r1}/image?v=${ctx.now().getTime()}`,
+    thumbUrl: `/api/rounds/${r1}/image?size=thumb&v=${ctx.now().getTime()}`,
   });
   expect(dto.playedOn).toBe('2026-11-04');
   expect(dto.sessionId).toBe(session.id);

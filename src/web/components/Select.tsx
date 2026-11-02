@@ -72,6 +72,8 @@ interface SelectProps<T extends string | number> {
   className?: string;
   /** Class thêm cho nút kích hoạt (vd bề rộng). */
   triggerClassName?: string;
+  /** Khoá ô (vd đang lưu lựa chọn trước): nút không bấm được, khung đang mở thì đóng. */
+  disabled?: boolean;
 }
 
 /** Thời gian bộ đệm gõ-để-nhảy (khi không có ô tìm) tự xoá. */
@@ -103,7 +105,7 @@ function optionMatches<T extends string | number>(option: SelectOption<T>, query
   return [option.label, ...(option.searchText ?? [])].some((text) => normalizeText(text).includes(query));
 }
 
-export function Select<T extends string | number>({ label, value, onChange, groups, search, placeholder, stacked = false, className, triggerClassName }: SelectProps<T>) {
+export function Select<T extends string | number>({ label, value, onChange, groups, search, placeholder, stacked = false, className, triggerClassName, disabled = false }: SelectProps<T>) {
   const id = useId();
   const labelId = `${id}-label`;
   const listId = `${id}-list`;
@@ -174,6 +176,11 @@ export function Select<T extends string | number>({ label, value, onChange, grou
   useEffect(() => {
     if (open && hasSearch) searchRef.current?.focus();
   }, [open, hasSearch]);
+
+  // Bị khoá khi đang mở → đóng khung.
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   // Huỷ hẹn giờ của bộ đệm gõ-để-nhảy khi gỡ component.
   useEffect(() => () => window.clearTimeout(typeahead.current.timer), []);
@@ -311,6 +318,7 @@ export function Select<T extends string | number>({ label, value, onChange, grou
           aria-controls={open ? listId : undefined}
           aria-labelledby={labelId}
           aria-activedescendant={search ? undefined : activeId}
+          disabled={disabled}
           className={cx('field flex w-full items-center justify-between gap-2 py-1.5 pr-2 text-left', !stacked && 'sm:w-auto', open && 'border-gold', triggerClassName)}
           onClick={() => (open ? close(true) : openList())}
           onKeyDown={onKeyDown}

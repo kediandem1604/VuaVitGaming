@@ -9,6 +9,9 @@
  *   khác giữ số (không đánh lại). Buổi đã huỷ → không thêm ván.
  * - Ảnh: PNG/JPG/WebP nhận diện theo nội dung (không tin content-type), tối đa 5 MB; lưu trong DB kèm
  *   `image_updated_at` (ETag và `?v=` của URL ảnh — đổi ảnh thì người đang xem tải ảnh mới).
+ * - Ảnh nhỏ (`thumb`, ≤ 300 KB): web tự thu nhỏ trong trình duyệt rồi up sau ảnh gốc. Đổi ảnh gốc → xoá
+ *   ảnh nhỏ (ảnh nhỏ cũ không còn khớp); up ảnh nhỏ cũng đặt lại `image_updated_at` để `?v=` của cả hai URL
+ *   đổi. Chưa có ảnh nhỏ → `?size=thumb` trả ảnh gốc. Truy vấn danh sách không bao giờ chọn cột ảnh.
  * - Sửa phe thắng / người thắng: người thắng phải là người đã khai role Phe thứ 3 ở ván đó (lần khai
  *   `pending`/`approved`); đặt phe khác neutral → xoá danh sách người thắng. Mùa của buổi đã chốt →
  *   `SEASON_CLOSED` (danh hiệu đã trao không được lệch với bảng). Ghi trong giao dịch khoá dòng `seasons`
@@ -23,7 +26,7 @@ import { Prisma } from '@prisma/client';
 import type { Faction } from '@prisma/client';
 import { z } from 'zod';
 import type { ReportDto, RoundDto, RoundReportDto, SessionRoundsDto } from '../../../shared/api-types.js';
-import { roundImageUrl, roundWon } from '../../../shared/rounds.js';
+import { roundImageUrl, roundThumbUrl, roundWon } from '../../../shared/rounds.js';
 import type { Ctx } from '../../ctx.js';
 import { appError } from '../../lib/errors.js';
 import { dbToDateOnly, seasonIdOf, toVnDate } from '../../lib/time.js';
@@ -38,6 +41,9 @@ import { announceIfLeaderChanged, getReportDtos, isId, lockOpenSeason } from '..
 /** 5 MiB — "Ảnh tối đa 5 MB" (spec ván §4). */
 export const ROUND_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const ROUND_IMAGE_TOO_LARGE_MESSAGE = 'Ảnh tối đa 5 MB';
+/** 300 KiB — ảnh nhỏ web đã thu nhỏ (cạnh dài 400px) luôn nhỏ hơn nhiều. */
+export const ROUND_THUMB_MAX_BYTES = 300 * 1024;
+export const ROUND_THUMB_TOO_LARGE_MESSAGE = 'Ảnh nhỏ tối đa 300 KB';
 export const ROUND_IMAGE_TYPE_MESSAGE = 'Chỉ nhận ảnh PNG, JPG hoặc WebP';
 export const ROUND_WINNER_INVALID_MESSAGE = 'Người thắng phải là người đã khai role Phe thứ 3 ở ván này';
 export const ROUND_WINNERS_NOT_NEUTRAL_MESSAGE = 'Chỉ chọn người thắng khi Phe thứ 3 thắng';
@@ -62,6 +68,14 @@ export function parseWinnerFaction(raw: unknown): Faction | null {
 /** Ảnh ván: quá 5 MB → "Ảnh tối đa 5 MB"; không phải PNG/JPG/WebP (kể cả rỗng) → "Chỉ nhận ảnh PNG, JPG hoặc WebP". */
 export function checkRoundImage(buf: Buffer): ImageMime {
   if (buf.length > ROUND_IMAGE_MAX_BYTES) throw appError('INVALID_IMAGE', ROUND_IMAGE_TOO_LARGE_MESSAGE);
+  const mime = detectImageMime(buf);
+  if (mime === null) throw appError('INVALID_IMAGE', ROUND_IMAGE_TYPE_MESSAGE);
+  return mime;
+}
+
+/** Ảnh nhỏ: quá 300 KB → "Ảnh nhỏ tối đa 300 KB"; không phải PNG/JPG/WebP → câu như ảnh gốc. */
+export function checkRoundThumb(buf: Buffer): ImageMime {
+  if (buf.length > ROUND_THUMB_MAX_BYTES) throw appError('INVALID_IMAGE', ROUND_THUMB_TOO_LARGE_MESSAGE);
   const mime = detectImageMime(buf);
   if (mime === null) throw appError('INVALID_IMAGE', ROUND_IMAGE_TYPE_MESSAGE);
   return mime;
@@ -113,6 +127,7 @@ async function toRoundDtos(ctx: Ctx, rows: RoundRow[], viewerId: number): Promis
       winnerFaction: r.winnerFaction,
       winnerIds: r.winners.map((w) => w.memberId),
       imageUrl: roundImageUrl(r.id, r.imageUpdatedAt),
+      thumbUrl: roundThumbUrl(r.id, r.imageUpdatedAt),
       imageUpdatedAt: r.imageUpdatedAt.toISOString(),
       reports: r.statReports.map(
         (s): RoundReportDto => ({
@@ -157,19 +172,41 @@ export async function getRoundDto(ctx: Ctx, roundId: number, viewerId: number): 
   return dto!;
 }
 
-/** Mốc đổi ảnh và mime của ván (không tải ảnh) — đủ để trả 304; không có → null. */
-export async function getRoundImageMeta(ctx: Ctx, roundId: number): Promise<{ mime: string; updatedAt: Date } | null> {
+/**
+ * Mốc đổi ảnh của ván và ván có ảnh nhỏ không (không tải ảnh — `thumb_mime` là chữ ngắn) — đủ để trả
+ * 304; không có → null.
+ */
+export async function getRoundImageMeta(ctx: Ctx, roundId: number): Promise<{ updatedAt: Date; hasThumb: boolean } | null> {
   if (!isId(roundId)) return null;
-  const row = await ctx.db.gameRound.findUnique({ where: { id: roundId }, select: { imageMime: true, imageUpdatedAt: true } });
-  return row ? { mime: row.imageMime, updatedAt: row.imageUpdatedAt } : null;
+  const row = await ctx.db.gameRound.findUnique({ where: { id: roundId }, select: { imageUpdatedAt: true, thumbMime: true } });
+  return row ? { updatedAt: row.imageUpdatedAt, hasThumb: row.thumbMime !== null } : null;
 }
 
-/** Ảnh của ván kèm mime và mốc đổi ảnh; không có → null. */
-export async function getRoundImage(ctx: Ctx, roundId: number): Promise<{ buf: Buffer; mime: string; updatedAt: Date } | null> {
+/**
+ * Ảnh của ván kèm mime và mốc đổi ảnh; `thumb` = muốn ảnh nhỏ — có thì trả ảnh nhỏ (`isThumb`), chưa
+ * có thì ảnh gốc. Mỗi truy vấn chỉ tải đúng một cột ảnh. Không có ván → null.
+ */
+export async function getRoundImage(
+  ctx: Ctx,
+  roundId: number,
+  thumb = false,
+): Promise<{ buf: Buffer; mime: string; updatedAt: Date; isThumb: boolean } | null> {
   if (!isId(roundId)) return null;
+  if (thumb) {
+    const row = await ctx.db.gameRound.findUnique({ where: { id: roundId }, select: { thumb: true, thumbMime: true, imageUpdatedAt: true } });
+    if (!row) return null;
+    if (row.thumb !== null && row.thumbMime !== null) {
+      return { buf: toBuffer(row.thumb), mime: row.thumbMime, updatedAt: row.imageUpdatedAt, isThumb: true };
+    }
+  }
   const row = await ctx.db.gameRound.findUnique({ where: { id: roundId }, select: { image: true, imageMime: true, imageUpdatedAt: true } });
   if (!row) return null;
-  return { buf: Buffer.from(row.image.buffer, row.image.byteOffset, row.image.byteLength), mime: row.imageMime, updatedAt: row.imageUpdatedAt };
+  return { buf: toBuffer(row.image), mime: row.imageMime, updatedAt: row.imageUpdatedAt, isThumb: false };
+}
+
+/** Prisma 6 trả Bytes dưới dạng Uint8Array; bọc lại thành Buffer không sao chép. */
+function toBuffer(bytes: Uint8Array): Buffer {
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,13 +249,32 @@ export async function createRound(ctx: Ctx, actorId: number, sessionId: number, 
   return getRoundDto(ctx, id, actorId);
 }
 
-/** Đổi ảnh của ván (`imageUpdatedAt = now`); ảnh sai → `INVALID_IMAGE`; ván không có → `NOT_FOUND`. */
+/**
+ * Đổi ảnh của ván (`imageUpdatedAt = now`) và xoá ảnh nhỏ cũ (web up ảnh nhỏ mới ngay sau); ảnh sai →
+ * `INVALID_IMAGE`; ván không có → `NOT_FOUND`.
+ */
 export async function replaceRoundImage(ctx: Ctx, actorId: number, roundId: number, image: Buffer): Promise<RoundDto> {
   const mime = checkRoundImage(image);
   if (!isId(roundId)) throw appError('NOT_FOUND');
   const { count } = await ctx.db.gameRound.updateMany({
     where: { id: roundId },
-    data: { image: toBytes(image), imageMime: mime, imageUpdatedAt: ctx.now() },
+    data: { image: toBytes(image), imageMime: mime, imageUpdatedAt: ctx.now(), thumb: null, thumbMime: null },
+  });
+  if (count === 0) throw appError('NOT_FOUND');
+  return getRoundDto(ctx, roundId, actorId);
+}
+
+/**
+ * Lưu ảnh nhỏ của ván (`PUT /api/admin/rounds/:id/thumbnail`); đặt lại `imageUpdatedAt` để `?v=` của
+ * URL ảnh đổi — người đang xem không giữ bản ảnh gốc server đã trả thay cho ảnh nhỏ. Ảnh sai / quá
+ * 300 KB → `INVALID_IMAGE`; ván không có → `NOT_FOUND`.
+ */
+export async function setRoundThumb(ctx: Ctx, actorId: number, roundId: number, thumb: Buffer): Promise<RoundDto> {
+  const mime = checkRoundThumb(thumb);
+  if (!isId(roundId)) throw appError('NOT_FOUND');
+  const { count } = await ctx.db.gameRound.updateMany({
+    where: { id: roundId },
+    data: { thumb: toBytes(thumb), thumbMime: mime, imageUpdatedAt: ctx.now() },
   });
   if (count === 0) throw appError('NOT_FOUND');
   return getRoundDto(ctx, roundId, actorId);

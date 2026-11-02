@@ -777,12 +777,13 @@ function ReportSummary({ report, meta }: { report: ReportDto; meta: ReactNode })
  */
 function RoundThumb({ round }: { round: NonNullable<ReportDto['round']> }) {
   const [zoom, setZoom] = useState(false);
-  // `imageUrl` có `?v=` theo lần đổi ảnh gần nhất → mod luôn thấy ảnh mới, không dính cache 5 phút.
+  // Hai URL có `?v=` theo lần đổi ảnh gần nhất → mod luôn thấy ảnh mới, không dính cache 5 phút. Ô nhỏ
+  // dùng ảnh nhỏ, phóng to dùng ảnh gốc.
   const src = round.imageUrl;
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" aria-label={`Phóng to ảnh ván ${round.number}`} className="shrink-0 overflow-hidden rounded-lg border-2 border-night-700 hover:border-gold" onClick={() => setZoom(true)}>
-        <img src={src} alt="" loading="lazy" className="aspect-video w-24 object-cover" />
+        <img src={round.thumbUrl} alt="" loading="lazy" className="aspect-video w-24 object-cover" />
       </button>
       <p className="font-bold text-white">
         Ván {round.number} · {winnerText(round.winnerFaction)}

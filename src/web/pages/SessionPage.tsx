@@ -9,16 +9,19 @@
  * khai role phe thứ 3 ở ván đó) và Xoá ván (hỏi lại). Đổi phe thắng/người thắng → điểm mọi lần khai
  * của ván tính lại, nên làm mới các bảng điểm (`ROUND_SCORE_QUERY_KEYS`).
  *
- * Ảnh gửi dạng body thô (không multipart). Web chặn tại chỗ ảnh sai loại / quá 5 MB với đúng câu của
- * server; mọi quy tắc khác (buổi huỷ, ván đã có lần khai…) do server báo nguyên văn. Mở trang với
- * `#van-{n}` thì cuộn tới ván đó khi dữ liệu về.
+ * Ảnh gửi dạng body thô (không multipart), thu nhỏ trong trình duyệt trước (`lib/imageResize`): ảnh
+ * chính up qua route thêm ván / đổi ảnh, rồi ảnh nhỏ qua `PUT /api/admin/rounds/:id/thumbnail` (lỗi ảnh
+ * nhỏ không chặn — server trả ảnh gốc thay). Lưới dùng `thumbUrl`, phóng to dùng `imageUrl`. Web chặn
+ * tại chỗ ảnh sai loại, ảnh không đọc được và ảnh (sau khi thu nhỏ) quá 5 MB với đúng câu của server;
+ * mọi quy tắc khác (buổi huỷ, ván đã có lần khai…) do server báo nguyên văn. Mở trang với `#van-{n}` thì
+ * cuộn tới ván đó khi dữ liệu về.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useState, type ChangeEvent } from 'react';
 import { useLocation, useParams } from 'react-router';
 import type { Faction, RoleDto, RoundDto, RoundReportDto, SessionRoundsDto } from '../../shared/api-types';
-import { apiSend, apiSendFile, errorMessage } from '../api';
+import { ApiError, apiSend, apiSendFile, errorMessage } from '../api';
 import { Avatar } from '../components/Avatar';
 import { EmptyState } from '../components/EmptyState';
 import { Presence } from '../components/Presence';
@@ -29,13 +32,15 @@ import { WinnerChip } from '../components/WinnerChip';
 import { useMe } from '../hooks/useMe';
 import { cx } from '../lib/cx';
 import { formatDayLabel, formatTime } from '../lib/format';
+import { IMAGE_DECODE_MESSAGE, prepareRoundImage } from '../lib/imageResize';
 import { rolesQuery } from '../lib/queries';
+import { APPROVED_REPORTS_KEY, PENDING_REPORTS_KEY } from '../lib/queryKeys';
 import { ROUND_SCORE_QUERY_KEYS, roundAnchor, sessionRoundsQuery, sessionTakesRoundReports, sessionVnDate } from '../lib/rounds';
 import { Checkbox } from './admin/Controls';
 import { HINT_CLASS, LABEL_CLASS } from './reportFields';
 import { RoundReportForm } from './RoundReportForm';
 
-/** Ảnh ván: PNG/JPG/WebP ≤ 5 MB (server kiểm tra lại theo nội dung, cùng câu báo). */
+/** Ảnh ván: PNG/JPG/WebP ≤ 5 MB sau khi thu nhỏ (server kiểm tra lại theo nội dung, cùng câu báo). */
 export const ROUND_IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp';
 const ROUND_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const ROUND_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -43,11 +48,36 @@ const IMAGE_TYPE_MESSAGE = 'Chỉ nhận ảnh PNG, JPG hoặc WebP';
 const IMAGE_SIZE_MESSAGE = 'Ảnh tối đa 5 MB';
 const ERROR_CLASS = 'text-sm font-bold text-duck-soft';
 
-/** Lỗi tại chỗ của một file ảnh ván, hoặc `null` khi gửi được. */
+/** Lỗi tại chỗ của một file ảnh ván (sai loại), hoặc `null` khi thu nhỏ rồi gửi được. */
 export function roundImageProblem(file: File): string | null {
-  if (!ROUND_IMAGE_TYPES.has(file.type)) return IMAGE_TYPE_MESSAGE;
-  if (file.size > ROUND_IMAGE_MAX_BYTES) return IMAGE_SIZE_MESSAGE;
-  return null;
+  return ROUND_IMAGE_TYPES.has(file.type) ? null : IMAGE_TYPE_MESSAGE;
+}
+
+/** Tiền tố khoá danh sách buổi (`['sessions', …]`) — "Ván đấu ({n})" ở Quản trị → Buổi chơi. */
+const SESSIONS_KEY = ['sessions'] as const;
+
+/**
+ * Thu nhỏ ảnh ván (ảnh chính + ảnh nhỏ). Không đọc được ảnh → "Không đọc được ảnh"; ảnh chính vẫn quá
+ * 5 MB → "Ảnh tối đa 5 MB" — cả hai ném `ApiError` để `errorMessage` hiện đúng câu.
+ */
+async function shrinkRoundImage(file: File): Promise<{ main: Blob; thumb: Blob }> {
+  let prepared: { main: Blob; thumb: Blob };
+  try {
+    prepared = await prepareRoundImage(file);
+  } catch {
+    throw new ApiError('INVALID_IMAGE', IMAGE_DECODE_MESSAGE, 400);
+  }
+  if (prepared.main.size > ROUND_IMAGE_MAX_BYTES) throw new ApiError('INVALID_IMAGE', IMAGE_SIZE_MESSAGE, 400);
+  return prepared;
+}
+
+/** Up ảnh nhỏ cho ván; lỗi thì bỏ qua (server trả ảnh gốc khi chưa có ảnh nhỏ) và giữ DTO cũ. */
+async function uploadThumb(round: RoundDto, thumb: Blob): Promise<RoundDto> {
+  try {
+    return await apiSendFile<RoundDto>('PUT', `/api/admin/rounds/${round.id}/thumbnail`, thumb);
+  } catch {
+    return round;
+  }
 }
 
 /** Ô chọn phe thắng: `''` = chưa chọn. */
@@ -168,7 +198,7 @@ function RoundCard({ round, staff, roles, canReport }: RoundCardProps) {
         className="overflow-hidden rounded-xl border-2 border-night-700 bg-night-900 hover:border-gold"
         onClick={() => setZoom(true)}
       >
-        <img src={round.imageUrl} alt="" loading="lazy" className="aspect-video w-full object-cover" />
+        <img src={round.thumbUrl} alt="" loading="lazy" className="aspect-video w-full object-cover" />
       </button>
       <Presence present={zoom}>
         <RoundImageModal title={`Ảnh ván ${round.number}`} src={round.imageUrl} onClose={() => setZoom(false)} />
@@ -267,10 +297,14 @@ function AddRound({ sessionId }: { sessionId: number }) {
   const [inputKey, setInputKey] = useState(0);
 
   const add = useMutation({
-    mutationFn: ({ image, faction }: { image: File; faction: WinnerChoice }) =>
-      apiSendFile<RoundDto>('POST', `/api/admin/sessions/${sessionId}/rounds${faction ? `?winnerFaction=${faction}` : ''}`, image),
+    mutationFn: async ({ image, faction }: { image: File; faction: WinnerChoice }) => {
+      const { main, thumb } = await shrinkRoundImage(image);
+      const round = await apiSendFile<RoundDto>('POST', `/api/admin/sessions/${sessionId}/rounds${faction ? `?winnerFaction=${faction}` : ''}`, main);
+      return uploadThumb(round, thumb);
+    },
     onSuccess: (round) => {
       cache.put(round);
+      void cache.queryClient.invalidateQueries({ queryKey: SESSIONS_KEY });
       if (round.winnerFaction !== null) for (const queryKey of ROUND_SCORE_QUERY_KEYS) void cache.queryClient.invalidateQueries({ queryKey });
       setFile(null);
       setWinner('');
@@ -317,7 +351,7 @@ function AddRound({ sessionId }: { sessionId: number }) {
               add.reset();
             }}
           />
-          <p className={HINT_CLASS}>PNG, JPG hoặc WebP, tối đa 5 MB</p>
+          <p className={HINT_CLASS}>PNG, JPG hoặc WebP — ảnh lớn được tự thu nhỏ</p>
         </div>
         <Select stacked label="Phe thắng" value={winner} onChange={setWinner} groups={WINNER_GROUPS} />
       </div>
@@ -354,13 +388,25 @@ function RoundAdmin({ round }: { round: RoundDto }) {
     onError: () => void cache.queryClient.invalidateQueries({ queryKey: cache.key }),
   });
   const replace = useMutation({
-    mutationFn: (file: File) => apiSendFile<RoundDto>('PUT', `/api/admin/rounds/${round.id}/image`, file),
-    onSuccess: (updated) => cache.put(updated),
+    mutationFn: async (file: File) => {
+      const { main, thumb } = await shrinkRoundImage(file);
+      const updated = await apiSendFile<RoundDto>('PUT', `/api/admin/rounds/${round.id}/image`, main);
+      return uploadThumb(updated, thumb);
+    },
+    onSuccess: (updated) => {
+      cache.put(updated);
+      // Ảnh nhỏ ở Duyệt điểm lấy URL theo ván → hai danh sách lấy lại URL mới.
+      void cache.queryClient.invalidateQueries({ queryKey: PENDING_REPORTS_KEY });
+      void cache.queryClient.invalidateQueries({ queryKey: APPROVED_REPORTS_KEY });
+    },
     onSettled: () => setInputKey((n) => n + 1),
   });
   const remove = useMutation({
     mutationFn: () => apiSend<undefined>('DELETE', `/api/admin/rounds/${round.id}`),
-    onSuccess: () => cache.remove(round.id),
+    onSuccess: () => {
+      cache.remove(round.id);
+      void cache.queryClient.invalidateQueries({ queryKey: SESSIONS_KEY });
+    },
   });
 
   const onImage = (event: ChangeEvent<HTMLInputElement>) => {
@@ -402,6 +448,7 @@ function RoundAdmin({ round }: { round: RoundDto }) {
           patch.mutate({ winnerFaction: next === '' ? null : next });
         }}
         groups={WINNER_GROUPS}
+        disabled={patch.isPending}
       />
       {round.winnerFaction === 'neutral' && (
         <fieldset className="flex flex-col gap-1.5">

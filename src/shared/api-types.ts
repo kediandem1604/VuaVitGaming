@@ -265,6 +265,8 @@ export interface ReportRoundDto {
   won: boolean;
   /** Ảnh ván, cùng dạng `?v=` với `RoundDto.imageUrl` (đổi theo mỗi lần thay ảnh). */
   imageUrl: string;
+  /** Ảnh nhỏ của ván (như `RoundDto.thumbUrl`). */
+  thumbUrl: string;
 }
 
 /**
@@ -824,6 +826,11 @@ export interface RoundDto {
   winnerFaction: Faction | null;
   winnerIds: number[];
   imageUrl: string;
+  /**
+   * Ảnh nhỏ (cạnh dài ≤ 400px) cho lưới/danh sách: `/api/rounds/{id}/image?size=thumb&v=…`; ván chưa có
+   * ảnh nhỏ thì server trả ảnh gốc. Phóng to vẫn dùng `imageUrl`.
+   */
+  thumbUrl: string;
   imageUpdatedAt: string;
   reports: RoundReportDto[];
 }

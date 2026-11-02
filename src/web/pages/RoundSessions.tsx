@@ -120,7 +120,7 @@ function RoundRow({ round, roles }: { round: RoundDto; roles: RoleDto[] }) {
     <li className="panel-inset flex flex-col gap-2">
       <div className="flex items-center gap-3">
         <PrefetchLink to={sessionPath(round.sessionId, round.number)} aria-label={`Xem ván ${round.number}`} className="shrink-0 overflow-hidden rounded-lg border-2 border-night-700 hover:border-gold">
-          <img src={round.imageUrl} alt="" loading="lazy" className="aspect-video w-20 object-cover" />
+          <img src={round.thumbUrl} alt="" loading="lazy" className="aspect-video w-20 object-cover" />
         </PrefetchLink>
         <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
           <span className="font-bold text-white">Ván {round.number}</span>
