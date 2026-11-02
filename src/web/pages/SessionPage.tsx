@@ -94,6 +94,15 @@ const WINNER_GROUPS: SelectGroup<WinnerChoice>[] = [
 ];
 
 /** Chip trạng thái nhỏ cạnh lần khai của chính mình. */
+/** Phe thứ 3 thắng mà chưa tick ai → không ai được điểm (mod cần biết để tick). */
+const missingNeutralWinner = (round: RoundDto) => round.winnerFaction === 'neutral' && round.winnerIds.length === 0;
+
+/** Người khai role phe thứ 3 ở ván (chờ duyệt hoặc đã duyệt), mỗi người một dòng. */
+const neutralDeclarers = (round: RoundDto) =>
+  round.reports.filter((report, index, list) => report.role.faction === 'neutral' && list.findIndex((other) => other.member.id === report.member.id) === index);
+
+const WARNING_CLASS = 'rounded-xl border-2 border-gold bg-gold/10 px-3 py-2 text-sm font-bold text-gold';
+
 const MY_STATUS: Record<RoundReportDto['status'], { text: string; className: string }> = {
   pending: { text: 'Chờ duyệt', className: 'bg-gold text-gold-ink' },
   approved: { text: 'Đã duyệt', className: 'bg-ok text-night-950' },
@@ -190,6 +199,8 @@ function RoundCard({ round, staff, roles, canReport }: RoundCardProps) {
           Ván {round.number}
         </h2>
         <WinnerChip faction={round.winnerFaction} />
+        {/* Chỉ mod/admin thấy: nhắc tick người thắng phe thứ 3. */}
+        {staff && missingNeutralWinner(round) && <span className="chip bg-gold px-2 py-0.5 text-xs text-gold-ink">Chưa chọn người thắng</span>}
       </div>
 
       <button
@@ -427,7 +438,7 @@ function RoundAdmin({ round }: { round: RoundDto }) {
   };
 
   // Người có thể tick thắng: đã khai role phe thứ 3 ở ván này (mỗi người một dòng).
-  const neutral = round.reports.filter((report, index, list) => report.role.faction === 'neutral' && list.findIndex((other) => other.member.id === report.member.id) === index);
+  const neutral = neutralDeclarers(round);
   const toggleWinner = (memberId: number, checked: boolean) => {
     const next = checked ? [...round.winnerIds, memberId] : round.winnerIds.filter((item) => item !== memberId);
     patch.mutate({ winnerIds: next });
@@ -445,31 +456,34 @@ function RoundAdmin({ round }: { round: RoundDto }) {
         value={round.winnerFaction ?? ''}
         onChange={(next) => {
           if (next === (round.winnerFaction ?? '')) return;
-          patch.mutate({ winnerFaction: next === '' ? null : next });
+          // Đổi sang Phe thứ 3 mà chỉ một người khai role phe thứ 3 → tick sẵn người đó (hay bị quên).
+          const only = next === 'neutral' && neutral.length === 1 ? neutral[0] : undefined;
+          patch.mutate(only ? { winnerFaction: 'neutral', winnerIds: [only.member.id] } : { winnerFaction: next === '' ? null : next });
         }}
         groups={WINNER_GROUPS}
         disabled={patch.isPending}
       />
-      {round.winnerFaction === 'neutral' && (
+      {missingNeutralWinner(round) && (
+        <p role="status" className={WARNING_CLASS}>
+          {neutral.length === 0 ? 'Chưa ai khai role phe thứ 3 ở ván này.' : 'Chưa chọn người thắng — phe thứ 3 chưa ai được điểm. Tick người thắng bên dưới.'}
+        </p>
+      )}
+      {round.winnerFaction === 'neutral' && neutral.length > 0 && (
         <fieldset className="flex flex-col gap-1.5">
           <legend className={cx(LABEL_CLASS, 'mb-1')}>Người thắng (Phe thứ 3)</legend>
-          {neutral.length === 0 ? (
-            <p className={HINT_CLASS}>Chưa ai khai role phe thứ 3 ở ván này</p>
-          ) : (
-            neutral.map((report) => (
-              <Checkbox
-                key={report.member.id}
-                id={`${base}-winner-${report.member.id}`}
-                checked={round.winnerIds.includes(report.member.id)}
-                disabled={busy}
-                onChange={(event) => toggleWinner(report.member.id, event.target.checked)}
-              >
-                <span className="text-sm text-white">
-                  {report.member.displayName} ({report.role.icon} {report.role.nameVi})
-                </span>
-              </Checkbox>
-            ))
-          )}
+          {neutral.map((report) => (
+            <Checkbox
+              key={report.member.id}
+              id={`${base}-winner-${report.member.id}`}
+              checked={round.winnerIds.includes(report.member.id)}
+              disabled={busy}
+              onChange={(event) => toggleWinner(report.member.id, event.target.checked)}
+            >
+              <span className="text-sm text-white">
+                {report.member.displayName} ({report.role.icon} {report.role.nameVi})
+              </span>
+            </Checkbox>
+          ))}
         </fieldset>
       )}
       <div className="flex flex-wrap gap-2">

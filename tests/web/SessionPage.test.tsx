@@ -422,14 +422,22 @@ test('a mod sets the winner, ticks neutral winners, replaces the image and delet
   expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Chưa chọn', 'Ngỗng', 'Vịt', 'Phe thứ 3']);
   fireEvent.click(screen.getByRole('option', { name: 'Phe thứ 3' }));
   await waitFor(() => expect(within(first).getByText('Phe thứ 3 thắng')).toBeInTheDocument());
-  expect(JSON.parse(String((calls(fetchMock, 'PATCH')[0]?.[1] as RequestInit).body))).toEqual({ winnerFaction: 'neutral' });
+  // Chỉ một người khai role phe thứ 3 → tick sẵn người đó trong cùng lần PATCH.
+  expect(JSON.parse(String((calls(fetchMock, 'PATCH')[0]?.[1] as RequestInit).body))).toEqual({ winnerFaction: 'neutral', winnerIds: [11] });
 
   // Chỉ người đã khai role phe thứ 3 ở ván này mới tick được.
   const winners = within(first).getByRole('group', { name: 'Người thắng (Phe thứ 3)' });
   expect(within(winners).getAllByRole('checkbox')).toHaveLength(1);
-  fireEvent.click(within(winners).getByRole('checkbox', { name: 'Đa Đa Mười Một (🦤 Chim đa đa)' }));
   await waitFor(() => expect(within(winners).getByRole('checkbox')).toBeChecked());
-  expect(JSON.parse(String((calls(fetchMock, 'PATCH')[1]?.[1] as RequestInit).body))).toEqual({ winnerIds: [11] });
+  expect(within(admin).queryByRole('status')).not.toBeInTheDocument();
+  expect(within(first).queryByText('Chưa chọn người thắng')).not.toBeInTheDocument();
+
+  // Bỏ tick → cảnh báo chưa ai được điểm (trong khung quản lý và chip cạnh phe thắng).
+  fireEvent.click(within(winners).getByRole('checkbox', { name: 'Đa Đa Mười Một (🦤 Chim đa đa)' }));
+  await waitFor(() => expect(within(winners).getByRole('checkbox')).not.toBeChecked());
+  expect(JSON.parse(String((calls(fetchMock, 'PATCH')[1]?.[1] as RequestInit).body))).toEqual({ winnerIds: [] });
+  expect(within(admin).getByRole('status')).toHaveTextContent('Chưa chọn người thắng — phe thứ 3 chưa ai được điểm. Tick người thắng bên dưới.');
+  expect(within(first).getByText('Chưa chọn người thắng')).toBeInTheDocument();
 
   fireEvent.change(within(admin).getByLabelText('Đổi ảnh'), { target: { files: [new File(['w'], 'b.webp', { type: 'image/webp' })] } });
   await waitFor(() => expect(first.querySelector('img')).toHaveAttribute('src', '/api/rounds/101/image?size=thumb&v=2'));
@@ -455,4 +463,60 @@ test('deleting a round without reports removes it from the page', async () => {
   await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ván 3' })).not.toBeInTheDocument());
   expect(screen.getByText('Buổi này chưa có ảnh ván, chờ mod up')).toBeInTheDocument();
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
+});
+
+test('with two neutral declarers the mod must tick the winners themselves', async () => {
+  let data: SessionRoundsDto = {
+    session,
+    rounds: [round({ id: 101, number: 1, reports: [decl(1, 11, 'Đa Đa Mười Một', 2), decl(2, 12, 'Đa Đa Mười Hai', 2, { status: 'pending' }), decl(3, 10, 'Vịt Mười', 1)] })],
+  };
+  const fetchMock = stubFetch({
+    ...routesFor(() => data, member('mod')),
+    'PATCH /api/admin/rounds/101': (init) => {
+      const body = JSON.parse(String(init?.body)) as { winnerFaction?: 'neutral'; winnerIds?: number[] };
+      const current = data.rounds[0]!;
+      const updated = { ...current, winnerFaction: body.winnerFaction ?? current.winnerFaction, winnerIds: body.winnerIds ?? current.winnerIds };
+      data = { ...data, rounds: [updated] };
+      return json(200, updated);
+    },
+  });
+  renderPage();
+  const first = await card(1);
+  const admin = await within(first).findByRole('group', { name: 'Quản lý ván 1' });
+  fireEvent.click(within(admin).getByRole('combobox', { name: 'Phe thắng' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Phe thứ 3' }));
+  await waitFor(() => expect(within(first).getByText('Phe thứ 3 thắng')).toBeInTheDocument());
+  expect(JSON.parse(String((calls(fetchMock, 'PATCH')[0]?.[1] as RequestInit).body))).toEqual({ winnerFaction: 'neutral' });
+
+  const winners = within(first).getByRole('group', { name: 'Người thắng (Phe thứ 3)' });
+  expect(within(winners).getAllByRole('checkbox')).toHaveLength(2);
+  for (const box of within(winners).getAllByRole('checkbox')) expect(box).not.toBeChecked();
+  expect(within(admin).getByRole('status')).toHaveTextContent('Chưa chọn người thắng — phe thứ 3 chưa ai được điểm. Tick người thắng bên dưới.');
+
+  fireEvent.click(within(winners).getByRole('checkbox', { name: 'Đa Đa Mười Hai (🦤 Chim đa đa)' }));
+  await waitFor(() => expect(within(winners).getByRole('checkbox', { name: 'Đa Đa Mười Hai (🦤 Chim đa đa)' })).toBeChecked());
+  expect(JSON.parse(String((calls(fetchMock, 'PATCH')[1]?.[1] as RequestInit).body))).toEqual({ winnerIds: [12] });
+  expect(within(admin).queryByRole('status')).not.toBeInTheDocument();
+  expect(within(first).queryByText('Chưa chọn người thắng')).not.toBeInTheDocument();
+});
+
+test('a neutral win without neutral declarers says nobody declared one', async () => {
+  const data: SessionRoundsDto = { session, rounds: [round({ id: 101, number: 1, winnerFaction: 'neutral', reports: [decl(1, 10, 'Vịt Mười', 1)] })] };
+  stubFetch(routesFor(data, member('mod')));
+  renderPage();
+  const first = await card(1);
+  const admin = await within(first).findByRole('group', { name: 'Quản lý ván 1' });
+  expect(within(admin).getByRole('status')).toHaveTextContent('Chưa ai khai role phe thứ 3 ở ván này.');
+  expect(within(admin).queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(within(first).getByText('Chưa chọn người thắng')).toBeInTheDocument();
+});
+
+test('members do not see the missing-winner chip', async () => {
+  const data: SessionRoundsDto = { session, rounds: [round({ id: 101, number: 1, winnerFaction: 'neutral', reports: [decl(1, 11, 'Đa Đa Mười Một', 2)] })] };
+  stubFetch(routesFor(data));
+  renderPage();
+  const first = await card(1);
+  expect(within(first).getByText('Phe thứ 3 thắng')).toBeInTheDocument();
+  expect(within(first).queryByText('Chưa chọn người thắng')).not.toBeInTheDocument();
+  expect(within(first).queryByRole('status')).not.toBeInTheDocument();
 });
