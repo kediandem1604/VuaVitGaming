@@ -1,0 +1,373 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router';
+import { afterEach, expect, test, vi } from 'vitest';
+import type { HallDto, HallRoleDto, RoleDto, SeasonDto } from '../../src/shared/api-types';
+import { registerPrefetchRoute, resetPrefetchRegistry } from '../../src/web/lib/prefetch';
+import { HallPage } from '../../src/web/pages/HallPage';
+
+const role = (over: Pick<RoleDto, 'id' | 'key' | 'faction' | 'nameVi' | 'icon' | 'metricLabel'> & Partial<RoleDto>): RoleDto => ({
+  nameEn: over.key,
+  description: '',
+  maxPerGame: 10,
+  points: 1,
+  extraMetricLabel: null,
+  extraMaxPerGame: null,
+  extraPoints: null,
+  penaltyMetricLabel: null,
+  penaltyMaxPerGame: null,
+  penaltyPoints: null,
+  mapNote: null,
+  modeKey: null,
+  hasImage: false,
+  active: true,
+  sortOrder: over.id,
+  ...over,
+});
+
+const goose = role({ id: 1, key: 'goose', faction: 'goose', nameVi: 'Ngỗng', icon: '🪿', metricLabel: 'Số lần vote trúng Vịt' });
+const medium = role({ id: 3, key: 'medium', faction: 'goose', nameVi: 'Thầy đồng', icon: '🔮', metricLabel: 'Số xác ẩn được bạn phát hiện' });
+const swordsman = role({
+  id: 61,
+  key: 'swordsman',
+  faction: 'duck',
+  nameVi: 'Kiếm sĩ',
+  icon: '⚔️',
+  metricLabel: 'Số mạng chém',
+  mapNote: 'Có từ v4.10 (08/2026)',
+});
+const dodo = role({ id: 70, key: 'dodo', faction: 'neutral', nameVi: 'Chim đa đa', icon: '🦤', metricLabel: 'Số trận thắng (bị vote ra)' });
+// Role của chế độ đặc biệt: phe Ngỗng nhưng phải nằm ở tab riêng, không lẫn vào Phe Ngỗng.
+const inquisitor = role({ id: 80, key: 'inquisitor', faction: 'goose', nameVi: 'Thanh tra', icon: '🪿', metricLabel: 'Điểm', modeKey: 'corruption' });
+
+const mainRoles: HallRoleDto[] = [
+  { role: goose, holder: { memberId: 1, displayName: 'Ngỗng Một', score: 7 }, previous: null },
+  { role: medium, holder: null, previous: null },
+  { role: swordsman, holder: null, previous: { memberId: 2, displayName: 'Vịt Hai', score: 12, seasonId: '2026-09' } },
+  { role: dodo, holder: { memberId: 3, displayName: 'Ngỗng Ba', score: 1 }, previous: null },
+];
+
+const specialEntry: HallRoleDto = { role: inquisitor, holder: { memberId: 4, displayName: 'Vịt Bốn', score: 2 }, previous: null };
+
+const seasons: SeasonDto[] = [
+  { id: '2026-10', closed: false },
+  { id: '2026-09', closed: true },
+];
+
+const halls: Record<string, HallDto> = {
+  '2026-10': { seasonId: '2026-10', closed: false, roles: mainRoles },
+  '2026-09': {
+    seasonId: '2026-09',
+    closed: true,
+    roles: [
+      { role: goose, holder: null, previous: null },
+      { role: medium, holder: null, previous: null },
+      { role: swordsman, holder: { memberId: 2, displayName: 'Vịt Hai', score: 12 }, previous: null },
+      { role: dodo, holder: null, previous: null },
+    ],
+  },
+};
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+function stubFetch(hallBySeason: Record<string, HallDto> = halls) {
+  const fetchMock = vi.fn((input: string | URL | Request) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url === '/api/seasons') return Promise.resolve(json(200, seasons));
+    const match = /^\/api\/hall\?season=(\d{4}-\d{2})$/.exec(url);
+    const hall = match?.[1] ? hallBySeason[match[1]] : undefined;
+    if (hall) return Promise.resolve(json(200, hall));
+    throw new Error(`Không có tuyến giả cho ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{location.pathname + location.search}</output>;
+}
+
+const renderAt = (url: string) => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[url]}>
+        <HallPage />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+};
+
+const characters = () => screen.queryAllByRole('img').map((node) => node.getAttribute('aria-label'));
+const href = (link: HTMLElement) => link.getAttribute('href');
+/** Link của ô (tới bảng xếp hạng của role) — tách khỏi link tên người giữ (tới trang thành viên). */
+const roleLinks = () => screen.getAllByRole('link').filter((link) => href(link)?.startsWith('/bang-xep-hang'));
+const memberLinks = () => screen.getAllByRole('link').filter((link) => href(link)?.startsWith('/thanh-vien/'));
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+test('defaults to the newest season and the goose tab, showing only goose main roles', async () => {
+  const fetchMock = stubFetch();
+  renderAt('/dai-sanh');
+
+  expect(screen.getByRole('heading', { level: 1, name: 'Đại sảnh hoá thân' })).toBeInTheDocument();
+  expect(await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith('/api/hall?season=2026-10', expect.anything());
+  // Nhãn mùa trong đầu trang (nút của ô chọn mùa cũng hiện cùng chữ).
+  expect(screen.getByText('Tháng 10/2026', { selector: 'p > span' })).toBeInTheDocument();
+  expect(screen.queryByText('Mùa đã chốt')).not.toBeInTheDocument();
+
+  expect(screen.getByRole('button', { name: 'Phe Ngỗng' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Phe Vịt' })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('button', { name: 'Phe thứ 3' })).toHaveAttribute('aria-pressed', 'false');
+  // Không có role chế độ đặc biệt đang bật → không có tab đó.
+  expect(screen.queryByRole('button', { name: 'Chế độ đặc biệt' })).not.toBeInTheDocument();
+
+  expect(characters()).toEqual(['Ngỗng: Ngỗng Một', 'Thầy đồng: Chưa ai hoá thân']);
+
+  // Ô có người giữ: điểm + tên chỉ số; ô trống thì không có dòng điểm.
+  const gooseCard = screen.getByRole('link', { name: /Ngỗng: Ngỗng Một/ });
+  expect(gooseCard).toHaveTextContent('7 lần vote trúng Vịt');
+  expect(gooseCard).toHaveAttribute('href', '/bang-xep-hang?role=1&mua=2026-10');
+  expect(screen.getByRole('link', { name: /Thầy đồng/ })).not.toHaveTextContent('Số xác');
+});
+
+test('inside a tab, roles with a holder come first, each group keeping the catalogue order', async () => {
+  // Danh mục Phe Ngỗng: Ngỗng (trống) → Thầy đồng (trống) → Dân phòng (chỉ có mùa trước) →
+  // Cảnh sát trưởng (có người) → Người Canada (có người). Thẻ có người lên đầu, còn lại giữ thứ tự.
+  const vigilante = role({ id: 4, key: 'vigilante', faction: 'goose', nameVi: 'Dân phòng', icon: '🔫', metricLabel: 'Số phát bắn trúng kẻ xấu' });
+  const sheriff = role({ id: 5, key: 'sheriff', faction: 'goose', nameVi: 'Cảnh sát trưởng', icon: '⭐', metricLabel: 'Số phát bắn trúng kẻ xấu' });
+  const canadian = role({ id: 6, key: 'canadian', faction: 'goose', nameVi: 'Người Canada', icon: '🍁', metricLabel: 'Số lần tự báo xác' });
+  stubFetch({
+    '2026-10': {
+      seasonId: '2026-10',
+      closed: false,
+      roles: [
+        { role: goose, holder: null, previous: null },
+        { role: medium, holder: null, previous: null },
+        { role: vigilante, holder: null, previous: { memberId: 9, displayName: 'Ngỗng Chín', score: 1, seasonId: '2026-09' } },
+        { role: sheriff, holder: { memberId: 5, displayName: 'Ngỗng Năm', score: 4 }, previous: null },
+        { role: canadian, holder: { memberId: 6, displayName: 'Ngỗng Sáu', score: 1 }, previous: null },
+        // Hai tab khác chỉ có một thẻ mỗi tab: thứ tự không đổi.
+        { role: swordsman, holder: null, previous: null },
+        { role: dodo, holder: { memberId: 3, displayName: 'Ngỗng Ba', score: 1 }, previous: null },
+      ],
+    },
+  });
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Cảnh sát trưởng: Ngỗng Năm' });
+
+  // Người giữ mùa trước không tính là "có người": Dân phòng vẫn đứng sau hai thẻ có người.
+  expect(characters()).toEqual([
+    'Cảnh sát trưởng: Ngỗng Năm',
+    'Người Canada: Ngỗng Sáu',
+    'Ngỗng: Chưa ai hoá thân',
+    'Thầy đồng: Chưa ai hoá thân',
+    'Dân phòng: Ngỗng Chín (mùa trước)',
+  ]);
+  // Link của mỗi ô vẫn là của chính role đó.
+  expect(roleLinks().map(href)).toEqual([
+    '/bang-xep-hang?role=5&mua=2026-10',
+    '/bang-xep-hang?role=6&mua=2026-10',
+    '/bang-xep-hang?role=1&mua=2026-10',
+    '/bang-xep-hang?role=3&mua=2026-10',
+    '/bang-xep-hang?role=4&mua=2026-10',
+  ]);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe thứ 3' }));
+  expect(characters()).toEqual(['Chim đa đa: Ngỗng Ba']);
+});
+
+test('switching to Phe Vịt shows duck roles, with the previous holder marked', async () => {
+  stubFetch();
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe Vịt' }));
+
+  expect(screen.getByRole('button', { name: 'Phe Vịt' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Phe Ngỗng' })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByTestId('location')).toHaveTextContent('/dai-sanh?phe=duck');
+  expect(characters()).toEqual(['Kiếm sĩ: Vịt Hai (mùa trước)']);
+
+  const card = screen.getByRole('link', { name: /Kiếm sĩ/ });
+  expect(within(card).getByText('Mùa trước')).toBeInTheDocument();
+  expect(card).toHaveTextContent('12 mạng chém');
+  expect(card).toHaveTextContent('mùa trước');
+  expect(card).toHaveTextContent('Có từ v4.10 (08/2026)');
+  expect(card).toHaveAttribute('href', '/bang-xep-hang?role=61&mua=2026-10');
+});
+
+test('the special-mode tab appears only when such roles exist and keeps them out of the faction tabs', async () => {
+  stubFetch({ '2026-10': { seasonId: '2026-10', closed: false, roles: [...mainRoles, specialEntry] } });
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+
+  // Thanh tra là phe Ngỗng nhưng thuộc chế độ đặc biệt → không nằm trong tab Phe Ngỗng.
+  expect(characters()).toEqual(['Ngỗng: Ngỗng Một', 'Thầy đồng: Chưa ai hoá thân']);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Chế độ đặc biệt' }));
+  expect(screen.getByRole('button', { name: 'Chế độ đặc biệt' })).toHaveAttribute('aria-pressed', 'true');
+  expect(characters()).toEqual(['Thanh tra: Vịt Bốn']);
+  expect(screen.getByTestId('location')).toHaveTextContent('/dai-sanh?phe=special');
+});
+
+test('each hall tile is a role card inside the leaderboard link', async () => {
+  stubFetch();
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+
+  // Mỗi ô là một link (lớp `lift`) bọc thẻ role có băng phe; không có link lồng trong link.
+  const tiles = roleLinks();
+  expect(tiles).toHaveLength(2);
+  for (const tile of tiles) {
+    expect(tile).toHaveTextContent('PHE NGỖNG');
+    expect(within(tile).queryByRole('link')).toBeNull();
+    expect(tile.className.split(' ')).toContain('lift');
+  }
+  // Ô trống mời khai điểm (chỉ là chữ); ô có người thì không.
+  expect(screen.getByRole('link', { name: /Thầy đồng/ })).toHaveTextContent('Khai điểm để giành');
+  expect(screen.getByRole('link', { name: /Ngỗng: Ngỗng Một/ })).not.toHaveTextContent('Khai điểm để giành');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe Vịt' }));
+  const duckTile = screen.getByRole('link', { name: /Kiếm sĩ/ });
+  expect(duckTile).toHaveTextContent('PHE VỊT');
+  // Có người giữ mùa trước: không phải ô trống.
+  expect(duckTile).not.toHaveTextContent('Khai điểm để giành');
+});
+
+test('holder names are links to the public member page, outside the role link of the same tile', async () => {
+  stubFetch();
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+
+  // Ô có người: link role (cả thẻ) và một link tên riêng; ô trống không có link tên.
+  const holder = screen.getByRole('link', { name: 'Ngỗng Một' });
+  expect(holder).toHaveAttribute('href', '/thanh-vien/1');
+  expect(memberLinks()).toEqual([holder]);
+  expect(roleLinks().map(href)).toEqual(['/bang-xep-hang?role=1&mua=2026-10', '/bang-xep-hang?role=3&mua=2026-10']);
+  // Link tên nằm cùng ô lưới với thẻ của role đó, không nằm trong thẻ.
+  const tile = screen.getByRole('link', { name: /Ngỗng: Ngỗng Một/ });
+  expect(holder.closest('li')).toBe(tile.closest('li'));
+  expect(tile).not.toContainElement(holder);
+  for (const link of screen.getAllByRole('link')) expect(within(link).queryByRole('link')).toBeNull();
+
+  // Người giữ mùa trước cũng là link tới trang thành viên; link role của ô vẫn như cũ.
+  fireEvent.click(screen.getByRole('button', { name: 'Phe Vịt' }));
+  expect(screen.getByRole('link', { name: 'Vịt Hai' })).toHaveAttribute('href', '/thanh-vien/2');
+  expect(screen.getByRole('link', { name: /Kiếm sĩ/ })).toHaveAttribute('href', '/bang-xep-hang?role=61&mua=2026-10');
+  expect(memberLinks()).toHaveLength(1);
+});
+
+test('faction tabs are chips coloured by the selected faction', async () => {
+  stubFetch({ '2026-10': { seasonId: '2026-10', closed: false, roles: [...mainRoles, specialEntry] } });
+  renderAt('/dai-sanh');
+  await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+  const classes = (name: string) => screen.getByRole('button', { name }).className.split(' ');
+
+  expect(classes('Phe Ngỗng')).toEqual(expect.arrayContaining(['chip', 'bg-goose-strong']));
+  expect(classes('Phe Vịt')).toContain('chip');
+  expect(classes('Phe Vịt')).not.toContain('bg-duck-strong');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe Vịt' }));
+  expect(classes('Phe Vịt')).toContain('bg-duck-strong');
+  expect(classes('Phe Ngỗng')).not.toContain('bg-goose-strong');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Phe thứ 3' }));
+  expect(classes('Phe thứ 3')).toContain('bg-third');
+
+  // Tab không thuộc phe nào: mục đang chọn nền vàng chữ `gold-ink`.
+  fireEvent.click(screen.getByRole('button', { name: 'Chế độ đặc biệt' }));
+  expect(classes('Chế độ đặc biệt')).toEqual(expect.arrayContaining(['bg-gold', 'text-gold-ink']));
+  expect(classes('Phe thứ 3')).not.toContain('bg-third');
+});
+
+test('?mua= and ?phe= select a closed season and a tab', async () => {
+  const fetchMock = stubFetch();
+  renderAt('/dai-sanh?mua=2026-09&phe=neutral');
+
+  expect(await screen.findByRole('img', { name: 'Chim đa đa: Chưa ai hoá thân' })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith('/api/hall?season=2026-09', expect.anything());
+  expect(fetchMock).not.toHaveBeenCalledWith('/api/hall?season=2026-10', expect.anything());
+  expect(screen.getByText('Tháng 9/2026', { selector: 'span' })).toBeInTheDocument();
+  expect(screen.getByText('Mùa đã chốt')).toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveTextContent('Tháng 9/2026 (đã chốt)');
+  expect(screen.getByRole('button', { name: 'Phe thứ 3' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('invalid ?mua= and ?phe= fall back to defaults and are never sent to the API', async () => {
+  const fetchMock = stubFetch();
+  renderAt('/dai-sanh?mua=2030-01&phe=xyz');
+
+  expect(await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith('/api/hall?season=2026-10', expect.anything());
+  expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('2030-01'), expect.anything());
+  expect(screen.getByRole('button', { name: 'Phe Ngỗng' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('combobox', { name: 'Mùa' })).toHaveTextContent('Tháng 10/2026');
+});
+
+test('?phe=special falls back to goose when no special-mode role exists', async () => {
+  stubFetch();
+  renderAt('/dai-sanh?phe=special');
+  expect(await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Phe Ngỗng' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('choosing a season in the select updates the URL and reloads the hall', async () => {
+  const fetchMock = stubFetch();
+  renderAt('/dai-sanh?phe=duck');
+  await screen.findByRole('img', { name: 'Kiếm sĩ: Vịt Hai (mùa trước)' });
+
+  fireEvent.click(screen.getByRole('combobox', { name: 'Mùa' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Tháng 9/2026 (đã chốt)' }));
+
+  expect(await screen.findByRole('img', { name: 'Kiếm sĩ: Vịt Hai' })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith('/api/hall?season=2026-09', expect.anything());
+  expect(screen.getByTestId('location')).toHaveTextContent('/dai-sanh?phe=duck&mua=2026-09');
+  expect(screen.getByText('Mùa đã chốt')).toBeInTheDocument();
+  // Vẫn ở tab Phe Vịt; link ô dẫn tới mùa đang xem.
+  expect(screen.getByRole('button', { name: 'Phe Vịt' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('link', { name: /Kiếm sĩ/ })).toHaveAttribute('href', '/bang-xep-hang?role=61&mua=2026-09');
+});
+
+test('a failed hall load shows the message and Thử lại recovers', async () => {
+  let fail = true;
+  const fetchMock = vi.fn((input: string | URL | Request) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url === '/api/seasons') return Promise.resolve(json(200, seasons));
+    if (fail) return Promise.resolve(json(500, { error: { code: 'INTERNAL', message: 'Có lỗi xảy ra, thử lại sau' } }));
+    return Promise.resolve(json(200, halls['2026-10']));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  renderAt('/dai-sanh');
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Có lỗi xảy ra, thử lại sau');
+  fail = false;
+  fireEvent.click(screen.getByRole('button', { name: 'Thử lại' }));
+  expect(await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' })).toBeInTheDocument();
+});
+
+test('focusing a hall card or a holder name prefetches the leaderboard / member page chunk', async () => {
+  stubFetch();
+  const leaderboard = vi.fn(() => Promise.resolve({ default: () => null }));
+  const member = vi.fn(() => Promise.resolve({ default: () => null }));
+  registerPrefetchRoute('/bang-xep-hang', leaderboard);
+  registerPrefetchRoute('/thanh-vien/:id', member);
+  try {
+    renderAt('/dai-sanh');
+    await screen.findByRole('img', { name: 'Ngỗng: Ngỗng Một' });
+
+    fireEvent.focus(screen.getByRole('link', { name: /Ngỗng: Ngỗng Một/ }));
+    expect(leaderboard).toHaveBeenCalledTimes(1);
+    fireEvent.focus(screen.getByRole('link', { name: 'Ngỗng Một' }));
+    expect(member).toHaveBeenCalledTimes(1);
+  } finally {
+    resetPrefetchRegistry();
+  }
+});

@@ -1,0 +1,33 @@
+# Không đưa vào ảnh Docker (xem Dockerfile)
+node_modules
+dist
+coverage
+*.tsbuildinfo
+
+# Git, tài liệu, công cụ phát triển
+.git
+.gitignore
+.gitattributes
+.github
+.superpowers
+docs
+README.md
+
+# Test và cấu hình test (ảnh chỉ cần build + chạy)
+tests
+vitest.config.ts
+
+# Bí mật — biến môi trường khai báo trên Railway, không bao giờ nằm trong ảnh
+.env
+.env.*
+!.env.example
+
+# Linh tinh của hệ điều hành / IDE / công cụ AI (worktree trong .claude có cả node_modules)
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+.claude
+
+# Cấu hình máy chủ (deploy/server/.env chứa bí mật, backups/ chứa dữ liệu) — ảnh không cần
+deploy

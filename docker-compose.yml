@@ -1,0 +1,80 @@
+# GGD Hub — database cho máy phát triển và bản production chạy thử (spec §7.1).
+#
+#   db       PostgreSQL 16 cho dev, dữ liệu giữ trong volume `ggd-pgdata`.
+#            Chuỗi kết nối: postgresql://ggd:ggd@localhost:54329/ggd_dev (như .env.example).
+#   db-test  PostgreSQL 16 cho test, dữ liệu trong RAM (tmpfs) và tắt fsync cho nhanh —
+#            tests/helpers/global-setup.ts tự bật khi chạy `npm test`.
+#            Chuỗi kết nối: postgresql://ggd:ggd@localhost:54330/ggd_test (tests/helpers/setup.ts).
+#   app      Ảnh production build từ Dockerfile, thuộc profile `app` (không tự chạy):
+#            `npm run app:docker`. Đọc biến từ .env (hoặc file ở GGD_ENV_FILE), riêng
+#            DATABASE_URL và PORT được đè để trỏ vào `db` trong mạng compose.
+#
+# Tên dự án compose cố định (`name: ggd-hub`) thay vì theo tên thư mục: mọi bản checkout của
+# repo (kể cả worktree) dùng chung một bộ container `db` / `db-test` và volume dữ liệu dev, nên
+# không có hai dự án tranh nhau cổng 54329/54330. Máy đã chạy bản cũ (dự án theo tên thư mục,
+# vd `goosegooseduck`): xem README mục 7 để dừng và gỡ bộ container cũ.
+#
+# Mọi cổng chỉ mở trên loopback — 127.0.0.1 và [::1] — không lộ ra mạng ngoài. Phải có cả
+# [::1]: Prisma phân giải `localhost` thành ::1 trước; nếu ::1 từ chối kết nối thì engine
+# chờ ~2 giây mới thử 127.0.0.1, và mỗi kết nối mới trong pool đều chịu 2 giây đó (đo trên
+# Windows: 10 giao dịch song song mất 2,1 s thay vì 0,1 s — test điểm danh đồng thời hỏng).
+#
+# Healthcheck nối qua TCP (-h 127.0.0.1): lúc khởi tạo lần đầu, ảnh postgres chạy một server
+# tạm chỉ mở socket Unix; pg_isready qua socket sẽ báo "sẵn sàng" quá sớm rồi server tạm tắt,
+# `--wait` trả về và `prisma migrate deploy` gặp "connection refused".
+
+name: ggd-hub
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ggd
+      POSTGRES_PASSWORD: ggd
+      POSTGRES_DB: ggd_dev
+    ports:
+      - "127.0.0.1:54329:5432"
+      - "[::1]:54329:5432"
+    volumes:
+      - ggd-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ggd -d ggd_dev -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  db-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ggd
+      POSTGRES_PASSWORD: ggd
+      POSTGRES_DB: ggd_test
+    # Dữ liệu test bỏ đi được: tắt các bảo đảm bền vững để test chạy nhanh hơn.
+    command: postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+    ports:
+      - "127.0.0.1:54330:5432"
+      - "[::1]:54330:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ggd -d ggd_test -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  app:
+    build: .
+    profiles: [app]
+    env_file: ${GGD_ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: postgresql://ggd:ggd@db:5432/ggd_dev
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "[::1]:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  ggd-pgdata:

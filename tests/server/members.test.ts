@@ -1,0 +1,559 @@
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { beforeEach, expect, test, vi } from 'vitest';
+import type { Ctx } from '../../src/server/ctx.js';
+import {
+  accessLevelFromRoles,
+  buildWelcomeText,
+  formatMemberCode,
+  listMembers,
+  markMemberLeft,
+  recordOAuthEmail,
+  syncGuildMembers,
+  updateProfile,
+  upsertMemberFromGuild,
+} from '../../src/server/modules/members/service.js';
+import { setAttendance } from '../../src/server/modules/sessions/service.js';
+import type { GuildMemberInfo } from '../../src/server/ports.js';
+import { makeTestCtx } from '../helpers/ctx.js';
+import { resetDb, testDb } from '../helpers/db.js';
+import { createMember, createSession } from '../helpers/factories.js';
+
+beforeEach(resetDb);
+
+const info = (id: string, roles: string[] = []): GuildMemberInfo => ({
+  discordId: id,
+  displayName: `User ${id}`,
+  avatarUrl: null,
+  roleIds: roles,
+  joinedAt: null,
+});
+
+const addWebSession = (memberId: number) =>
+  testDb.webSession.create({ data: { memberId, expiresAt: new Date('2026-10-23T12:00:00Z') } });
+
+const webSessionCount = (memberId: number) => testDb.webSession.count({ where: { memberId } });
+
+// ---------------------------------------------------------------------------
+// Mã thành viên và quyền
+// ---------------------------------------------------------------------------
+
+test('formatMemberCode pads to 4 digits and leaves longer numbers alone', () => {
+  expect(formatMemberCode(1)).toBe('GGD-0001');
+  expect(formatMemberCode(42)).toBe('GGD-0042');
+  expect(formatMemberCode(9999)).toBe('GGD-9999');
+  expect(formatMemberCode(10000)).toBe('GGD-10000');
+  expect(() => formatMemberCode(0)).toThrow();
+  expect(() => formatMemberCode(1.5)).toThrow();
+});
+
+test('access level from roles', () => {
+  const cfg = { adminRoleIds: ['r-admin'], modRoleIds: ['r-mod'] };
+  expect(accessLevelFromRoles(['r-mod', 'r-admin'], cfg)).toBe('admin');
+  expect(accessLevelFromRoles(['r-mod'], cfg)).toBe('mod');
+  expect(accessLevelFromRoles([], cfg)).toBe('member');
+  expect(accessLevelFromRoles(['r-other'], cfg)).toBe('member');
+  // Nhiều role cùng cấp: khớp bất kỳ role nào là đủ.
+  expect(accessLevelFromRoles(['b'], { adminRoleIds: ['a', 'b'], modRoleIds: [] })).toBe('admin');
+});
+
+// ---------------------------------------------------------------------------
+// upsertMemberFromGuild
+// ---------------------------------------------------------------------------
+
+test('codes are sequential', async () => {
+  const { ctx } = makeTestCtx();
+  const first = await upsertMemberFromGuild(ctx, info('1'));
+  const second = await upsertMemberFromGuild(ctx, info('2', ['r-mod']));
+
+  expect(first.member.memberCode).toBe('GGD-0001');
+  expect(second.member.memberCode).toBe('GGD-0002');
+  expect(first).toMatchObject({ created: true, reactivated: false });
+  expect(first.member).toMatchObject({
+    discordId: '1',
+    displayName: 'User 1',
+    avatarUrl: null,
+    status: 'active',
+    accessLevel: 'member',
+    email: null,
+    leftAt: null,
+  });
+  expect(first.member.joinedAt.toISOString()).toBe('2026-10-22T12:00:00.000Z');
+  expect(second.member.accessLevel).toBe('mod');
+});
+
+test('existing member updated, no new code', async () => {
+  const { ctx } = makeTestCtx();
+  const created = await upsertMemberFromGuild(ctx, info('1'));
+  const updated = await upsertMemberFromGuild(ctx, {
+    ...info('1', ['r-admin']),
+    displayName: 'Tên mới',
+    avatarUrl: 'https://cdn.example/a.png',
+  });
+
+  expect(updated).toMatchObject({ created: false, reactivated: false });
+  expect(updated.member).toMatchObject({
+    id: created.member.id,
+    memberCode: 'GGD-0001',
+    displayName: 'Tên mới',
+    avatarUrl: 'https://cdn.example/a.png',
+    accessLevel: 'admin',
+    status: 'active',
+  });
+  expect(await testDb.member.count()).toBe(1);
+  // Cập nhật không tiêu số nào của sequence.
+  expect((await upsertMemberFromGuild(ctx, info('2'))).member.memberCode).toBe('GGD-0002');
+});
+
+test('rejoin keeps code', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  const original = await upsertMemberFromGuild(ctx, info('1'));
+  setNow('2026-10-22T13:00:00Z');
+  await markMemberLeft(ctx, '1');
+  expect(await testDb.member.findUniqueOrThrow({ where: { discordId: '1' } })).toMatchObject({
+    status: 'left',
+    leftAt: new Date('2026-10-22T13:00:00Z'),
+  });
+
+  setNow('2026-10-22T14:00:00Z');
+  const r = await upsertMemberFromGuild(ctx, info('1'));
+  expect(r).toMatchObject({
+    created: false,
+    reactivated: true,
+    member: { memberCode: 'GGD-0001', status: 'active', leftAt: null },
+  });
+  // Ngày vào hội giữ nguyên lần đầu, không bị đặt lại khi quay lại.
+  expect(r.member.joinedAt).toEqual(original.member.joinedAt);
+  expect(await testDb.member.count()).toBe(1);
+});
+
+test('guildJoinedAt is taken from Discord on create and only overwritten by a non-null value', async () => {
+  const { ctx } = makeTestCtx();
+  // Tạo mới mà Discord không cho biết ngày vào → null (ngày vào hiệu lực lùi về `joinedAt`).
+  const unknown = await upsertMemberFromGuild(ctx, info('1'));
+  expect(unknown.member.guildJoinedAt).toBeNull();
+  expect(unknown.member.gamesAdjustment).toBe(0);
+
+  // Tạo mới có ngày vào thật → ghi.
+  const joinedAt = new Date('2025-06-01T03:00:00Z');
+  const known = await upsertMemberFromGuild(ctx, { ...info('2'), joinedAt });
+  expect(known.member.guildJoinedAt).toEqual(joinedAt);
+
+  // Cập nhật: null giữ giá trị cũ; giá trị mới thì ghi đè.
+  expect((await upsertMemberFromGuild(ctx, info('2'))).member.guildJoinedAt).toEqual(joinedAt);
+  const later = new Date('2026-02-02T02:00:00Z');
+  expect((await upsertMemberFromGuild(ctx, { ...info('2'), joinedAt: later })).member.guildJoinedAt).toEqual(later);
+  // Người tạo lúc chưa biết, lần đồng bộ sau mới có → điền vào.
+  expect((await upsertMemberFromGuild(ctx, { ...info('1'), joinedAt })).member.guildJoinedAt).toEqual(joinedAt);
+});
+
+test('losing a creation race falls back to updating the winner row', async () => {
+  const { ctx } = makeTestCtx();
+  let raced = false;
+  // Chen một dòng cho cùng discordId ngay sau khi service thấy "chưa có" — mô phỏng
+  // bot join và bấm nút đến cùng lúc, một cách tất định.
+  const db = testDb.$extends({
+    query: {
+      member: {
+        async findUnique({ args, query }) {
+          const found = await query(args);
+          if (!found && !raced) {
+            raced = true;
+            await createMember(testDb, { discordId: 'race', displayName: 'Bên thắng' });
+          }
+          return found;
+        },
+      },
+    },
+  }) as unknown as PrismaClient;
+
+  const r = await upsertMemberFromGuild({ ...ctx, db }, info('race', ['r-mod']));
+  expect(raced).toBe(true);
+  expect(r).toMatchObject({
+    created: false,
+    reactivated: false,
+    member: { discordId: 'race', displayName: 'User race', memberCode: 'GGD-0001', accessLevel: 'mod' },
+  });
+  expect(await testDb.member.count()).toBe(1);
+});
+
+test('concurrent upserts for a new discordId yield one row and one code', async () => {
+  const { ctx } = makeTestCtx();
+  const results = await Promise.all(Array.from({ length: 5 }, () => upsertMemberFromGuild(ctx, info('1'))));
+
+  const rows = await testDb.member.findMany({ where: { discordId: '1' } });
+  expect(rows).toHaveLength(1);
+  expect(results.filter((r) => r.created)).toHaveLength(1);
+  expect(new Set(results.map((r) => r.member.id)).size).toBe(1);
+  expect(new Set(results.map((r) => r.member.memberCode)).size).toBe(1);
+  expect(rows[0]?.memberCode).toMatch(/^GGD-\d{4}$/);
+
+  // Người tiếp theo vẫn nhận mã khác — không có hai dòng chung một mã.
+  const next = await upsertMemberFromGuild(ctx, info('2'));
+  expect(next.member.memberCode).not.toBe(rows[0]?.memberCode);
+  expect(await testDb.member.count()).toBe(2);
+});
+
+// ---------------------------------------------------------------------------
+// markMemberLeft / syncGuildMembers
+// ---------------------------------------------------------------------------
+
+test('markMemberLeft deletes web sessions, keeps first leftAt, ignores unknown ids', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  const a = (await upsertMemberFromGuild(ctx, info('1'))).member;
+  const b = (await upsertMemberFromGuild(ctx, info('2'))).member;
+  await addWebSession(a.id);
+  await addWebSession(a.id);
+  await addWebSession(b.id);
+
+  setNow('2026-10-22T13:00:00Z');
+  await markMemberLeft(ctx, '1');
+  expect(await webSessionCount(a.id)).toBe(0);
+  expect(await webSessionCount(b.id)).toBe(1);
+  expect(await testDb.member.findUniqueOrThrow({ where: { id: a.id } })).toMatchObject({
+    status: 'left',
+    leftAt: new Date('2026-10-22T13:00:00Z'),
+  });
+
+  // Đã rời rồi thì giữ mốc rời ban đầu.
+  setNow('2026-10-22T14:00:00Z');
+  await markMemberLeft(ctx, '1');
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: a.id } })).leftAt).toEqual(
+    new Date('2026-10-22T13:00:00Z'),
+  );
+
+  await expect(markMemberLeft(ctx, 'không-có')).resolves.toBeUndefined();
+  expect(await testDb.member.count({ where: { status: 'active' } })).toBe(1);
+  expect(await webSessionCount(b.id)).toBe(1);
+});
+
+test('sync marks absent members left and kills their web sessions', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  const m1 = (await upsertMemberFromGuild(ctx, info('1'))).member;
+  const m2 = (await upsertMemberFromGuild(ctx, info('2'))).member;
+  await addWebSession(m1.id);
+  await addWebSession(m2.id);
+
+  setNow('2026-10-22T13:00:00Z');
+  expect(await syncGuildMembers(ctx, [info('1'), info('3')])).toEqual({ created: 1, left: 1 });
+
+  expect(await testDb.member.findUniqueOrThrow({ where: { id: m2.id } })).toMatchObject({
+    status: 'left',
+    leftAt: new Date('2026-10-22T13:00:00Z'),
+  });
+  expect(await webSessionCount(m2.id)).toBe(0);
+  expect(await webSessionCount(m1.id)).toBe(1);
+  expect(await testDb.member.findUniqueOrThrow({ where: { discordId: '3' } })).toMatchObject({
+    memberCode: 'GGD-0003',
+    status: 'active',
+  });
+
+  // Chạy lại cùng danh sách: không tạo, không đếm lại người đã rời.
+  expect(await syncGuildMembers(ctx, [info('1'), info('3')])).toEqual({ created: 0, left: 0 });
+
+  // Người đã rời xuất hiện lại: kích hoạt lại, không phải "tạo mới".
+  expect(await syncGuildMembers(ctx, [info('1'), info('2'), info('3')])).toEqual({ created: 0, left: 0 });
+  expect(await testDb.member.findUniqueOrThrow({ where: { id: m2.id } })).toMatchObject({
+    memberCode: 'GGD-0002',
+    status: 'active',
+    leftAt: null,
+  });
+});
+
+test('sync with an empty list marks everyone left', async () => {
+  const { ctx } = makeTestCtx();
+  await upsertMemberFromGuild(ctx, info('1'));
+  await upsertMemberFromGuild(ctx, info('2'));
+  expect(await syncGuildMembers(ctx, [])).toEqual({ created: 0, left: 2 });
+  expect(await testDb.member.count({ where: { status: 'active' } })).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// Rời server → trả chỗ ở các buổi chưa diễn ra
+// ---------------------------------------------------------------------------
+
+const JOINED_AT = new Date('2026-10-22T11:00:00Z');
+const attendance = (sessionId: number, memberId: number) =>
+  testDb.attendance.findUniqueOrThrow({ where: { sessionId_memberId: { sessionId, memberId } } });
+const sessionRow = (id: number) => testDb.gameSession.findUniqueOrThrow({ where: { id } });
+
+/**
+ * B đang `going` ở một buổi `scheduled` và một buổi `ended`, đã rời một buổi `scheduled`
+ * khác; A đang `going` cùng buổi với B. Trả về các id để test kiểm tra sau khi B rời server.
+ */
+async function seatsFixture(ctx: ReturnType<typeof makeTestCtx>['ctx']) {
+  const a = (await upsertMemberFromGuild(ctx, info('a'))).member;
+  const b = (await upsertMemberFromGuild(ctx, info('b'))).member;
+  const scheduled = await createSession(testDb);
+  const ended = await createSession(testDb, { status: 'ended', endedAt: ctx.now() });
+  const alreadyLeft = await createSession(testDb, { startsAt: new Date('2026-10-23T14:00:00Z') });
+  await testDb.attendance.createMany({
+    data: [
+      { sessionId: scheduled.id, memberId: a.id, status: 'going', updatedAt: JOINED_AT },
+      { sessionId: scheduled.id, memberId: b.id, status: 'going', updatedAt: JOINED_AT },
+      { sessionId: ended.id, memberId: b.id, status: 'going', updatedAt: JOINED_AT },
+      { sessionId: alreadyLeft.id, memberId: b.id, status: 'cancelled', updatedAt: JOINED_AT },
+    ],
+  });
+  return { a, b, scheduled, ended, alreadyLeft };
+}
+
+async function expectSeatsReleased(f: Awaited<ReturnType<typeof seatsFixture>>, leftAt: Date): Promise<void> {
+  // Buổi chưa diễn ra: chỗ của B bị huỷ đúng mốc đồng hồ test; buổi cần sửa lại tin Discord.
+  expect(await attendance(f.scheduled.id, f.b.id)).toMatchObject({ status: 'cancelled', updatedAt: leftAt });
+  expect((await sessionRow(f.scheduled.id)).discordDirty).toBe(true);
+  // Buổi đã kết thúc: lịch sử tham gia giữ nguyên, không đánh dấu gì.
+  expect(await attendance(f.ended.id, f.b.id)).toMatchObject({ status: 'going', updatedAt: JOINED_AT });
+  expect((await sessionRow(f.ended.id)).discordDirty).toBe(false);
+  // Buổi B đã tự rời trước đó: không đụng tới, không bị đánh dấu.
+  expect(await attendance(f.alreadyLeft.id, f.b.id)).toMatchObject({ status: 'cancelled', updatedAt: JOINED_AT });
+  expect((await sessionRow(f.alreadyLeft.id)).discordDirty).toBe(false);
+  // Người khác trong cùng buổi không bị ảnh hưởng.
+  expect(await attendance(f.scheduled.id, f.a.id)).toMatchObject({ status: 'going', updatedAt: JOINED_AT });
+}
+
+test('markMemberLeft releases the seats of the leaving member in scheduled sessions only', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  const f = await seatsFixture(ctx);
+
+  setNow('2026-10-22T13:00:00Z');
+  await markMemberLeft(ctx, 'b');
+  await expectSeatsReleased(f, new Date('2026-10-22T13:00:00Z'));
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: f.b.id } })).status).toBe('left');
+
+  // Quay lại server: chỗ KHÔNG được trả lại, mốc huỷ giữ nguyên.
+  setNow('2026-10-22T14:00:00Z');
+  expect((await upsertMemberFromGuild(ctx, info('b'))).reactivated).toBe(true);
+  expect(await attendance(f.scheduled.id, f.b.id)).toMatchObject({
+    status: 'cancelled',
+    updatedAt: new Date('2026-10-22T13:00:00Z'),
+  });
+});
+
+test('markMemberLeft on an already-left member touches no attendance', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  // Dòng `going` còn sót của người đã rời (vd do đua với lúc bấm Tham gia): không phải việc của lần rời lại.
+  const l = (await upsertMemberFromGuild(ctx, info('l'))).member;
+  const s = await createSession(testDb);
+  await testDb.attendance.create({ data: { sessionId: s.id, memberId: l.id, status: 'going', updatedAt: JOINED_AT } });
+  await testDb.member.update({ where: { id: l.id }, data: { status: 'left', leftAt: JOINED_AT } });
+
+  setNow('2026-10-22T13:00:00Z');
+  await markMemberLeft(ctx, 'l');
+  expect(await attendance(s.id, l.id)).toMatchObject({ status: 'going', updatedAt: JOINED_AT });
+  expect((await sessionRow(s.id)).discordDirty).toBe(false);
+});
+
+test('syncGuildMembers releases the seats of members missing from the guild', async () => {
+  const { ctx, setNow } = makeTestCtx();
+  const f = await seatsFixture(ctx);
+
+  setNow('2026-10-22T13:00:00Z');
+  expect(await syncGuildMembers(ctx, [info('a')])).toEqual({ created: 0, left: 1 });
+  await expectSeatsReleased(f, new Date('2026-10-22T13:00:00Z'));
+
+  // Chạy lại khi B đã rời: không đổi gì thêm (mốc huỷ giữ nguyên).
+  setNow('2026-10-22T14:00:00Z');
+  expect(await syncGuildMembers(ctx, [info('a')])).toEqual({ created: 0, left: 0 });
+  expect(await attendance(f.scheduled.id, f.b.id)).toMatchObject({
+    status: 'cancelled',
+    updatedAt: new Date('2026-10-22T13:00:00Z'),
+  });
+});
+
+/**
+ * Bản sao ctx mà mọi giao dịch của nó gọi `onAttendanceUpdateMany` ngay sau mỗi
+ * `tx.attendance.updateMany` (giao dịch vẫn mở, vẫn giữ mọi khoá đã lấy).
+ */
+function pausingCtx(ctx: Ctx, onAttendanceUpdateMany: () => Promise<void>): Ctx {
+  const wrapTx = (tx: Prisma.TransactionClient): Prisma.TransactionClient =>
+    new Proxy(tx, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop) as unknown;
+        if (prop === 'attendance') {
+          return new Proxy(value as object, {
+            get(delegate, name) {
+              const fn = Reflect.get(delegate, name) as unknown;
+              if (name !== 'updateMany' || typeof fn !== 'function') {
+                return typeof fn === 'function' ? (fn as (...a: unknown[]) => unknown).bind(delegate) : fn;
+              }
+              return async (...args: unknown[]) => {
+                const result = await (fn as (...a: unknown[]) => Promise<unknown>).apply(delegate, args);
+                await onAttendanceUpdateMany();
+                return result;
+              };
+            },
+          });
+        }
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+  const db = new Proxy({} as PrismaClient, {
+    get(_target, prop) {
+      if (prop === '$transaction') {
+        return (fn: (tx: Prisma.TransactionClient) => Promise<unknown>, opts?: unknown) =>
+          (testDb.$transaction as (f: unknown, o?: unknown) => Promise<unknown>)((tx: Prisma.TransactionClient) => fn(wrapTx(tx)), opts);
+      }
+      const value = Reflect.get(testDb, prop) as unknown;
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(testDb) : value;
+    },
+  });
+  return { ...ctx, db };
+}
+
+/** Số kết nối của DB test đang đứng chờ một khoá. */
+async function lockWaiters(): Promise<number> {
+  const [row] = await testDb.$queryRaw<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'
+  `;
+  return row?.n ?? 0;
+}
+
+test('leaving the server while pressing Leave on the same session never deadlocks (sessions are locked first)', async () => {
+  const { ctx } = makeTestCtx();
+  const m = (await upsertMemberFromGuild(ctx, info('dl'))).member;
+  const s = await createSession(testDb);
+  await testDb.attendance.create({ data: { sessionId: s.id, memberId: m.id, status: 'going', updatedAt: JOINED_AT } });
+
+  // Rời server: dừng ngay sau khi huỷ chỗ (giao dịch còn mở, còn giữ khoá) cho tới khi được thả.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let paused!: () => void;
+  const pausedAtUpdate = new Promise<void>((resolve) => (paused = resolve));
+  const leaving = markMemberLeft(
+    pausingCtx(ctx, async () => {
+      paused();
+      await gate;
+    }),
+    'dl',
+  );
+  await pausedAtUpdate;
+
+  // Đúng lúc đó người ấy bấm "Huỷ" ở buổi: phải xếp hàng sau lần rời server, không được
+  // giữ khoá buổi rồi chờ dòng điểm danh (thứ tự ngược nhau → deadlock).
+  const pressing = setAttendance(ctx, s.id, m.id, false);
+  await vi.waitFor(async () => expect(await lockWaiters()).toBeGreaterThan(0));
+  release();
+
+  await expect(leaving).resolves.toBeUndefined();
+  await expect(pressing).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  expect(await attendance(s.id, m.id)).toMatchObject({ status: 'cancelled' });
+  expect((await sessionRow(s.id)).discordDirty).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// Hồ sơ và email
+// ---------------------------------------------------------------------------
+
+test('updateProfile trims, clears and stores email and notify flags', async () => {
+  const { ctx } = makeTestCtx();
+  const m = (await upsertMemberFromGuild(ctx, info('1'))).member;
+
+  const withEmail = await updateProfile(ctx, m.id, { email: '  An.Nguyen@Example.VN  ' });
+  // Cắt khoảng trắng, giữ nguyên chữ hoa/thường.
+  expect(withEmail.email).toBe('An.Nguyen@Example.VN');
+  expect(withEmail).toMatchObject({ id: m.id, notifyEmail: true, notifyDm: true });
+
+  const flags = await updateProfile(ctx, m.id, { notifyEmail: false, notifyDm: false });
+  expect(flags).toMatchObject({ email: 'An.Nguyen@Example.VN', notifyEmail: false, notifyDm: false });
+
+  expect((await updateProfile(ctx, m.id, { email: '' })).email).toBeNull();
+  await updateProfile(ctx, m.id, { email: 'a@x.vn' });
+  expect((await updateProfile(ctx, m.id, { email: null })).email).toBeNull();
+
+  // Patch rỗng: không đổi gì, vẫn trả về thành viên.
+  expect(await updateProfile(ctx, m.id, {})).toMatchObject({ email: null, notifyEmail: false, notifyDm: false });
+});
+
+test('invalid email rejected', async () => {
+  const { ctx } = makeTestCtx();
+  const m = (await upsertMemberFromGuild(ctx, info('1'))).member;
+  await expect(updateProfile(ctx, m.id, { email: 'abc' })).rejects.toMatchObject({
+    code: 'VALIDATION',
+    message: 'Email không hợp lệ',
+  });
+  await expect(updateProfile(ctx, m.id, { email: 'a@' })).rejects.toMatchObject({ code: 'VALIDATION' });
+  // Kiểu sai (từ body JSON) cũng bị chặn ở service.
+  await expect(
+    updateProfile(ctx, m.id, { notifyDm: 'có' as unknown as boolean }),
+  ).rejects.toMatchObject({ code: 'VALIDATION' });
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: m.id } })).email).toBeNull();
+});
+
+test('updateProfile on unknown member is NOT_FOUND', async () => {
+  const { ctx } = makeTestCtx();
+  await expect(updateProfile(ctx, 999, { notifyDm: false })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+});
+
+test('OAuth email never overwrites user email and ignores unverified', async () => {
+  const { ctx } = makeTestCtx();
+  const m = (await upsertMemberFromGuild(ctx, info('1'))).member;
+  await updateProfile(ctx, m.id, { email: 'a@x.vn' });
+  await recordOAuthEmail(ctx, m.id, 'b@x.vn', true);
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: m.id } })).email).toBe('a@x.vn');
+
+  const fresh = (await upsertMemberFromGuild(ctx, info('2'))).member;
+  await recordOAuthEmail(ctx, fresh.id, 'c@x.vn', false);
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: fresh.id } })).email).toBeNull();
+  await recordOAuthEmail(ctx, fresh.id, null, true);
+  await recordOAuthEmail(ctx, fresh.id, '', true);
+  await recordOAuthEmail(ctx, fresh.id, 'không phải email', true);
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: fresh.id } })).email).toBeNull();
+
+  await recordOAuthEmail(ctx, fresh.id, ' c@x.vn ', true);
+  expect((await testDb.member.findUniqueOrThrow({ where: { id: fresh.id } })).email).toBe('c@x.vn');
+});
+
+// ---------------------------------------------------------------------------
+// listMembers
+// ---------------------------------------------------------------------------
+
+test('listMembers filters by status and searches name, code and discordId', async () => {
+  const { ctx } = makeTestCtx();
+  // Tạo ngược thứ tự tên để chắc rằng kết quả sắp theo mã, không theo tên hay id.
+  const c = await createMember(testDb, { displayName: 'Cường', discordId: 'snowflake-999' });
+  const b = await createMember(testDb, { displayName: 'bob an', discordId: 'id-b' });
+  const a = await createMember(testDb, { displayName: 'Ánh Dương', discordId: 'id-a' });
+  await markMemberLeft(ctx, 'id-b');
+
+  const codes = (rows: { memberCode: string }[]) => rows.map((r) => r.memberCode);
+  expect(codes(await listMembers(ctx, {}))).toEqual([c.memberCode, b.memberCode, a.memberCode]);
+  expect(codes(await listMembers(ctx, { status: 'active' }))).toEqual([c.memberCode, a.memberCode]);
+  expect(codes(await listMembers(ctx, { status: 'left' }))).toEqual([b.memberCode]);
+
+  // Tên: không phân biệt hoa thường (so ASCII để không phụ thuộc locale của DB); có dấu khớp nguyên văn.
+  expect(codes(await listMembers(ctx, { q: 'BOB' }))).toEqual([b.memberCode]);
+  expect(codes(await listMembers(ctx, { q: 'Dương' }))).toEqual([a.memberCode]);
+  expect(codes(await listMembers(ctx, { q: 'ggd-0002' }))).toEqual([b.memberCode]); // mã
+  expect(codes(await listMembers(ctx, { q: 'SNOW' }))).toEqual([c.memberCode]); // discordId
+  expect(codes(await listMembers(ctx, { q: 'ggd-' }))).toHaveLength(3);
+  expect(codes(await listMembers(ctx, { q: 'ggd-', status: 'left' }))).toEqual([b.memberCode]);
+  expect(await listMembers(ctx, { q: 'không có ai' })).toEqual([]);
+  // Chuỗi tìm toàn khoảng trắng = không lọc; ký tự đặc biệt của LIKE không phải wildcard.
+  expect(codes(await listMembers(ctx, { q: '   ' }))).toHaveLength(3);
+  expect(await listMembers(ctx, { q: '%' })).toEqual([]);
+  expect(await listMembers(ctx, { q: 'ggd_0002' })).toEqual([]);
+  expect(await listMembers(ctx, { q: '\\' })).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// Lời chào
+// ---------------------------------------------------------------------------
+
+test('welcome text has code and link', async () => {
+  const { ctx } = makeTestCtx();
+  const member = (await upsertMemberFromGuild(ctx, { ...info('1'), displayName: 'An' })).member;
+
+  const fresh = buildWelcomeText(member, 'http://localhost:3000', false);
+  expect(fresh).toContain('GGD-0001');
+  expect(fresh).toBe(
+    'Chào mừng An đến với hội Goose Goose Duck! 🪿\n' +
+      'Mã thành viên của bạn: GGD-0001\n' +
+      'Đăng nhập hệ thống: http://localhost:3000',
+  );
+
+  const back = buildWelcomeText(member, 'http://localhost:3000', true);
+  expect(back).toContain('Chào mừng trở lại');
+  expect(back).toBe(
+    'Chào mừng trở lại, An!\nMã thành viên của bạn: GGD-0001\nĐăng nhập hệ thống: http://localhost:3000',
+  );
+});

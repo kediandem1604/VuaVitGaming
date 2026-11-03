@@ -45,7 +45,7 @@ Biểu đồ thống kê, hỗ trợ nhiều server Discord, app điện thoại
 | Kênh nhắc | Email + DM Discord, mỗi người tự tắt từng kênh |
 | Ai được vote MVP | Cả server; ứng viên là người có mặt ở buổi đó; không tự vote mình |
 | Ảnh nhân vật | Tự vẽ sẵn (SVG), admin tải ảnh khác thay được |
-| Hosting | Cloud rẻ: 1 dịch vụ Railway (~5$/tháng) + PostgreSQL Neon miễn phí |
+| Hosting | Cloud rẻ: 1 dịch vụ Railway + PostgreSQL của Railway trong cùng project, cùng vùng (Singapore), ~5–10$/tháng tổng cộng (ruling R37: Neon gói miễn phí không đủ vì bộ hẹn giờ mỗi phút giữ compute thức 24/7) |
 | Kiến trúc | Một ứng dụng TypeScript duy nhất |
 
 ## 3. Kiến trúc
@@ -67,10 +67,10 @@ Discord server ◄─► Bot (discord.js)      Web API (Fastify)  ◄─► Web 
 | Ngôn ngữ | TypeScript, Node.js 24 LTS | Một ngôn ngữ cho bot, server, web |
 | Bot | discord.js v14 | Thư viện bot Discord phổ biến và đầy đủ nhất |
 | Web API | Fastify | Nhẹ, có sẵn plugin cookie/static/rate-limit |
-| Database | PostgreSQL + Prisma | Ổn định, có migration, Neon có gói miễn phí |
+| Database | PostgreSQL + Prisma | Ổn định, có migration; Railway có sẵn PostgreSQL trong cùng project |
 | Giao diện | React + Vite + React Router + TanStack Query + Tailwind | Phổ biến, build ra file tĩnh để Fastify phục vụ |
 | Email | Nodemailer qua SMTP (mặc định Gmail + mật khẩu ứng dụng) | Không cần tên miền; đổi nhà cung cấp chỉ cần sửa cấu hình |
-| Test | Vitest + PostgreSQL thật chạy trong Docker | Test logic tính điểm/vote trên DB thật |
+| Test | Vitest + PostgreSQL thật chạy nhúng (`embedded-postgres`, không cần Docker) | Test logic tính điểm/vote trên DB thật |
 
 ### Nguyên tắc tách module
 
@@ -158,7 +158,7 @@ Discord server ◄─► Bot (discord.js)      Web API (Fastify)  ◄─► Web 
 
 ### 4.8 Nhân vật
 
-- Trong game mọi người chơi đều có cùng một dáng nhân vật, nên nhân vật hoá thân = một dáng nhân vật SVG tự vẽ dùng chung, tô màu theo phe (xanh ngỗng, đỏ vịt, tím phe thứ 3), kèm biểu tượng role.
+- Trong game mọi người chơi đều có cùng một dáng nhân vật, nên nhân vật hoá thân = một dáng nhân vật SVG tự vẽ dùng chung, tô màu theo phe (xanh ngỗng, đỏ vịt, tím phe thứ 3), kèm biểu tượng role. *(Đã thay bởi `2026-10-23-ggd-ui-sanh-dem-design.md` §4: thân trắng như ngỗng trong game, đội đồ theo role, phe hiện ở vòng sáng dưới chân và khung thẻ.)*
 - Bảng tên trên đầu: chữ trắng viền tối như trong game, tự co chữ khi tên dài.
 - Admin tải ảnh khác cho từng role: chỉ nhận PNG/JPG/WebP, tối đa 1 MB, kiểm tra định dạng thật theo nội dung file; lưu trong PostgreSQL (vì ổ đĩa Railway không giữ file khi deploy lại).
 
@@ -186,13 +186,13 @@ Một vòng lặp chạy mỗi 60 giây (giữ khoá thuê trong `scheduler_leas
 | `attendances` | session_id, member_id, status (`going`/`cancelled`), updated_at | khoá chính (session_id, member_id) |
 | `notification_log` | session_id, member_id, kind (`pre15`/`start`), channel (`email`/`dm`), sent_at, error | duy nhất (session_id, member_id, kind, channel) |
 | `award_categories` | id, scope (`always`/`mode`/`optional`), mode_id (chỉ khi scope = `mode`), name, description, active, sort_order | mode_id bắt buộc khi và chỉ khi scope = `mode` |
-| `vote_rounds` | id, session_id, opens_at, closes_at, status (`open`/`closed`) | session_id duy nhất |
-| `vote_messages` | round_id, category_id, discord_message_id | duy nhất (round_id, category_id); các hạng mục được chọn cho đợt vote |
+| `vote_rounds` | id, session_id, opens_at, closes_at, status (`open`/`closed`), announce_pending | session_id duy nhất; `announce_pending` = đã đóng nhưng chưa đăng được kết quả vào kênh thông báo (bộ hẹn giờ đăng bù) |
+| `vote_messages` | round_id, category_id, discord_message_id, result_pending | duy nhất (round_id, category_id); các hạng mục được chọn cho đợt vote; `result_pending` = đợt đã đóng nhưng tin chưa được sửa thành kết quả (bộ hẹn giờ sửa bù) |
 | `votes` | round_id, category_id, voter_id, nominee_id, updated_at | duy nhất (round_id, category_id, voter_id); voter_id ≠ nominee_id |
 | `awards` | round_id, category_id, member_id, vote_count | duy nhất (round_id, category_id, member_id) |
 | `roles` | id, key, faction (`goose`/`duck`/`neutral`), name_en, name_vi, description, metric_label, max_per_game, map_note (null, vd "Chỉ có ở Ancient Sands"), mode_id (null = role chế độ thường; có giá trị = role riêng của chế độ đặc biệt), icon (emoji), image (bytea, null), image_mime (null), active, sort_order | key duy nhất; max_per_game ≥ 1 |
 | `stat_reports` | id, member_id, role_id, session_id (null), played_on, value, note, status (`pending`/`approved`/`rejected`), reviewed_by, reviewed_at, reject_reason, created_at | value ≥ 0 |
-| `seasons` | id (`YYYY-MM`), starts_at, ends_at, closed_at, review_nudged_at (đã nhắc mod ngày 3 chưa) | |
+| `seasons` | id (`YYYY-MM`), starts_at, ends_at, closed_at, review_nudged_at (đã nhắc mod ngày 3 chưa), summary_pending | `summary_pending` = đã chốt nhưng chưa đăng được bảng tổng kết vào kênh thông báo (bộ hẹn giờ đăng bù) |
 | `scheduler_lease` | id (luôn = 1), holder, expires_at | Một dòng duy nhất |
 | `role_titles` | season_id, role_id, member_id, score | duy nhất (season_id, role_id) |
 | `app_settings` | key, value | key duy nhất. Giá trị mặc định: thời gian mở vote 12 tiếng, tự kết thúc buổi sau 4 tiếng, nhắc trước 15 phút |
@@ -366,7 +366,7 @@ Trang đăng nhập là trang duy nhất không cần đăng nhập.
 
 ## 10. Kiểm thử
 
-- **Test tự động (Vitest, PostgreSQL thật trong Docker)** cho phần dễ sai:
+- **Test tự động (Vitest, PostgreSQL thật chạy nhúng)** cho phần dễ sai:
   - Tính điểm, phân định hoà, đổi người hoá thân.
   - Chốt mùa: tự từ chối lần khai còn chờ, lưu `role_titles`, chạy lại không trùng.
   - Vote: đổi phiếu, cấm tự vote, đếm phiếu, hoà phiếu, không ai vote.
@@ -385,10 +385,11 @@ Biến môi trường:
 | `DATABASE_URL` | Chuỗi kết nối PostgreSQL |
 | `PUBLIC_URL` | Địa chỉ web (dùng cho OAuth và link trong tin nhắn) |
 | `SESSION_SECRET` | Khoá ký cookie |
+| `TRUST_PROXY_HOPS` | Số lớp proxy phía trước app (mặc định 1) — dùng để lấy đúng IP người dùng cho giới hạn tốc độ |
 | `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Thông tin app Discord |
 | `DISCORD_GUILD_ID` | ID server Discord |
 | `DISCORD_SCHEDULE_CHANNEL_ID`, `DISCORD_VOTE_CHANNEL_ID`, `DISCORD_ANNOUNCE_CHANNEL_ID` | Các kênh bot đăng tin |
 | `DISCORD_ADMIN_ROLE_IDS`, `DISCORD_MOD_ROLE_IDS` | Role Discord được coi là admin / mod (phân tách bằng dấu phẩy) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | Gửi email |
 
-Deploy: một dịch vụ Railway chạy `npm start` (chạy migration rồi khởi động), PostgreSQL trên Neon. README tiếng Việt hướng dẫn từng bước: tạo app Discord và bật intent, mời bot vào server, tạo mật khẩu ứng dụng Gmail, tạo database Neon, deploy Railway, chạy dữ liệu mẫu.
+Deploy: một dịch vụ Railway chạy `npm start` (chạy migration rồi khởi động) + một dịch vụ PostgreSQL của Railway trong **cùng project** (`DATABASE_URL=${{Postgres.DATABASE_URL}}`, mạng nội bộ), cả hai cùng vùng Southeast Asia (Singapore), Replicas = 1; tổng ~5–10$/tháng. Neon chỉ là phương án thay thế, và phải dùng gói trả phí (gói miễn phí hết giờ compute giữa tháng vì bộ hẹn giờ chạy mỗi phút). README tiếng Việt hướng dẫn từng bước: tạo app Discord và bật intent, mời bot vào server, tạo mật khẩu ứng dụng Gmail, tạo project Railway kèm PostgreSQL, deploy ứng dụng vào cùng project, chạy dữ liệu mẫu, rồi chạy danh sách kiểm tra tay trên server Discord thử.

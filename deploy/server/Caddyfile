@@ -1,0 +1,6 @@
+# Caddy tự xin và gia hạn chứng chỉ HTTPS cho SITE_ADDRESS (vd 13-229-10-20.sslip.io hoặc
+# tên miền riêng), tự chuyển http → https, rồi chuyển yêu cầu vào ứng dụng.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}

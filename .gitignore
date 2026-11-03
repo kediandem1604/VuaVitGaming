@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+
+# Bản sao lưu database trên máy chủ Ubuntu (deploy/server)
+deploy/server/backups/
