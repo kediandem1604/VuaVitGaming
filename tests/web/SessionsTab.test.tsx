@@ -44,7 +44,7 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const noContent = () => new Response(null, { status: 204 });
 
-type Handler = (init: RequestInit | undefined) => Response | Promise<Response>;
+type Handler = (init: RequestInit | undefined, url: string) => Response | Promise<Response>;
 
 /** fetch giả định tuyến theo `METHOD path` (bỏ query string). */
 function stubFetch(routes: Record<string, Handler>) {
@@ -54,7 +54,7 @@ function stubFetch(routes: Record<string, Handler>) {
     const key = `${init?.method ?? 'GET'} ${path}`;
     const handler = routes[key];
     if (!handler) throw new Error(`Không có tuyến giả cho ${key}`);
-    return Promise.resolve(handler(init));
+    return Promise.resolve(handler(init, url));
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -346,4 +346,36 @@ test('every session row links to its rounds page', async () => {
   expect(links.map((link) => link.getAttribute('href'))).toEqual(['/buoi/5', '/buoi/6']);
   // Kèm số ván của buổi.
   expect(links.map((link) => link.textContent)).toEqual(['Ván đấu (3)', 'Ván đấu (0)']);
+});
+
+test('the day list defaults to the play day: before 6:00 VN it shows yesterday, from 6:00 today', async () => {
+  // Chỉ giả `Date` (hẹn giờ vẫn thật) để ngày mặc định không phụ thuộc giờ máy chạy.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    const byDate: Record<string, SessionDto[]> = {
+      '2026-10-30': [{ ...base, id: 30, startsAt: '2026-10-30T15:00:00.000Z' }], // 22:00 VN 30/10
+      '2026-10-31': [{ ...base, id: 31, startsAt: '2026-10-31T12:30:00.000Z' }], // 19:30 VN 31/10
+    };
+    stubFetch({
+      ...baseRoutes,
+      'GET /api/sessions': (_init, url) => json(200, byDate[new URL(url, 'http://x').searchParams.get('date') ?? ''] ?? []),
+    });
+
+    // 03:00 giờ VN ngày 31/10 → vẫn là ngày chơi 30/10 (trận khuya).
+    vi.setSystemTime(new Date('2026-10-31T03:00:00+07:00'));
+    renderTab();
+    expect(await screen.findByRole('article', { name: '22:00 Cổ điển (Classic)' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Xem buổi ngày')).toHaveValue('2026-10-30');
+    // Form tạo buổi vẫn theo ngày lịch hôm nay.
+    expect(screen.getByLabelText('Ngày')).toHaveValue('2026-10-31');
+    cleanup();
+
+    // 06:00 giờ VN → ngày chơi là hôm nay.
+    vi.setSystemTime(new Date('2026-10-31T06:00:00+07:00'));
+    renderTab();
+    expect(await screen.findByRole('article', { name: '19:30 Cổ điển (Classic)' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Xem buổi ngày')).toHaveValue('2026-10-31');
+  } finally {
+    vi.useRealTimers();
+  }
 });

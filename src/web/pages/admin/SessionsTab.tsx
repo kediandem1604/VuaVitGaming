@@ -14,6 +14,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import type { EndOptionDto, ModeDto, OpenVoteRoundDto, SessionDto } from '../../../shared/api-types';
+import { defaultPlayedOn } from '../../../shared/report-day';
 import { apiGet, apiSend, errorMessage } from '../../api';
 import { EmptyState } from '../../components/EmptyState';
 import { Modal } from '../../components/Modal';
@@ -66,7 +67,9 @@ interface UpdateBody {
 }
 
 export function SessionsTab() {
-  const [date, setDate] = useState(vnTodayIso());
+  // Danh sách mở sẵn ở ngày chơi hiện tại (quy tắc 6:00 chung): 00:00–05:59 giờ VN vẫn là hôm qua,
+  // để admin up ván trận khuya sau nửa đêm không phải lùi ngày. Form tạo buổi vẫn theo ngày lịch.
+  const [date, setDate] = useState(() => defaultPlayedOn(new Date()));
 
   return (
     <>
