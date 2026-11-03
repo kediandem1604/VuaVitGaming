@@ -63,7 +63,8 @@ export function RoundReportForm({ round, roles, existing = null, onDone }: Round
   const roundsKey = sessionRoundsQuery(round.sessionId).queryKey;
 
   const [roleId, setRoleId] = useState<number>(existing?.role.id ?? 0);
-  const [value, setValue] = useState(existing ? String(existing.value) : '');
+  // Mọi ô số bắt đầu bằng 0 (form sửa: giá trị đã khai) — không gõ gì vẫn gửi được 0.
+  const [value, setValue] = useState(existing ? String(existing.value) : OPTIONAL_METRIC_DEFAULT);
   const [extraValue, setExtraValue] = useState(existing ? String(existing.extraValue) : OPTIONAL_METRIC_DEFAULT);
   const [penaltyValue, setPenaltyValue] = useState(existing ? String(existing.penaltyValue) : OPTIONAL_METRIC_DEFAULT);
   const [note, setNote] = useState(existing?.note ?? '');
@@ -152,7 +153,8 @@ export function RoundReportForm({ round, roles, existing = null, onDone }: Round
         value={roleId}
         onChange={(next) => {
           setRoleId(next);
-          // Ô phụ/phạt của role trước không có nghĩa với role mới: về mặc định.
+          // Chỉ số của role trước không có nghĩa với role mới: mọi ô số về 0.
+          setValue(OPTIONAL_METRIC_DEFAULT);
           setExtraValue(OPTIONAL_METRIC_DEFAULT);
           setPenaltyValue(OPTIONAL_METRIC_DEFAULT);
           touch();
