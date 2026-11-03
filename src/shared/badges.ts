@@ -9,7 +9,7 @@
 
 export type BadgeKind = 'monthly' | 'milestone';
 
-/** Danh hiệu theo tháng (§3.1), trao sau khi tháng chốt. */
+/** Danh hiệu theo tháng (§3.1), trao sau khi tháng chốt — riêng SMVP trao sớm hơn, 00:05 ngày 1 tháng sau. */
 export type MonthlyBadgeKey = 'smvp' | 'fun_king' | 'top_goose' | 'top_duck' | 'top_neutral' | 'grinder' | 'versatile';
 
 /** Cột mốc trọn đời (§3.2), trao ngay khi đạt. */
@@ -40,7 +40,7 @@ export interface BadgeDef {
 /** Mọi danh hiệu theo thứ tự spec §3: bảy danh hiệu tháng rồi chín cột mốc. */
 export const BADGES: readonly BadgeDef[] = [
   // §3.1 Theo tháng
-  { key: 'smvp', kind: 'monthly', icon: '👑', name: 'SMVP', howTo: 'Thắng nhiều hạng mục vote khen nhất trong tháng' },
+  { key: 'smvp', kind: 'monthly', icon: '👑', name: 'SMVP', howTo: 'Đứng hạng 1 bảng tổng điểm Cả 3 phe của tháng (trao 00:05 ngày 1 tháng sau)' },
   { key: 'fun_king', kind: 'monthly', icon: '🤡', name: 'Vua tấu hài', howTo: 'Thắng nhiều hạng mục vote vui nhất trong tháng' },
   { key: 'top_goose', kind: 'monthly', icon: '🪿', name: 'Chiến thần phe Ngỗng', howTo: 'Đứng hạng 1 Top 3 phe Ngỗng của tháng' },
   { key: 'top_duck', kind: 'monthly', icon: '🦆', name: 'Sát thủ phe Vịt', howTo: 'Đứng hạng 1 Top 3 phe Vịt của tháng' },

@@ -1,6 +1,7 @@
 /**
- * Huy hiệu qua HTTP (spec huy hiệu §7): tường vinh danh và trang thành viên công khai; kèm danh
- * sách chọn người `GET /api/members/options` (báo cáo người chơi, spec điểm role §6). Cả ba
+ * Huy hiệu qua HTTP (spec huy hiệu §7): tường vinh danh, SMVP vừa trao (bảng chúc mừng) và trang
+ * thành viên công khai; kèm danh
+ * sách chọn người `GET /api/members/options` (báo cáo người chơi, spec điểm role §6). Tất cả
  * chỉ đọc và đều cần đăng nhập (`requireMember`). Chỉ kiểm tra DẠNG query ở đây; `before` có
  * tồn tại hay không do service báo (`VALIDATION`).
  */
@@ -9,7 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { BadgeDto, MemberOptionDto, PublicMemberDto } from '../../../shared/api-types.js';
 import { appError } from '../../lib/errors.js';
-import { MAX_LIMIT, getPublicMember, listBadges } from '../../modules/badges/queries.js';
+import { MAX_LIMIT, getPublicMember, getRecentSmvp, listBadges } from '../../modules/badges/queries.js';
 import { listMemberOptions } from '../../modules/members/service.js';
 import { requireMember } from '../auth-plugin.js';
 import { idParams } from '../schemas.js';
@@ -25,6 +26,9 @@ export async function badgeRoutes(app: FastifyInstance): Promise<void> {
     const { before, limit } = badgesQuery.parse(request.query);
     return listBadges(app.ctx, { before, limit });
   });
+
+  // SMVP trao trong 7 ngày gần nhất (hoặc null) — bảng chúc mừng ở mọi trang.
+  app.get('/api/badges/recent-smvp', { preHandler: requireMember }, async (): Promise<BadgeDto | null> => getRecentSmvp(app.ctx));
 
   // Đường dẫn tĩnh: Fastify ưu tiên nó hơn `/api/members/:id` bên dưới.
   app.get('/api/members/options', { preHandler: requireMember }, async (): Promise<MemberOptionDto[]> => listMemberOptions(app.ctx));

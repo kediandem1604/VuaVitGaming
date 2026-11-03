@@ -5,6 +5,8 @@
 - Nhánh: `feat/ggd-hub-v1`
 - Liên quan: spec gốc `2026-10-22-ggd-hub-design.md` §4.5 (vote MVP), §4.6–4.7 (khai điểm, mùa, hoá thân), §8 (Hồ sơ); spec `2026-10-26-highlight-design.md`. Thiết kế đã duyệt trong chat.
 
+> **Cập nhật 2026-11-03 (quyết định của chủ) — SMVP đổi luật.** SMVP tháng M = người hạng 1 bảng "Cả 3 phe" của mùa M (`getFactionTotals(...).boards.all.top[0]`, cùng cách xếp và phân hoà; điểm > 0; không ai → tháng đó không có SMVP), thay cho "nhiều lần thắng hạng mục vote Khen nhất" ở §3.1/§4. Trao lúc **00:05 VN ngày 1** tháng M+1 (không đợi chốt mùa ngày 4), detail đóng băng `{points} điểm cả 3 phe`; chốt chặn là bảng `smvp_months` (khoá `period_id`, kèm `announce_pending`), job `runSmvpBadges` trong việc `badges` trao bù mọi tháng từ `2026-10` đã qua giờ trao mà chưa có dòng. Đợt danh hiệu tháng ngày 4 bỏ SMVP (và tin tổng kết từ 10/2026 không còn dòng SMVP). Lời chúc riêng ở `#thông-báo`: "🏆 Chúc mừng **{tên}** đạt danh hiệu **SMVP tháng {MM/YYYY}** với {points} điểm!"; web có bảng chúc mừng ở mọi trang 7 ngày sau khi trao (`GET /api/badges/recent-smvp`, đóng được, nhớ theo lần trao trong `localStorage`). Các tháng trước 10/2026 giữ SMVP đã trao theo luật cũ. Nhóm Khen giờ chỉ còn tính cho cột mốc MVP.
+
 ## 1. Mục tiêu
 
 Thành viên nhận **danh hiệu** khi đứng đầu một hạng mục trong tháng (vd **SMVP tháng 10/2026**) hoặc khi đạt một cột mốc (vd **Lão làng** — 50 trận). Danh hiệu **không bao giờ mất**: trao một lần, lưu lại, không tính lại. Mọi thành viên xem được danh hiệu của mọi người; danh hiệu mới hơn hiện trên.

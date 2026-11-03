@@ -356,7 +356,6 @@ test('runBadgeJobs awards the due month and then the milestones', async () => {
   await runBadgeJobs(ctx);
   expect(await testDb.badgeMonth.findUnique({ where: { periodId: '2026-10' } })).toMatchObject({ announcePending: false });
   expect((await rows()).map((r) => [r.periodId, r.badgeKey, r.memberId])).toEqual([
-    ['2026-10', 'smvp', a.id],
     ['2026-10', 'grinder', a.id],
     ['', 'mvp_1', a.id],
   ]);

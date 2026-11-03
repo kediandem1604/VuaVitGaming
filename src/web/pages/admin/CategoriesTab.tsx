@@ -28,10 +28,10 @@ const DESCRIPTION_MAX = 200;
 const SCOPE_LABEL: Record<CategoryScope, string> = { always: 'Luôn có', mode: 'Theo chế độ', optional: 'Tuỳ chọn' };
 const SCOPES: readonly CategoryScope[] = ['always', 'mode', 'optional'];
 
-/** Nhóm danh hiệu của hạng mục: Khen → SMVP, Vui → Vua tấu hài, Không tính → không vào danh hiệu nào. */
+/** Nhóm danh hiệu của hạng mục: Khen → cột mốc MVP (SMVP giờ theo bảng Cả 3 phe), Vui → Vua tấu hài, Không tính → không vào danh hiệu nào. */
 const BADGE_GROUP_LABEL: Record<BadgeGroupDto, string> = { mvp: 'Khen', fun: 'Vui', none: 'Không tính' };
 const BADGE_GROUPS: readonly BadgeGroupDto[] = ['mvp', 'fun', 'none'];
-const BADGE_GROUP_HINT = 'Khen tính cho SMVP và các cột mốc MVP; Vui tính cho Vua tấu hài.';
+const BADGE_GROUP_HINT = 'Khen tính cho các cột mốc MVP; Vui tính cho Vua tấu hài.';
 
 const H2_CLASS = 'text-xl leading-tight font-extrabold text-white';
 const LABEL_CLASS = 'text-sm font-bold text-night-200';

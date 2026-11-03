@@ -85,7 +85,7 @@ export interface HallOfDayDto {
 /** Phạm vi hạng mục tri ân: buổi nào cũng có / chỉ một chế độ chơi / theo role (admin tick thêm khi kết thúc). */
 export type CategoryScope = 'always' | 'mode' | 'optional';
 
-/** Hạng mục tính cho danh hiệu tháng nào: `mvp` (Khen → SMVP), `fun` (Vui → Vua tấu hài), `none` (không tính). */
+/** Hạng mục tính cho danh hiệu tháng nào: `mvp` (Khen → cột mốc MVP; SMVP giờ theo bảng Cả 3 phe), `fun` (Vui → Vua tấu hài), `none` (không tính). */
 export type BadgeGroupDto = 'mvp' | 'fun' | 'none';
 
 /**

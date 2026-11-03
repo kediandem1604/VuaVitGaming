@@ -24,7 +24,8 @@
  * trang cũ trong transition tới khi chunk về), `main` mang `aria-busy`, và sau 150ms hiện vạch tiến
  * trình vàng mảnh trên cùng (`.nav-progress`) cùng dòng `role="status"` "Đang tải…" cho trình đọc màn hình.
  *
- * Giữa thanh trên và nội dung là banner ngày nhân điểm (`MultiplierBanner`) — chỉ hiện khi có ngày nhân.
+ * Giữa thanh trên và nội dung là banner ngày nhân điểm (`MultiplierBanner`) — chỉ hiện khi có ngày nhân —
+ * rồi bảng chúc mừng SMVP (`SmvpBanner`) — chỉ hiện 7 ngày sau khi trao, tới khi bấm "Đóng".
  */
 
 import { Award, ChartColumn, Crown, House, LogOut, PenLine, Trophy, User, Wrench, type LucideIcon } from 'lucide-react';
@@ -37,6 +38,7 @@ import { arriveNavigation, usePendingNavigation } from '../lib/navPending';
 import { Avatar } from './Avatar';
 import { DuckMark } from './DuckMark';
 import { MultiplierBanner } from './MultiplierBanner';
+import { SmvpBanner } from './SmvpBanner';
 import { ChristmasLights } from './ChristmasDecor';
 import { ThemeToggle } from './ThemeDecor';
 import { PrefetchNavLink } from './PrefetchLink';
@@ -197,6 +199,8 @@ export function Layout({ me, children }: LayoutProps) {
 
       {/* Banner ngày nhân điểm (spec ngày nhân điểm §5): ngoài header dính để không chiếm chỗ khi cuộn. */}
       <MultiplierBanner />
+      {/* Bảng chúc mừng SMVP (7 ngày sau khi trao, đóng được) — cùng chỗ, ngay dưới banner nhân điểm. */}
+      <SmvpBanner />
 
       {/* Chừa chỗ cho thanh dock khi nó còn hiện (< lg). */}
       <main aria-busy={pending !== null ? true : undefined} className="vt-page mx-auto w-full max-w-5xl flex-1 px-4 py-4 pb-24 lg:pb-8">{children}</main>

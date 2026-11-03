@@ -5,7 +5,7 @@
  */
 
 import { queryOptions } from '@tanstack/react-query';
-import type { HeldRoleDto, MemberOptionDto, MultiplierDayDto, RoleDto, SeasonDto, SessionBountiesDto, StandaloneAccusationDto } from '../../shared/api-types';
+import type { BadgeDto, HeldRoleDto, MemberOptionDto, MultiplierDayDto, RoleDto, SeasonDto, SessionBountiesDto, StandaloneAccusationDto } from '../../shared/api-types';
 import { apiGet } from '../api';
 import { APPROVED_ACCUSATIONS_KEY, MULTIPLIER_UPCOMING_KEY, MY_ACCUSATIONS_KEY, PENDING_ACCUSATIONS_KEY, SESSION_BOUNTIES_KEY } from './queryKeys';
 
@@ -62,4 +62,10 @@ export const pendingAccusationsQuery = queryOptions({
 export const approvedAccusationsQuery = queryOptions({
   queryKey: APPROVED_ACCUSATIONS_KEY,
   queryFn: () => apiGet<StandaloneAccusationDto[]>('/api/admin/accusations?status=approved'),
+});
+
+/** SMVP trao trong 7 ngày gần nhất (hoặc null) — bảng chúc mừng dưới thanh điều hướng ở mọi trang. */
+export const recentSmvpQuery = queryOptions({
+  queryKey: ['recent-smvp'] as const,
+  queryFn: () => apiGet<BadgeDto | null>('/api/badges/recent-smvp'),
 });

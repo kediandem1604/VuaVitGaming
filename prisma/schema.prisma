@@ -142,6 +142,7 @@ model Member {
   revokedReports  StatReport[]      @relation("ReportRevoker")
   roleTitles      RoleTitle[]
   badges          MemberBadge[]
+  smvpMonths      SmvpMonth[]
   accusationsMade     PlayerAccusation[] @relation("AccusationReporter")
   accusationsReceived PlayerAccusation[] @relation("AccusationAccused")
   accusationsAsVictim PlayerAccusation[] @relation("AccusationVictim")
@@ -614,6 +615,23 @@ model BadgeMonth {
   announcePending Boolean @map("announce_pending")
 
   @@map("badge_months")
+}
+
+/// SMVP của tháng (`YYYY-MM`) đã chốt — chốt chặn trao một lần (trao 00:05 ngày 1 tháng sau, riêng khỏi `badge_months`).
+model SmvpMonth {
+  periodId  String   @id @map("period_id")
+  /// Người đứng đầu bảng "Cả 3 phe" lúc trao; null = không ai có điểm > 0 (tháng không có SMVP).
+  memberId  Int?     @map("member_id")
+  /// Tổng điểm cả 3 phe của người đó lúc trao (đóng băng).
+  points    Int?
+  awardedAt DateTime @map("awarded_at") @db.Timestamptz(3)
+  /// Đã trao nhưng chưa đăng được lời chúc vào kênh thông báo — lượt sau đăng bù.
+  announcePending Boolean @map("announce_pending")
+
+  member Member? @relation(fields: [memberId], references: [id], onDelete: Restrict)
+
+  @@index([memberId])
+  @@map("smvp_months")
 }
 
 // ---------------------------------------------------------------------------

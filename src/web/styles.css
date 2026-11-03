@@ -467,6 +467,13 @@
   animation: fade-in var(--dur-base) var(--ease-out) backwards;
 }
 
+/* Bảng chúc mừng SMVP (`SmvpBanner`): nền tối viền vàng — khác banner nhân điểm khi cả hai cùng hiện. */
+.smvp-banner {
+  border: 2px solid var(--color-gold);
+  box-shadow: 0 6px 22px -8px color-mix(in srgb, var(--color-gold) 70%, transparent);
+  animation: fade-in var(--dur-base) var(--ease-out) backwards;
+}
+
 /*
  * Khối bọc dữ liệu của `QueryState`: `display: contents` để không chen vào bố cục (gap/grid) của
  * cha. Khi dữ liệu là bản cũ giữ lại lúc đổi mùa/role/bộ lọc (`data-busy="true"`; `aria-busy` nằm ở khung thật), các con mờ

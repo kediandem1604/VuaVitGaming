@@ -1,6 +1,6 @@
 /**
- * Đọc danh hiệu cho web (spec huy hiệu §7): tường vinh danh `GET /api/badges` và trang thành
- * viên công khai `GET /api/members/:id`. Chỉ đọc — `member_badges` do job `badges` ghi
+ * Đọc danh hiệu cho web (spec huy hiệu §7): tường vinh danh `GET /api/badges`, trang thành
+ * viên công khai `GET /api/members/:id` và SMVP vừa trao `GET /api/badges/recent-smvp` (bảng chúc mừng). Chỉ đọc — `member_badges` do job `badges` ghi
  * (monthly.ts, milestones.ts) và không bao giờ sửa/xoá.
  *
  * Thứ tự "mới nhất trước" là `awardedAt` giảm dần rồi `id` giảm dần (index `[awardedAt, id]`).
@@ -136,4 +136,21 @@ export async function getPublicMember(ctx: Ctx, memberId: number): Promise<Publi
     left: member.status === 'left',
     badges: rows.map(toBadgeDto),
   };
+}
+
+/** Bảng chúc mừng SMVP hiện trong bấy lâu sau giờ trao. */
+export const RECENT_SMVP_MS = 7 * 24 * 3600_000;
+
+/**
+ * SMVP trao gần nhất nếu trao trong `RECENT_SMVP_MS` trở lại (tính cả đúng mốc), không thì null —
+ * cho bảng chúc mừng ở mọi trang. Mới nhất trước như tường vinh danh.
+ */
+export async function getRecentSmvp(ctx: Ctx): Promise<BadgeDto | null> {
+  const since = new Date(ctx.now().getTime() - RECENT_SMVP_MS);
+  const row = await ctx.db.memberBadge.findFirst({
+    where: { badgeKey: 'smvp', awardedAt: { gte: since } },
+    orderBy: NEWEST_FIRST,
+    select: BADGE_SELECT,
+  });
+  return row ? toBadgeDto(row) : null;
 }

@@ -1,6 +1,10 @@
 /**
- * Danh hiệu tháng (spec huy hiệu §3.1, §4, §6.1, §8): bảy danh hiệu trao MỘT lần cho
+ * Danh hiệu tháng (spec huy hiệu §3.1, §4, §6.1, §8): các danh hiệu tháng trao MỘT lần cho
  * mỗi tháng lịch giờ VN sau khi tháng đó chốt, ghi đóng băng vào `member_badges`.
+ *
+ * SMVP KHÔNG còn ở đợt này (quyết định 2026-11-03): SMVP là hạng 1 bảng "Cả 3 phe", trao riêng
+ * lúc 00:05 ngày 1 tháng sau — xem `smvp.ts`. Tin tổng kết tháng từ `SMVP_FROM` trở đi cũng bỏ
+ * dòng SMVP (đã có lời chúc riêng); tháng cũ hơn giữ nguyên dòng SMVP luật cũ.
  *
  * Tháng M được trao khi `now >= seasonCloseAt(M)` (00:05 VN ngày 4 tháng sau) và, nếu
  * có dòng `seasons` của M, dòng đó đã chốt (`closedAt`) — để Top phe dùng số liệu đã chốt.
@@ -42,6 +46,7 @@ import {
 } from '../../lib/time.js';
 import { HOT_TX } from '../../lib/tx.js';
 import { getFactionTop } from '../stats/leaderboard.js';
+import { SMVP_FROM } from './smvp.js';
 
 /** Một danh hiệu sắp ghi vào `member_badges` (chưa có `awardedAt` — ghi lúc trao). Cột mốc (Task 3) dùng lại. */
 export interface BadgeGrant {
@@ -97,7 +102,7 @@ function leaders(counts: Map<number, number>, min: number): { memberId: number; 
 }
 
 /** Số lần thắng vote trong tháng theo nhóm hạng mục (đọc nhóm hiện tại), mỗi người một số. */
-async function voteWinCounts(ctx: Ctx, periodId: string, group: 'mvp' | 'fun'): Promise<Map<number, number>> {
+async function voteWinCounts(ctx: Ctx, periodId: string, group: 'fun'): Promise<Map<number, number>> {
   const rows = await ctx.db.award.groupBy({
     by: ['memberId'],
     where: { category: { badgeGroup: group }, round: { session: sessionInMonth(periodId) } },
@@ -130,13 +135,12 @@ async function approvedRoleCounts(ctx: Ctx, periodId: string): Promise<Map<numbe
 }
 
 /**
- * Bảy danh hiệu §3.1 của tháng `periodId` (`YYYY-MM`, sai dạng → ném lỗi), theo thứ tự
+ * Các danh hiệu §3.1 của tháng `periodId` trừ SMVP (trao riêng, `smvp.ts`) (`YYYY-MM`, sai dạng → ném lỗi), theo thứ tự
  * danh mục rồi id thành viên. Không ai đạt tối thiểu → không có dòng cho danh hiệu đó.
  * Chỉ đọc; không ghi gì.
  */
 export async function computeMonthlyBadges(ctx: Ctx, periodId: string): Promise<BadgeGrant[]> {
-  const [mvp, fun, top, games, roles] = await Promise.all([
-    voteWinCounts(ctx, periodId, 'mvp'),
+  const [fun, top, games, roles] = await Promise.all([
     voteWinCounts(ctx, periodId, 'fun'),
     getFactionTop(ctx, periodId, 1),
     gamesPlayedCounts(ctx, periodId),
@@ -144,7 +148,6 @@ export async function computeMonthlyBadges(ctx: Ctx, periodId: string): Promise<
   ]);
 
   const grants: BadgeGrant[] = [];
-  for (const l of leaders(mvp, 1)) grants.push(grant('smvp', periodId, l.memberId, `${l.n} lần MVP`));
   for (const l of leaders(fun, 1)) grants.push(grant('fun_king', periodId, l.memberId, `${l.n} lần thắng hạng mục vui`));
   for (const faction of ['goose', 'duck', 'neutral'] as const) {
     // Hạng 1 của phe; `getFactionTop` chỉ trả dòng có điểm > 0 nên không cần lọc thêm.
@@ -221,6 +224,8 @@ async function loadGrants(ctx: Ctx, periodId: string): Promise<(BadgeGrant & { d
   return rows.flatMap((r) => {
     // Khoá lạ (không có trong danh mục tháng) không thể có — bỏ qua thay vì làm hỏng cả tin.
     if (!MONTHLY_KEY_SET.has(r.badgeKey)) return [];
+    // SMVP từ `SMVP_FROM` đã có lời chúc riêng lúc trao (ngày 1) — không nhắc lại trong tổng kết.
+    if (r.badgeKey === 'smvp' && periodId >= SMVP_FROM) return [];
     const badgeKey = r.badgeKey as MonthlyBadgeKey;
     return [{ memberId: r.memberId, badgeKey, periodId, title: r.title, icon: r.icon, detail: r.detail, displayName: r.member.displayName }];
   });

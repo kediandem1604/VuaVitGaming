@@ -153,6 +153,12 @@ export function seasonCloseAt(id: string): Date {
   return vnWallClockToUtc(y, m, 4, 0, 5);
 }
 
+/** Giờ trao SMVP của tháng: 00:05 ngày 1 tháng sau, giờ VN (trước giờ chốt mùa ba ngày). */
+export function smvpAwardAt(id: string): Date {
+  const { y, m } = nextMonth(parseSeasonId(id));
+  return vnWallClockToUtc(y, m, 1, 0, 5);
+}
+
 /** Giờ nhắc mod duyệt nốt: 09:00 ngày 3 tháng sau, giờ VN. */
 export function seasonNudgeAt(id: string): Date {
   const { y, m } = nextMonth(parseSeasonId(id));

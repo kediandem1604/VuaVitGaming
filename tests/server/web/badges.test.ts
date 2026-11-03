@@ -415,3 +415,34 @@ test('member options: login required; active members only, by name, just id/name
     { id: me.id, displayName: 'Chi', avatarUrl: 'https://cdn.test/chi.png' },
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// SMVP vừa trao (bảng chúc mừng)
+// ---------------------------------------------------------------------------
+
+test('recent-smvp: login required; the latest smvp within 7 days, else null', async () => {
+  expect((await get('/api/badges/recent-smvp')).statusCode).toBe(401);
+
+  const { sid } = await memberWithSid();
+  const an = await createMember(testDb, { displayName: 'An' });
+  let res = await get('/api/badges/recent-smvp', sid);
+  expect(res.statusCode).toBe(200);
+  expect(res.json()).toBeNull();
+
+  // now mặc định của test: 22/10/2026 — trao 20/10 còn trong 7 ngày; cột mốc không tính.
+  await grant(an.id, 'smvp', '2026-10-01T17:05:00.000Z', '2026-09', '3 lần MVP');
+  const recent = await grant(an.id, 'smvp', '2026-10-20T17:05:00.000Z', '2026-10', '12 điểm cả 3 phe');
+  await grant(an.id, 'games_10', '2026-10-21T03:00:00.000Z');
+  res = await get('/api/badges/recent-smvp', sid);
+  expect(res.json()).toEqual({
+    id: recent.id,
+    badgeKey: 'smvp',
+    kind: 'monthly',
+    periodId: '2026-10',
+    title: 'SMVP tháng 10/2026',
+    icon: '👑',
+    detail: '12 điểm cả 3 phe',
+    awardedAt: '2026-10-20T17:05:00.000Z',
+    member: { id: an.id, displayName: 'An', avatarUrl: an.avatarUrl },
+  });
+});

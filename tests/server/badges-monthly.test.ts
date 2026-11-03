@@ -144,16 +144,13 @@ async function octoberVotes(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// computeMonthlyBadges — SMVP, Vua tấu hài
+// computeMonthlyBadges — Vua tấu hài (SMVP trao riêng: badges-smvp.test.ts)
 // ---------------------------------------------------------------------------
 
-test('smvp counts only mvp-group wins and gives ties to everyone', async () => {
+test('fun_king counts only fun-group wins; mvp-group wins no longer give smvp here', async () => {
   await octoberVotes();
   const grants = await computeMonthlyBadges(ctx, '2026-10');
-  expect(ofKey(grants, 'smvp')).toEqual([
-    { memberId: a.id, detail: '3 lần MVP' },
-    { memberId: b.id, detail: '3 lần MVP' },
-  ]);
+  expect(ofKey(grants, 'smvp')).toEqual([]);
   expect(ofKey(grants, 'fun_king')).toEqual([{ memberId: b.id, detail: '5 lần thắng hạng mục vui' }]);
 });
 
@@ -166,27 +163,26 @@ test('a category moved to none stops counting', async () => {
   await testDb.awardCategory.update({ where: { id: kills.id }, data: { badgeGroup: 'none' } });
 
   const grants = await computeMonthlyBadges(ctx, '2026-10');
-  expect(ofKey(grants, 'smvp')).toEqual([]);
   // Nhóm Vui vẫn tính; đổi nhóm luôn đọc giá trị hiện tại lúc trao.
   expect(ofKey(grants, 'fun_king')).toEqual([{ memberId: b.id, detail: '1 lần thắng hạng mục vui' }]);
 
-  await testDb.awardCategory.update({ where: { id: fun1.id }, data: { badgeGroup: 'mvp' } });
-  expect(ofKey(await computeMonthlyBadges(ctx, '2026-10'), 'smvp')).toEqual([{ memberId: b.id, detail: '1 lần MVP' }]);
+  await testDb.awardCategory.update({ where: { id: fun1.id }, data: { badgeGroup: 'none' } });
+  expect(ofKey(await computeMonthlyBadges(ctx, '2026-10'), 'fun_king')).toEqual([]);
 });
 
 test('month follows the VN date of the session', async () => {
   // 23:30 giờ VN ngày 31/10 → tháng 10; 00:30 giờ VN ngày 01/11 → tháng 11.
   const late = await endedSession({ startsAt: '2026-10-31T16:30:00Z', going: [a.id] });
   const early = await endedSession({ startsAt: '2026-10-31T17:30:00Z', going: [b.id] });
-  await win(late, kills.id, a.id);
-  await win(early, kills.id, b.id);
+  await win(late, fun1.id, a.id);
+  await win(early, fun1.id, b.id);
 
   const october = await computeMonthlyBadges(ctx, '2026-10');
-  expect(ofKey(october, 'smvp')).toEqual([{ memberId: a.id, detail: '1 lần MVP' }]);
+  expect(ofKey(october, 'fun_king')).toEqual([{ memberId: a.id, detail: '1 lần thắng hạng mục vui' }]);
   expect(ofKey(october, 'grinder')).toEqual([{ memberId: a.id, detail: '1 trận' }]);
 
   const november = await computeMonthlyBadges(ctx, '2026-11');
-  expect(ofKey(november, 'smvp')).toEqual([{ memberId: b.id, detail: '1 lần MVP' }]);
+  expect(ofKey(november, 'fun_king')).toEqual([{ memberId: b.id, detail: '1 lần thắng hạng mục vui' }]);
   expect(ofKey(november, 'grinder')).toEqual([{ memberId: b.id, detail: '1 trận' }]);
 });
 
@@ -268,12 +264,13 @@ test('versatile needs at least 2 approved roles in the month', async () => {
   ]);
 });
 
-test("titles read 'SMVP tháng 10/2026' and icons from the catalogue", async () => {
+test("titles read 'Vua tấu hài tháng 10/2026' and icons from the catalogue", async () => {
   await octoberVotes();
+  await endedSession({ going: [a.id] });
   const grants = await computeMonthlyBadges(ctx, '2026-10');
   expect(grants.length).toBeGreaterThan(0);
-  const smvp = grants.find((g) => g.badgeKey === 'smvp' && g.memberId === a.id);
-  expect(smvp).toEqual({ memberId: a.id, badgeKey: 'smvp', periodId: '2026-10', title: 'SMVP tháng 10/2026', icon: '👑', detail: '3 lần MVP' });
+  const funKing = grants.find((g) => g.badgeKey === 'fun_king');
+  expect(funKing).toEqual({ memberId: b.id, badgeKey: 'fun_king', periodId: '2026-10', title: 'Vua tấu hài tháng 10/2026', icon: '🤡', detail: '5 lần thắng hạng mục vui' });
   for (const g of grants) {
     const def = badgeDef(g.badgeKey);
     expect(def.kind).toBe('monthly');
@@ -281,9 +278,9 @@ test("titles read 'SMVP tháng 10/2026' and icons from the catalogue", async () 
     expect(g.icon).toBe(def.icon);
     expect(g.periodId).toBe('2026-10');
   }
-  // Thứ tự theo danh mục: SMVP trước Vua tấu hài (không ai điểm danh → không có Chăm cày).
+  // Thứ tự theo danh mục: Vua tấu hài trước Chăm cày; không có SMVP.
   const keys = [...new Set(grants.map((g) => g.badgeKey))];
-  expect(keys).toEqual(['smvp', 'fun_king']);
+  expect(keys).toEqual(['fun_king', 'grinder']);
 });
 
 // ---------------------------------------------------------------------------
@@ -292,7 +289,7 @@ test("titles read 'SMVP tháng 10/2026' and icons from the catalogue", async () 
 
 test('runMonthlyBadges waits until seasonCloseAt', async () => {
   const s = await endedSession({ going: [a.id] });
-  await win(s, kills.id, a.id);
+  await win(s, fun1.id, a.id);
 
   setNow(BEFORE_CLOSE); // 00:04 giờ VN ngày 04/11
   await runMonthlyBadges(ctx);
@@ -304,7 +301,7 @@ test('runMonthlyBadges waits until seasonCloseAt', async () => {
   await runMonthlyBadges(ctx);
   expect(await monthRow('2026-10')).toEqual({ periodId: '2026-10', awardedAt: new Date(CLOSE_AT), announcePending: false });
   expect((await badgeRows('2026-10')).map((r) => [r.badgeKey, r.memberId, r.awardedAt])).toEqual([
-    ['smvp', a.id, new Date(CLOSE_AT)],
+    ['fun_king', a.id, new Date(CLOSE_AT)],
     ['grinder', a.id, new Date(CLOSE_AT)],
   ]);
   expect(notifier.announcements).toHaveLength(1);
@@ -312,18 +309,18 @@ test('runMonthlyBadges waits until seasonCloseAt', async () => {
 
 test('a month with only vote awards and no seasons row is awarded', async () => {
   const s = await endedSession();
-  await win(s, kills.id, a.id);
+  await win(s, fun1.id, a.id);
   expect(await testDb.season.count()).toBe(0);
 
   setNow(MID_NOVEMBER);
   await runMonthlyBadges(ctx);
   expect(await monthRow('2026-10')).toMatchObject({ announcePending: false });
-  expect((await badgeRows('2026-10')).map((r) => [r.badgeKey, r.memberId])).toEqual([['smvp', a.id]]);
+  expect((await badgeRows('2026-10')).map((r) => [r.badgeKey, r.memberId])).toEqual([['fun_king', a.id]]);
 });
 
 test('a month whose seasons row is not closed waits', async () => {
   const s = await endedSession();
-  await win(s, kills.id, a.id);
+  await win(s, fun1.id, a.id);
   await ensureSeason(ctx, '2026-10'); // có dòng, chưa chốt
 
   setNow(MID_NOVEMBER);
@@ -334,7 +331,7 @@ test('a month whose seasons row is not closed waits', async () => {
   await testDb.season.update({ where: { id: '2026-10' }, data: { closedAt: ctx.now() } });
   await runMonthlyBadges(ctx);
   expect(await monthRow('2026-10')).toMatchObject({ announcePending: false });
-  expect((await badgeRows('2026-10')).map((r) => r.badgeKey)).toEqual(['smvp']);
+  expect((await badgeRows('2026-10')).map((r) => r.badgeKey)).toEqual(['fun_king']);
 });
 
 test('runMonthlyBadges scans from the earliest data month to last month and skips awarded months', async () => {
@@ -342,7 +339,7 @@ test('runMonthlyBadges scans from the earliest data month to last month and skip
   const goose = await roleByKey(testDb, 'goose');
   await report(a.id, goose.id, '2026-08-20', 2);
   const s = await endedSession({ going: [b.id] });
-  await win(s, kills.id, b.id);
+  await win(s, fun1.id, b.id);
   // Tháng 9 đã có dòng badge_months từ trước (giả sử lượt trước đã trao) → bỏ qua, không đụng.
   const earlier = new Date('2026-10-04T00:00:00Z');
   await testDb.badgeMonth.create({ data: { periodId: '2026-09', awardedAt: earlier, announcePending: false } });
@@ -357,7 +354,7 @@ test('runMonthlyBadges scans from the earliest data month to last month and skip
   ]);
   expect((await badgeRows()).map((r) => [r.periodId, r.badgeKey, r.memberId])).toEqual([
     ['2026-08', 'top_goose', a.id],
-    ['2026-10', 'smvp', b.id],
+    ['2026-10', 'fun_king', b.id],
     ['2026-10', 'grinder', b.id],
   ]);
   // Tháng hiện tại (11) chưa xét.
@@ -392,12 +389,8 @@ test('awardMonth twice (or concurrently via Promise.all) inserts once', async ()
   expect(results.filter((r) => r)).toHaveLength(1);
   expect(await testDb.badgeMonth.count()).toBe(1);
   const rows = await badgeRows('2026-10');
-  // SMVP ×2 (An, Bình), Vua tấu hài ×1, Chăm cày: không ai điểm danh → 0.
-  expect(rows.map((r) => [r.badgeKey, r.memberId])).toEqual([
-    ['smvp', a.id],
-    ['smvp', b.id],
-    ['fun_king', b.id],
-  ]);
+  // Vua tấu hài ×1 (SMVP không còn ở đợt này), Chăm cày: không ai điểm danh → 0.
+  expect(rows.map((r) => [r.badgeKey, r.memberId])).toEqual([['fun_king', b.id]]);
   expect(await monthRow('2026-10')).toEqual({ periodId: '2026-10', awardedAt: new Date(MID_NOVEMBER), announcePending: true });
 
   expect(await awardMonth(ctx, '2026-10')).toBe(false);
@@ -432,6 +425,10 @@ test('summary posted once; Discord failure keeps announce_pending and the next r
   await win(s1, kills.id, a.id);
   await win(s2, kills.id, a.id);
   await win(s1, fun1.id, tricky.id);
+  // Dòng SMVP tháng 10 đã trao riêng (ngày 1) — không nhắc lại trong tin tổng kết.
+  await testDb.memberBadge.create({
+    data: { memberId: a.id, badgeKey: 'smvp', periodId: '2026-10', title: 'SMVP tháng 10/2026', icon: '👑', detail: '9 điểm cả 3 phe', awardedAt: new Date('2026-10-31T17:05:00Z') },
+  });
   setNow(MID_NOVEMBER);
 
   notifier.down = true;
@@ -458,7 +455,7 @@ test('summary posted once; Discord failure keeps announce_pending and the next r
   const text = notifier.announcements[0] ?? '';
   const lines = text.split('\n');
   expect(lines[0]).toBe('🏅 Danh hiệu tháng 10/2026');
-  expect(lines).toContain('👑 SMVP: An (2 lần MVP)');
+  expect(text).not.toContain('SMVP');
   expect(lines).toContain('🤡 Vua tấu hài: \\*bold\\*\\_x (1 lần thắng hạng mục vui)');
   expect(lines).toContain('🔥 Chăm cày: An (2 trận)');
   expect(lines.at(-1)).toBe('Xem tất cả: http://localhost:3000/huy-hieu');
@@ -546,10 +543,10 @@ test('escapeDiscordMarkdown escapes the characters Discord formats with', () => 
 
 test('runBadgeJobs awards due months like runMonthlyBadges', async () => {
   const s = await endedSession({ going: [a.id] });
-  await win(s, kills.id, a.id);
+  await win(s, fun1.id, a.id);
   setNow(MID_NOVEMBER);
   await runBadgeJobs(ctx);
   expect(await monthRow('2026-10')).toMatchObject({ announcePending: false });
-  expect((await badgeRows('2026-10')).map((r) => r.badgeKey)).toEqual(['smvp', 'grinder']);
+  expect((await badgeRows('2026-10')).map((r) => r.badgeKey)).toEqual(['fun_king', 'grinder']);
   expect(notifier.announcements).toHaveLength(1);
 });
